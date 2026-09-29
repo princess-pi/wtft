@@ -30,6 +30,7 @@
   "scripts": {
     "build": "bun run build.ts",
     "manifest": "bun run pricing-manifest.ts",
+    "artifacts": "bun run build-artifacts.ts",
     "test": "bun run tests/run.ts",
     "pr-cost": "bun pr-cost.ts",
     "typecheck": "tsc --noEmit",

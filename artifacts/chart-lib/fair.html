@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>State fair booth</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #161616; color: #e8e8e8; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; }
+    main { padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    h2 { font-size: 15px; margin: 18px 0 6px; color: #d7b56d; font-weight: 600; }
+    .meta { color: #999; font-size: 13px; margin: 4px 0 10px; }
+    .presets, .grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    button, select { background: #2a2a2a; color: inherit; border: 1px solid #444; border-radius: 6px; padding: 6px 10px; font: inherit; }
+    button.on { border-color: #d7b56d; color: #f3e2b8; }
+    fieldset { border: 1px solid #333; border-radius: 8px; margin: 0; min-width: 130px; padding: 4px 10px 8px; }
+    legend { padding: 0 6px; color: #aaa; }
+    label { display: block; margin: 4px 0; }
+    label.wide { display: flex; gap: 8px; align-items: center; }
+    input[type="range"] { width: 150px; vertical-align: middle; }
+    .frame { overflow-x: auto; background: #0e0e0e; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; }
+    pre { margin: 0; font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+    pre.call { color: #9ab; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top; }
+    th { color: #aaa; font-weight: 600; }
+    td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    tr.idle td { color: #777; }
+    code { color: #d7b56d; }
+    .swatch { display: inline-block; width: 0.9em; height: 0.9em; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+    details { margin: 10px 0; }
+    summary { cursor: pointer; color: #aaa; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>State fair booth</h1>
+  <p class="meta">A booth at the state fair, drawn by wtft's own <code>buildWtftLines</code>, unchanged. One sale is one interaction: revenue is <code>cost</code>, units sold are <code>inputTokens</code>. Three days, open 10:00 to 22:00, lunch and dinner bill 1.5 times.</p>
+  <div class="presets" id="presets"></div>
+  <div class="grid">
+    <fieldset>
+      <legend>Bin</legend>
+      <select id="interval"></select>
+    </fieldset>
+    <fieldset>
+      <legend>Bar</legend>
+      <label><input type="radio" name="mode" value="cumulative"> running total</label>
+      <label><input type="radio" name="mode" value="bucket"> this bin</label>
+    </fieldset>
+    <fieldset>
+      <legend>Measure</legend>
+      <label><input type="radio" name="unit" value="cost"> revenue <code>cost</code></label>
+      <label><input type="radio" name="unit" value="tokens"> units <code>tokens</code></label>
+    </fieldset>
+    <fieldset>
+      <legend>Columns</legend>
+      <label><input type="checkbox" id="cost-columns"> revenue pair</label>
+      <label><input type="checkbox" id="token-columns"> units pair</label>
+    </fieldset>
+    <fieldset>
+      <legend>Rows</legend>
+      <label class="wide">limit <input type="range" id="limit" min="1" max="40"> <output id="limit-out"></output></label>
+    </fieldset>
+    <fieldset>
+      <legend>Terminal</legend>
+      <label class="wide">columns <input type="range" id="columns" min="40" max="240"> <output id="columns-out"></output></label>
+    </fieldset>
+    <fieldset>
+      <legend>Timezone</legend>
+      <select id="tz"></select>
+    </fieldset>
+    <fieldset>
+      <legend>Booth</legend>
+      <label><input type="checkbox" id="souvenirs"> sells souvenirs</label>
+    </fieldset>
+    <fieldset>
+      <legend>View</legend>
+      <label><input type="radio" name="view" value="both"> both</label>
+      <label><input type="radio" name="view" value="today"> as the chart draws it</label>
+      <label><input type="radio" name="view" value="generic"> as a library would</label>
+    </fieldset>
+  </div>
+
+  <div id="today-block">
+    <h2>As the chart draws it today</h2>
+    <div class="frame"><pre id="today"></pre></div>
+  </div>
+  <div id="generic-block">
+    <h2>As a generic library would draw it</h2>
+    <p class="meta">A mockup. The lines are the chart's, after the substitutions below. The chart takes none of these words from its caller.</p>
+    <div class="frame"><pre id="generic"></pre></div>
+  </div>
+
+  <h2>What the chart says that only wtft means</h2>
+  <table id="subs"></table>
+  <p class="meta">A row that shows 0 does not fire in this view. Switch the measure to units for the key and the footer, tick souvenirs for the warning, and show 24 rows or more of the hourly bins for the power cut.</p>
+
+  <h2>Categories the booth rides on</h2>
+  <p class="meta">The chart has 14 categories and takes no others. The booth's items borrow a slot each, and with it the slot's colour and its position in the stack.</p>
+  <table id="cats"></table>
+
+  <details>
+    <summary>The call</summary>
+    <pre class="call" id="call"></pre>
+  </details>
+  <p class="meta" id="count"></p>
+</main>
+<script type="module">
+  import { ansiToHtml, CATEGORY_STYLE, FAIR_DEFAULTS, FAIR_ITEMS, FAIR_TZ, renderFair, SOUVENIRS, xtermRgb } from "../renderer/wtft-chart.mjs";
+
+  const $ = (id) => document.getElementById(id);
+  const INTERVALS = ["30m", "1h", "2h", "4h", "1d", "10t", "25t", "50t", "100t"];
+  const ZONES = [FAIR_TZ, "UTC", "America/New_York", "Asia/Tokyo"];
+  const VIEWS = { both: ["today", "generic"], today: ["today"], generic: ["generic"] };
+  const PRESETS = [
+    { label: "By the hour", state: { interval: "1h", limit: 24, mode: "cumulative", unit: "cost" } },
+    { label: "Lunch rush, per bin", state: { interval: "1h", limit: 24, mode: "bucket", unit: "cost" } },
+    { label: "Dayparts", state: { interval: "4h", limit: 9, mode: "bucket", unit: "cost" } },
+    { label: "By day", state: { interval: "1d", limit: 3, mode: "cumulative", unit: "cost" } },
+    { label: "Every 25 sales", state: { interval: "25t", limit: 20, mode: "bucket", unit: "cost" } },
+    { label: "Units sold", state: { interval: "1h", limit: 24, mode: "cumulative", unit: "tokens" } },
+  ];
+
+  for (const value of INTERVALS) $("interval").append(new Option(value, value));
+  for (const value of ZONES) $("tz").append(new Option(value, value));
+
+  const presets = $("presets");
+  PRESETS.forEach((preset, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = preset.label;
+    button.dataset.index = index;
+    button.addEventListener("click", () => { setControls({ ...read(), ...preset.state }); draw(); });
+    presets.append(button);
+  });
+
+  function setControls(state) {
+    $("interval").value = state.interval;
+    $("limit").value = state.limit;
+    document.querySelector(`input[name="mode"][value="${state.mode}"]`).checked = true;
+    document.querySelector(`input[name="unit"][value="${state.unit}"]`).checked = true;
+    $("cost-columns").checked = state.showCostColumns;
+    $("token-columns").checked = state.showTokenColumns;
+    $("columns").value = state.columns;
+    $("tz").value = state.timezone;
+    $("souvenirs").checked = state.souvenirs;
+    $("limit-out").textContent = state.limit;
+    $("columns-out").textContent = state.columns;
+  }
+
+  function read() {
+    return {
+      columns: Number($("columns").value),
+      interval: $("interval").value,
+      limit: Number($("limit").value),
+      mode: document.querySelector('input[name="mode"]:checked').value,
+      unit: document.querySelector('input[name="unit"]:checked').value,
+      showCostColumns: $("cost-columns").checked,
+      showTokenColumns: $("token-columns").checked,
+      timezone: $("tz").value,
+      souvenirs: $("souvenirs").checked,
+    };
+  }
+
+  function cell(text, cls) {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.textContent = text;
+    return td;
+  }
+
+  function fillTable(table, head, rows) {
+    const thead = document.createElement("tr");
+    for (const name of head) { const th = document.createElement("th"); th.textContent = name; thead.append(th); }
+    table.replaceChildren(thead, ...rows);
+  }
+
+  function draw() {
+    const state = read();
+    const picture = renderFair(state);
+    const view = document.querySelector('input[name="view"]:checked').value;
+    for (const which of ["today", "generic"]) {
+      $(`${which}-block`).hidden = !VIEWS[view].includes(which);
+      $(which).innerHTML = picture[which].map(ansiToHtml).join("\n");
+    }
+    fillTable($("subs"), ["Says", "A library would say", "Lines"], picture.substitutions.map((sub) => {
+      const tr = document.createElement("tr");
+      if (sub.count === 0) tr.className = "idle";
+      tr.append(cell(sub.says), cell(sub.becomes), cell(sub.count, "n"));
+      return tr;
+    }));
+    $("call").textContent = picture.call;
+    $("count").textContent = `${picture.today.length} lines from the chart, ${picture.generic.length} after the substitutions.`;
+    $("limit-out").textContent = state.limit;
+    $("columns-out").textContent = state.columns;
+    presets.querySelectorAll("button").forEach((button, index) => {
+      const want = PRESETS[index].state;
+      button.classList.toggle("on", Object.entries(want).every(([key, value]) => state[key] === value));
+    });
+  }
+
+  const items = [...FAIR_ITEMS, SOUVENIRS];
+  fillTable($("cats"), ["Booth item", "Chart category it rides on", "Price", "Rush hours bill"], items.map((item) => {
+    const tr = document.createElement("tr");
+    const slot = document.createElement("td");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = xtermRgb(CATEGORY_STYLE[item.slot].fg);
+    slot.append(swatch, `${item.slot} (the chart's legend says ${CATEGORY_STYLE[item.slot].label})`);
+    tr.append(cell(item.label), slot, cell(`$${item.price.toFixed(2)}`), cell(`$${(item.price * 1.5).toFixed(2)}`));
+    return tr;
+  }));
+
+  document.body.addEventListener("input", draw);
+  document.body.addEventListener("change", draw);
+  setControls(FAIR_DEFAULTS);
+  document.querySelector('input[name="view"][value="both"]').checked = true;
+  draw();
+</script>
+</body>
+</html>

@@ -20,7 +20,8 @@ The bundle exports:
   name, the interactions, and optionally a clock and a config. It returns the lines the CLI would print.
 - `wtftSession(model)`: a fake session of tag-file interactions (`_cat` set, as a tag file sets it).
 - `fairBooth(options)`: the state-fair booth's sales as the same interaction type.
-- `renderFair(state)`: the fair page's draw, in two views, and the list of substitutions the second view made.
+- `renderFair(state)`: the fair page's draw, in two views, the list of substitutions the second view made with a count each, and the `buildWtftLines` call as text.
+- `PRESETS`, `SPEC_PIN`: the four presets as command lines, and the terminal, clock and session file the spec page's blocks are drawn under.
 - `ansiToHtml(text)`, `stripAnsi(text)`, `xtermRgb(n)`: the terminal's colour codes to HTML.
 
 `renderReport` installs a stand-in for the terminal (`process.stdout.columns`) only while it runs, because
@@ -48,12 +49,12 @@ revenue is `cost` and its units are `inputTokens`. The page draws it twice:
   substitution is one place the chart says something only wtft means. The table is the list of
   findings, and the page counts how often each one fired.
 
-The spec page lists what the chart cannot say in the fair's terms, and gives each finding a disposition.
+The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
 
 ## 4. Verification
 
 - `tests/wtft-386-chart-artifacts.test.ts` asserts: the committed bundle equals a fresh build; `renderReport`'s lines for a fixed
   command line equal `buildWtftLines` called directly with the CLI's own arguments; each of the four presets in `spec.mdx` equals the
-  chart's output; `parseWtftCliArgs` is the parser the picker uses; the fair data feeds `buildWtftLines` and every substitution fires on the
-  default view; `paint.mjs` is gone.
+  chart's output; `parseWtftCliArgs` is the parser the picker uses; the fair data feeds `buildWtftLines`, every substitution fires in some view and is a row of
+  the findings table; `paint.mjs` is gone.
 - By eye: both pages open at https://wtft-artifacts.princess-pi.dev/.

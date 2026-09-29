@@ -6,197 +6,175 @@
   <title>Chart picker</title>
   <style>
     :root { color-scheme: dark; }
-    body {
-      margin: 0;
-      background: #161616;
-      color: #e8e8e8;
-      font: 15px/1.4 ui-sans-serif, system-ui, sans-serif;
-    }
-    main { padding: 16px; max-width: 920px; }
+    body { margin: 0; background: #161616; color: #e8e8e8; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; }
+    main { padding: 16px; }
     h1 { font-size: 18px; margin: 0 0 8px; }
-    .presets, .grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-    button, select {
-      background: #2a2a2a;
-      color: inherit;
-      border: 1px solid #444;
-      border-radius: 6px;
-      padding: 6px 10px;
-      font: inherit;
+    .meta { color: #999; font-size: 13px; margin: 4px 0 10px; }
+    .presets, .grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    button, select, input[type="text"] {
+      background: #2a2a2a; color: inherit; border: 1px solid #444; border-radius: 6px; padding: 6px 10px; font: inherit;
     }
     button.on { border-color: #d7b56d; color: #f3e2b8; }
-    fieldset {
-      border: 1px solid #333;
-      border-radius: 8px;
-      margin: 0;
-      min-width: 140px;
-    }
+    fieldset { border: 1px solid #333; border-radius: 8px; margin: 0; min-width: 130px; padding: 4px 10px 8px; }
     legend { padding: 0 6px; color: #aaa; }
     label { display: block; margin: 4px 0; }
-    .law { margin: 12px 0 4px; }
-    .notes { margin: 4px 0 12px; padding-left: 18px; color: #c8c8c8; }
-    pre {
-      background: #0e0e0e;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 12px;
-      overflow-x: auto;
-      font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      white-space: pre;
-    }
-    .swatch { display: inline-block; width: 0.8em; }
-    .meta { color: #999; font-size: 13px; }
+    label.wide { display: flex; gap: 8px; align-items: center; }
+    input[type="range"] { width: 150px; vertical-align: middle; }
+    .cmd { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
+    .cmd code { color: #d7b56d; }
+    .cmd input { flex: 1; font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .frame { overflow-x: auto; background: #0e0e0e; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; }
+    pre { margin: 0; font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+    pre.ruler { color: #555; }
+    .row { display: flex; gap: 10px; align-items: center; }
   </style>
 </head>
 <body>
 <main>
   <h1>Chart picker</h1>
-  <p class="meta">Sample session, five bins. The glyphs illustrate the encoding law. They are not a cell-for-cell port of the production quantizer.</p>
+  <p class="meta">The lines below come from wtft's own <code>buildWtftLines</code>, bundled for the browser and fed a fake session. The command line is read by wtft's own <code>parseWtftCliArgs</code>. Terminal width is not a flag: the CLI takes it from the terminal.</p>
   <div class="presets" id="presets"></div>
+  <div class="cmd"><code>$</code><input type="text" id="cmd" spellcheck="false" autocomplete="off" aria-label="wtft command line"></div>
   <div class="grid">
     <fieldset>
-      <legend>Interval</legend>
-      <label><input type="radio" name="interval" value="time" checked> time</label>
-      <label><input type="radio" name="interval" value="turns"> turns</label>
+      <legend>Interval <code>-i</code></legend>
+      <select id="interval"></select>
     </fieldset>
     <fieldset>
-      <legend>Layout</legend>
-      <label><input type="radio" name="layout" value="stack" checked> stack</label>
-      <label><input type="radio" name="layout" value="scatter"> scatter</label>
+      <legend>Mode</legend>
+      <label><input type="radio" name="mode" value="-c"> cumulative <code>-c</code></label>
+      <label><input type="radio" name="mode" value="-b"> bucket <code>-b</code></label>
     </fieldset>
     <fieldset>
-      <legend>Bar measure</legend>
-      <label><input type="radio" name="measure" value="inc-cost"> incremental cost</label>
-      <label><input type="radio" name="measure" value="total-cost" checked> total latest cost</label>
-      <label><input type="radio" name="measure" value="inc-tokens"> incremental tokens</label>
-      <label><input type="radio" name="measure" value="total-tokens"> total latest tokens</label>
+      <legend>Unit</legend>
+      <label><input type="radio" name="unit" value="--cost"> cost <code>--cost</code></label>
+      <label><input type="radio" name="unit" value="--tokens"> tokens <code>--tokens</code></label>
     </fieldset>
     <fieldset>
       <legend>Columns</legend>
-      <label><input type="checkbox" id="cost-columns" checked> cost pair</label>
-      <label><input type="checkbox" id="token-columns" checked> token pair</label>
+      <label><input type="checkbox" id="cost-columns"> cost pair <code>--no-cost</code></label>
+      <label><input type="checkbox" id="token-columns"> token pair <code>--no-tokens</code></label>
+      <label><input type="checkbox" id="emoji"> emoji <code>--no-emoji</code></label>
     </fieldset>
     <fieldset>
-      <legend>Recency</legend>
-      <label><input type="checkbox" id="recency"> recency glyph</label>
+      <legend>Rows and margin</legend>
+      <label class="wide">limit <code>-l</code> <input type="range" id="limit" min="1" max="40"> <output id="limit-out"></output></label>
+      <label class="wide">pad <code>--pad</code> <input type="range" id="pad" min="0" max="12"> <output id="pad-out"></output></label>
     </fieldset>
     <fieldset>
-      <legend>Rules</legend>
-      <label><input type="checkbox" id="ten"> every 10 turns</label>
-      <label><input type="checkbox" id="hundred"> every 100 turns</label>
+      <legend>Timezone <code>--tz</code></legend>
+      <select id="tz"></select>
+    </fieldset>
+    <fieldset>
+      <legend>Terminal</legend>
+      <label class="wide">columns <input type="range" id="columns" min="40" max="240"> <output id="columns-out"></output></label>
+    </fieldset>
+    <fieldset>
+      <legend>Fake session</legend>
+      <label>model <select id="model"></select></label>
+      <label>file <input type="text" id="session" size="30" spellcheck="false"></label>
     </fieldset>
   </div>
-  <p class="law" id="law"></p>
-  <ul class="notes" id="notes"></ul>
-  <p class="meta" id="legend"></p>
-  <pre id="chart"></pre>
-  <p class="meta" id="count"></p>
+  <div class="frame"><pre class="ruler" id="ruler"></pre><pre id="chart"></pre></div>
+  <div class="row"><p class="meta" id="count"></p><button type="button" id="copy">Copy plain text</button></div>
 </main>
 <script type="module">
-  import { PRESETS, render, xtermRgb } from "./paint.mjs";
+  import { ansiToHtml, parseWtftCliArgs, PRESETS, renderReport, SPEC_PIN, stripAnsi, WTFT_MODELS, wtftSession } from "../renderer/wtft-chart.mjs";
 
-  const presets = document.getElementById("presets");
+  const INTERVALS = ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w", "5t", "10t", "25t", "100t"];
+  const ZONES = ["", "UTC", "America/Los_Angeles", "America/New_York", "Europe/London", "Asia/Tokyo", "Australia/Sydney"];
+  const CLI_DEFAULT_LIMIT = 17;
+  const $ = (id) => document.getElementById(id);
+  const cmd = $("cmd");
+
+  for (const value of INTERVALS) $("interval").append(new Option(value, value));
+  for (const value of ZONES) $("tz").append(new Option(value || "(browser)", value));
+  for (const model of WTFT_MODELS) $("model").append(new Option(model, model));
+  $("session").value = SPEC_PIN.sessionFile;
+  $("columns").value = SPEC_PIN.columns;
+
+  const presets = $("presets");
   for (const [id, preset] of Object.entries(PRESETS)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = preset.label;
     button.dataset.preset = id;
-    button.addEventListener("click", () => apply(preset, button));
-    presets.appendChild(button);
+    button.addEventListener("click", () => { cmd.value = preset.argv.join(" "); commandChanged(); });
+    presets.append(button);
   }
 
-  function apply(preset, button) {
-    for (const item of presets.querySelectorAll("button")) item.classList.toggle("on", item === button);
-    setRadio("interval", preset.interval);
-    setRadio("layout", preset.layout);
-    setRadio("measure", preset.measure);
-    document.getElementById("cost-columns").checked = preset.columns.includes("inc-cost");
-    document.getElementById("token-columns").checked = preset.columns.includes("inc-tokens");
-    document.getElementById("recency").checked = preset.recency;
-    document.getElementById("ten").checked = preset.rules.ten;
-    document.getElementById("hundred").checked = preset.rules.hundred;
-    draw();
+  const words = () => cmd.value.trim().split(/\s+/).filter((word) => word && word !== "wtft");
+
+  function controlsToCommand() {
+    const argv = [
+      document.querySelector('input[name="mode"]:checked').value,
+      document.querySelector('input[name="unit"]:checked').value,
+      "-i", $("interval").value,
+      "-l", $("limit").value,
+    ];
+    if ($("tz").value) argv.push("--tz", $("tz").value);
+    if (!$("cost-columns").checked) argv.push("--no-cost");
+    if (!$("token-columns").checked) argv.push("--no-tokens");
+    if (!$("emoji").checked) argv.push("--no-emoji");
+    if (Number($("pad").value) !== 1) argv.push("--pad", $("pad").value);
+    cmd.value = argv.join(" ");
   }
 
-  function setRadio(name, value) {
-    const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
-    if (input) input.checked = true;
+  function commandToControls() {
+    const opts = parseWtftCliArgs(words());
+    document.querySelector(`input[name="mode"][value="${opts.mode === "bucket" ? "-b" : "-c"}"]`).checked = true;
+    const tokens = opts.hasTokens && !opts.hasCost;
+    document.querySelector(`input[name="unit"][value="${tokens ? "--tokens" : "--cost"}"]`).checked = true;
+    const interval = opts.hasInterval ? opts.interval : "1h";
+    if (![...$("interval").options].some((o) => o.value === interval)) $("interval").append(new Option(`${interval} (typed)`, interval));
+    $("interval").value = interval;
+    $("limit").value = opts.hasLimit ? opts.limit : CLI_DEFAULT_LIMIT;
+    const zone = opts.hasTimezone ? opts.timezone : "";
+    if (!ZONES.includes(zone) && ![...$("tz").options].some((o) => o.value === zone)) $("tz").append(new Option(`${zone} (typed)`, zone));
+    $("tz").value = zone;
+    $("cost-columns").checked = !opts.hideCostColumns;
+    $("token-columns").checked = !opts.hideTokenColumns;
+    $("emoji").checked = opts.enableEmoji !== false;
+    $("pad").value = opts.hasPad ? opts.pad : 1;
+    for (const id of ["limit", "pad", "columns"]) $(`${id}-out`).textContent = $(id).value;
   }
 
-  function read() {
-    const checked = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
-    return {
-      interval: checked("interval"),
-      layout: checked("layout"),
-      measure: checked("measure"),
-      columns: [
-        ...(document.getElementById("cost-columns").checked ? ["inc-cost", "total-cost"] : []),
-        ...(document.getElementById("token-columns").checked ? ["inc-tokens", "total-tokens"] : []),
-      ],
-      recency: document.getElementById("recency").checked,
-      rules: {
-        ten: document.getElementById("ten").checked,
-        hundred: document.getElementById("hundred").checked,
-      },
-    };
-  }
-
-  function ansiToHtml(text) {
-    const parts = text.split(/\u001b\[/);
-    let html = escape(parts[0] ?? "");
-    for (let i = 1; i < parts.length; i += 1) {
-      const split = parts[i].split("m");
-      const code = split.shift();
-      const body = escape(split.join("m"));
-      if (code === "0") {
-        html += body;
-        continue;
-      }
-      if (code === "90") {
-        html += `<span style="color:#888">${body}</span>`;
-        continue;
-      }
-      const fg = /38;5;(\d+)/.exec(code);
-      const bg = /48;5;(\d+)/.exec(code);
-      const style = [
-        fg ? `color:${xtermRgb(Number(fg[1]))}` : "",
-        bg ? `background:${xtermRgb(Number(bg[1]))}` : "",
-      ].filter(Boolean).join(";");
-      html += style ? `<span style="${style}">${body}</span>` : body;
-    }
-    return html;
-  }
-
-  function escape(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-  }
+  let sessionKey = "";
+  let interactions = [];
 
   function draw() {
-    const picture = render(read());
-    document.getElementById("law").textContent = picture.law;
-    const notes = document.getElementById("notes");
-    notes.replaceChildren(...picture.notes.map((note) => {
-      const li = document.createElement("li");
-      li.textContent = note;
-      return li;
-    }));
-    const legend = document.getElementById("legend");
-    legend.replaceChildren(...picture.legend.flatMap((item, index) => {
-      const swatch = document.createElement("span");
-      swatch.className = "swatch";
-      swatch.style.color = xtermRgb(item.fg);
-      swatch.textContent = "█";
-      const name = document.createTextNode(` ${item.label}${index < picture.legend.length - 1 ? "  " : ""}`);
-      return [swatch, name];
-    }));
-    document.getElementById("chart").innerHTML = picture.ansi.map(ansiToHtml).join("\n");
-    document.getElementById("count").textContent = `${picture.lineCount} lines in this picture. The widget limit counts bins.`;
+    const model = $("model").value;
+    if (sessionKey !== model) { sessionKey = model; interactions = wtftSession(model); }
+    const columns = Number($("columns").value);
+    const report = renderReport(words(), { columns, sessionFile: $("session").value, interactions });
+    const ruler = Array.from({ length: columns }, () => " ");
+    for (let at = 10; at <= columns; at += 10) {
+      const label = String(at);
+      for (let i = 0; i < label.length; i += 1) ruler[at - label.length + i] = label[i];
+    }
+    $("ruler").textContent = ruler.join("");
+    $("chart").innerHTML = report.lines.map(ansiToHtml).join("\n");
+    $("count").textContent = `${report.lines.length} lines, drawn for a ${columns}-column terminal.`;
+    for (const item of presets.querySelectorAll("button")) {
+      item.classList.toggle("on", PRESETS[item.dataset.preset].argv.join(" ") === words().join(" "));
+    }
+    window.__lines = report.lines.map(stripAnsi);
   }
 
-  document.body.addEventListener("change", () => {
-    for (const item of presets.querySelectorAll("button")) item.classList.remove("on");
-    draw();
-  });
-  apply(PRESETS["cost-cumulative"], presets.querySelector("button"));
+  function commandChanged() { commandToControls(); draw(); }
+
+  cmd.addEventListener("input", commandChanged);
+  for (const id of ["interval", "limit", "pad", "tz", "cost-columns", "token-columns", "emoji"]) {
+    $(id).addEventListener("input", () => { controlsToCommand(); commandChanged(); });
+  }
+  for (const input of document.querySelectorAll('input[name="mode"], input[name="unit"]')) {
+    input.addEventListener("change", () => { controlsToCommand(); commandChanged(); });
+  }
+  for (const id of ["columns", "model", "session"]) $(id).addEventListener("input", () => { $(`${id}-out`) && ($(`${id}-out`).textContent = $(id).value); draw(); });
+  $("copy").addEventListener("click", () => navigator.clipboard?.writeText(window.__lines.join("\n")));
+
+  cmd.value = PRESETS["cost-cumulative"].argv.join(" ");
+  commandChanged();
 </script>
 </body>
 </html>

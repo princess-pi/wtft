@@ -1,64 +1,92 @@
 # Chart spec
 
-`renderWtftChart` draws the chart lines. `getBinInfo` labels one interaction. `buildWtftLines` groups those labels into bins and hands them over newest first. One cell is one category. The columns, the cache-miss line, and the date line are part of that draw. This page specifies that encoding, the four pictures, and the lines between rows.
+`buildWtftLines` bins a session's interactions and hands the bins, newest first, to `renderWtftChart`, which draws the chart lines. `getBinInfo` labels one interaction. One cell is one category. The columns, the cache-miss line, the date line, the title with its timeline strip, and the legend are part of that draw.
 
-This page is the picture of that chart. The picker draws this sample under interval, layout, bar measure, column pairs, recency, and rules. The blocks below are the four presets, so a reader without the picker still sees them.
+This page is the picture of that chart, and the picker is the chart. The picker bundles wtft's own `buildWtftLines` and `parseWtftCliArgs` for the browser and runs them on a fake session. Every control is a chart flag or the terminal's width. Type a flag into the command line and the controls follow. The four blocks below are the four presets under a pinned clock, so a reader without the picker still sees them.
 
-Picker: [picker.html](picker.html)
+<iframe src="picker.html" title="Chart picker" style="width:100%;height:1060px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
 
-<iframe src="picker.html" title="Chart picker" style="width:100%;height:820px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
+[Open the picker on its own](picker.html)
 
-## Sample
+The library page runs the same chart on a booth at the state fair: [Chart library spec](../chart-lib/spec.mdx).
 
-Five bins, oldest first. The caller hands them to the chart newest first.
+## The fake session
 
-| Bin | When | Turn | Cache miss | Parts |
-|---|---|---|---|---|
-| 1 | 10:00 Sep-25 | 10 | no | code $1.00 / 800 tok, web $0.40 / 0 tok |
-| 2 | 12:00 Sep-25 | 20 | no | code $2.20 / 1400 tok |
-| 3 | 18:00 Sep-25 | 30 | no | research $0.80 / 2200 tok |
-| 4 | 14:00 Sep-26 | 40 | no | plan $0.50 / 600 tok, code $3.10 / 1800 tok |
-| 5 | 15:00 Sep-26 | 100 | yes | code $1.20 / 900 tok, tests $0.70 / 400 tok |
+Three working days of one session, Sep-24, Sep-25 and Sep-26. Each interaction is shaped as a tag file returns it, with `_cat` set, so the classifier's file, command and text inputs are not needed. Cost comes from the same `calculateClaudeCost` the parser calls. A turn after a gap of 12 minutes or more, and each day's first turn, is a cache miss and is classed `overhead`.
 
-Running totals land on the newest row: $9.90 and 8.1k tokens. A category that did not grow in a bin still occupies its share of a running-total bar.
-
-These pictures set the bar length to `round(row / max row × 16)` cells. A scatter mark sits at `round(category / max row × 15)`. The max is the largest row of the chosen measure, across the sample. The chart's scale is the session total for a running total, and the largest displayed bin for a bucket. A cost scale of 0 or less becomes 1; above 20 it ceils to a multiple of 5; otherwise it ceils to an integer. A token scale ceils to a multiple of 1000, and 0 stays 0. The layout width is at least 40. The bar is what remains after the label, the columns, and the scale's reserved cells.
+The model picks the timeline strip. `claude-sonnet-5-5` has no surge schedule, so the strip is one colour. `deepseek-v4-pro` has one, so the strip draws its surge hours in orange, the surge badge appears when the real clock is inside a window, and a turn billed at the surge rate makes its row orange, with a bolt when the columns have their full two-space gap.
 
 ## Encoding law
 
 A cell is one category.
 
 - Color is the category. The glyph is `█`.
-- On a running-total bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category.
+- On a running-total token bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category.
 - Recency applies to a token running total. An incremental bar is entirely new, so recency stays off. A cost bar stays `█`.
 - A scatter column that two categories round onto keeps the larger cost. The cell stays one category. An equal cost keeps the earlier category in the category order. Scatter is the cost bucket bar. A token bucket bar is a stack of `█` when that bin has token counts.
 
-## Rules
+## Rows
+
+Each row prints the bin label, incremental cost, total cost so far, incremental tokens, total tokens so far, and the bar.
+
+- `--cost` and `-C` choose the cost bar. `--tokens` and `--by-model` choose the token bar. With neither, the bar is cost, unless the config sets tokens.
+- `--cumulative` and `-c`, or `--bucket` and `-b`, choose a running total versus this bin. With neither, the mode is cumulative, unless the config sets it.
+- `--no-cost` hides the cost pair. `--no-tokens` hides the token pair.
+- The layout width is at least 40. The bar is what remains after the label area and the scale's reserved cells: 3 for cost, 5 for tokens. Under 15 cells the token pair goes first, then the cost pair.
+- The label area is compacted when it is more than a quarter of the width. `docs/spec-362-compact-label-columns.md` has the five steps. On this session the first step starts under 154 columns.
+- A positive amount under one cent uses four decimal places.
+- A cumulative cost bar is `round(total / scale × bar)` cells. The scale is the session total for a running total, and the largest displayed bin for a bucket. A cost scale of 0 or less becomes 1; above 20 it ceils to a multiple of 5; otherwise it ceils to an integer. A token scale ceils to a multiple of 1000.
+- A scatter mark sits at `round(cost / scale × (bar − 1))`.
+- A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell.
+- The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it.
+
+## Lines between rows
 
 A rule inserts one line on the older side of the boundary, which is where the cache-miss line sits.
 
 - Cache miss: the line reads `Cache Miss`, on the older side of the missed row. A miss on the oldest row still draws the line under it. When a miss and a date change share a boundary, the miss line comes first.
-- Date change: the line reads the older bin's date as `Mmm-DD`, whenever the date changes. A turn chart that crosses a date still draws it. The scale line carries the newest bin's date.
-- Every 10 turns and every 100 turns are on the picker, default off. The chart does not draw them. A turn divisible by both draws one line, labelled `100 turns`.
+- Date change: the line reads the older bin's date as `Mmm-DD`, whenever the date changes. A turn interval that crosses a date still draws it.
+- Padding: the CLI pads the chart out to `-l` rows with a dash row. The Pi widget does not. `docs/spec-264-pad-rows.md`.
 
-The scale line draws when the scale is above 0 and the bar is at least 15 cells. These pictures omit the scale line, the tick marks on the rule lines, the title, the legend, and the token glyph key. The chart left-aligns the numbers. These pictures right-align them. The chart dims the label and the incremental columns, and draws the totals in bold white.
+## Lines above and below
+
+- Title: `💸 WTF Tokens?` for cost and `🔢 WTF Tokens?` for tokens, then `...` and the last four characters of the session file name, then the timeline strip. `--no-emoji` draws `[$]` and `[#]`.
+- Timeline strip: 24 hours, the moon at each end, the sun at noon, a clock face at the current hour. Surge hours are orange.
+- Legend: every category, including ones with no spend in the session.
+- Scale line: draws when the scale is above 0 and the bar is at least 15 cells. It carries the newest bin's date.
+- A token chart ends with the glyph key and a token footer. Both charts end with a cache-hit line when the session has cache tokens.
+- An "Other" warning line appears in a cost chart when Other is more than a fifth of the spend and more than $6.
 
 ## Presets
 
-Each row prints incremental cost, total latest cost, incremental tokens, and total latest tokens. On a narrow width the token columns go first, then the cost columns, while the bar would be under 15 cells. A positive amount under one cent uses four decimal places. `--cost` and `-C` choose the cost bar. `--tokens` and `--by-model` choose the token bar. With neither unit flag, the bar is cost, unless config sets tokens. `--cumulative` and `-c`, or `--bucket` and `-b`, choose a running total versus this bin. With neither mode flag, the mode is cumulative, unless config sets it. `--no-cost` hides the cost pair. `--no-tokens` hides the token pair. The picker hides a pair, not one column of it.
+Pinned to `--tz UTC`, 160 columns, 1h bins, 10 rows, and the clock at 2026-09-26 15:30 UTC. The first line of each block is the command. A test compares every block to the chart's output.
 
 ### Cost, cumulative
 
-Stack. Bar is total latest cost. Recency off. One category per cell. The plain rows show the shape. The picker colors each category.
+Stack. Bar is total latest cost. Recency off. One category per cell.
 
 ```
-15:00    +$1.90       $9.90       +1.3k      8.1k tok  ████████████████
-── Cache Miss ─────────────────────────────────────────────────────────
-14:00    +$3.60       $8.00       +2.4k      6.8k tok  █████████████
-── Sep-25 ─────────────────────────────────────────────────────────────
-18:00    +$0.80       $4.40       +2.2k      4.4k tok  ███████
-12:00    +$2.20       $3.60       +1.4k      2.2k tok  ██████
-10:00    +$1.40       $1.40        +800       800 tok  ██
+$ wtft -c --cost --tz UTC -i 1h -l 10
+ 💸 WTF Tokens? ...ee07  🌕────────────☀️───🕒────────🌕
+ █Ovrhd █Waste █Plan █Spec █Research █Web █Grep █Code █Tests █Git █Agents █Prompt █Cmpct █Other
+ ── Sep-26 ───────────────────────── $0.00 ────────────────────── $1.75 ────────────────────── $3.50 ────────────────────── $5.25 ────────────────────── $7.00
+ 17:00 +$0.04 $6.06 +48.6k  3.6M tok   █████████████████████████████████████████████████████████████████████████████████████████████████████
+ 16:00 +$0.74 $6.02 +479.2k 3.6M tok   █████████████████████████████████████████████████████████████████████████████████████████████████████
+ 15:00 +$0.84 $5.27 +419.8k 3.1M tok   ████████████████████████████████████████████████████████████████████████████████████████
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 14:00 +$0.46 $4.44 +339.8k 2.7M tok   ██████████████████████████████████████████████████████████████████████████
+ 13:00 +$0.63 $3.98 +384.8k 2.3M tok   ██████████████████████████████████████████████████████████████████
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ ── Sep-25 ────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 12:00 +$0.08 $3.35 +29.5k  1.9M tok   ████████████████████████████████████████████████████████
+ 11:00 +$0.66 $3.26 +509.1k 1.9M tok   ███████████████████████████████████████████████████████
+ 10:00 +$0.47 $2.60 +390.7k 1.4M tok   ███████████████████████████████████████████
+ 09:00 +$0.83 $2.13 +416.3k 1.0M tok   ████████████████████████████████████
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ ── Sep-24 ────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 15:00 +$0.62 $1.30 +274.0k 596.8k tok ██████████████████████
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+   CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```
 
 ### Cost, bucket
@@ -66,13 +94,27 @@ Stack. Bar is total latest cost. Recency off. One category per cell. The plain r
 Scatter. Bar is incremental cost. This is the only scatter bar. Two categories on one column keep the larger one.
 
 ```
-15:00    +$1.90       $9.90       +1.3k      8.1k tok     █ █
-── Cache Miss ───────────────────────────────────────────────────────
-14:00    +$3.60       $8.00       +2.4k      6.8k tok    █          █
-── Sep-25 ───────────────────────────────────────────────────────────
-18:00    +$0.80       $4.40       +2.2k      4.4k tok     █
-12:00    +$2.20       $3.60       +1.4k      2.2k tok           █
-10:00    +$1.40       $1.40        +800       800 tok    █ █
+$ wtft -b --cost --tz UTC -i 1h -l 10
+ 💸 WTF Tokens? ...ee07  🌕────────────☀️───🕒────────🌕
+ █Ovrhd █Waste █Plan █Spec █Research █Web █Grep █Code █Tests █Git █Agents █Prompt █Cmpct █Other
+ ── Sep-26 ───────────────────────── $0.00 ────────────────────── $0.25 ────────────────────── $0.50 ────────────────────── $0.75 ────────────────────── $1.00
+ 17:00 +$0.04 $6.06 +48.6k  3.6M tok    █ █
+ 16:00 +$0.74 $6.02 +479.2k 3.6M tok    █ ██     █  █                                       █
+ 15:00 +$0.84 $5.27 +419.8k 3.1M tok     ███     █                  █                  █
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 14:00 +$0.46 $4.44 +339.8k 2.7M tok      █  ██    █             █
+ 13:00 +$0.63 $3.98 +384.8k 2.3M tok    █ █ ██ █         █             █
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ ── Sep-25 ────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 12:00 +$0.08 $3.35 +29.5k  1.9M tok      █  █
+ 11:00 +$0.66 $3.26 +509.1k 1.9M tok     ██        █                                         █
+ 10:00 +$0.47 $2.60 +390.7k 1.4M tok     ██       █                        █
+ 09:00 +$0.83 $2.13 +416.3k 1.0M tok     ██                      █                                 █
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ ── Sep-24 ────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+ 15:00 +$0.62 $1.30 +274.0k 596.8k tok  █       █   █ █  █
+ ── Cache Miss ────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼────────────────────────────┼
+   CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```
 
 ### Tokens, cumulative
@@ -80,13 +122,29 @@ Scatter. Bar is incremental cost. This is the only scatter bar. Two categories o
 Stack. Bar is total latest tokens. Recency on, so the glyph is `▃` or `▇` and the color is the category.
 
 ```
-15:00    +$1.90       $9.90       +1.3k      8.1k tok  ▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇
-── Cache Miss ─────────────────────────────────────────────────────────
-14:00    +$3.60       $8.00       +2.4k      6.8k tok  ▇▃▃▃▃▃▃▃▃▇▇▇▇
-── Sep-25 ─────────────────────────────────────────────────────────────
-18:00    +$0.80       $4.40       +2.2k      4.4k tok  ▇▇▇▇▇▃▃▃▃
-12:00    +$2.20       $3.60       +1.4k      2.2k tok  ▃▇▇▇
-10:00    +$1.40       $1.40        +800       800 tok  ▇▇
+$ wtft -c --tokens --tz UTC -i 1h -l 10
+ 🔢 WTF Tokens? ...ee07  🌕────────────☀️───🕒────────🌕
+ █Ovrhd █Waste █Plan █Spec █Research █Web █Grep █Code █Tests █Git █Agents █Prompt █Cmpct █Other
+ ── Sep-26 ────────────────────────── 0.0 ───────────────────── 903.8k ─────────────────────── 1.8M ─────────────────────── 2.7M ────────────────────── 3.6M
+ 17:00 +$0.04 $6.06 +48.6k  3.6M tok   ▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇
+ 16:00 +$0.74 $6.02 +479.2k 3.6M tok   ▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▇▇▇▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▃▃▃▃▃▇▃▃▃▃▃▃▃▇▃▃▇▇
+ 15:00 +$0.84 $5.27 +419.8k 3.1M tok   ▃▃▃▃▃▃▃▇▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▇▇▇▇▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▃▃▃▃▃▇▃▃▃▃▃▃▇▃▃
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 14:00 +$0.46 $4.44 +339.8k 2.7M tok   ▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▇▃▃▃▃▃▃▃▃▃▇▇▇▇▃▃▃▃▇▃▃▃▃▃▇▃▇
+ 13:00 +$0.63 $3.98 +384.8k 2.3M tok   ▃▃▃▃▃▇▇▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▃▃▃▃▃▃▃▃▇▃▃▇▇▃▃▃▇▇▇
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ ── Sep-25 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 12:00 +$0.08 $3.35 +29.5k  1.9M tok   ▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▃▃▃▃▃▃▃▃
+ 11:00 +$0.66 $3.26 +509.1k 1.9M tok   ▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▇▇▇▇▇▇▃▃▃▃▇▇▇▇▃▇▃▃▇
+ 10:00 +$0.47 $2.60 +390.7k 1.4M tok   ▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▃▃▃▃▃▃▃▃▃▇▇▇▇▇▇▃▇▇▇▇▃▇
+ 09:00 +$0.83 $2.13 +416.3k 1.0M tok   ▃▃▃▇▇▃▃▃▃▃▃▃▃▃▃▇▃▃▃▃▃▇▇▇▇▇▇▇▇▇▇▇
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ ── Sep-24 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 15:00 +$0.62 $1.30 +274.0k 596.8k tok ▃▃▇▃▃▃▇▃▃▇▇▇▇▃▃▃▇▇
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+   ▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)
+   ↑3.5M ↓157.8k CH79%
+   CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```
 
 ### Tokens, bucket
@@ -94,22 +152,36 @@ Stack. Bar is total latest tokens. Recency on, so the glyph is `▃` or `▇` an
 Stack. Bar is incremental tokens. Recency off. One category per cell.
 
 ```
-15:00    +$1.90       $9.90       +1.3k      8.1k tok  █████████
-── Cache Miss ─────────────────────────────────────────────────────────
-14:00    +$3.60       $8.00       +2.4k      6.8k tok  ████████████████
-── Sep-25 ─────────────────────────────────────────────────────────────
-18:00    +$0.80       $4.40       +2.2k      4.4k tok  ███████████████
-12:00    +$2.20       $3.60       +1.4k      2.2k tok  █████████
-10:00    +$1.40       $1.40        +800       800 tok  █████
+$ wtft -b --tokens --tz UTC -i 1h -l 10
+ 🔢 WTF Tokens? ...ee07  🌕────────────☀️───🕒────────🌕
+ █Ovrhd █Waste █Plan █Spec █Research █Web █Grep █Code █Tests █Git █Agents █Prompt █Cmpct █Other
+ ── Sep-26 ────────────────────────── 0.0 ───────────────────── 127.5k ───────────────────── 255.0k ───────────────────── 382.5k ──────────────────── 510.0k
+ 17:00 +$0.04 $6.06 +48.6k  3.6M tok   ███████████
+ 16:00 +$0.74 $6.02 +479.2k 3.6M tok   ██████████████████████████████████████████████████████████████████████████████████████████████████████████$
+ 15:00 +$0.84 $5.27 +419.8k 3.1M tok   ████████████████████████████████████████████████████████████████████████████████████████████$
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 14:00 +$0.46 $4.44 +339.8k 2.7M tok   ████████████████████████████████████████████████████████████████████████████
+ 13:00 +$0.63 $3.98 +384.8k 2.3M tok   █████████████████████████████████████████████████████████████████████████████████████
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ ── Sep-25 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 12:00 +$0.08 $3.35 +29.5k  1.9M tok   ███████$
+ 11:00 +$0.66 $3.26 +509.1k 1.9M tok   █████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+ 10:00 +$0.47 $2.60 +390.7k 1.4M tok   ██████████████████████████████████████████████████████████████████████████████████████
+ 09:00 +$0.83 $2.13 +416.3k 1.0M tok   ████████████████████████████████████████████████████████████████████████████████████████████$
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ ── Sep-24 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+ 15:00 +$0.62 $1.30 +274.0k 596.8k tok █████████████████████████████████████████████████████████████
+ ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
+   ▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)
+   ↑3.5M ↓157.8k CH79%
+   CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```
 
-## Outside this chart
+## Outside the picker
 
-- A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell. These pictures omit that cell. The sample's web row has zero tokens.
-- The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it. These pictures use largest-remainder into the scaled cell count.
-- The chart's legend lists every category, including ones with no spend in the session. The picker lists the categories in this sample: plan, research, web, code, and tests.
-- The caller passes width, timezone, surge, the session suffix, an other-category warning, and the cache line. Pad is applied before the chart sees the width. The picker does not draw them.
-- Padding rows out to the limit is `docs/spec-264-pad-rows.md`: the CLI pads, the widget does not. The widget's limit is a bin count, default 10. Rule lines are extra. The Pi display cap is `docs/spec-269-widget-fit.md`. The picker prints how many lines the picture has. Time versus turns is the interval kind. The size stays in binning. The default is `1h`.
+- The CLI report prints more than the chart: the token summary under `--tokens`, the histogram under `--other`, and the provisional warning. The picker prints the session path line and the chart.
+- `--width` is read and ignored by the CLI. The CLI takes its width from the terminal, minus `--pad` on each side. The picker's terminal slider is that width.
+- The Pi widget builds the same chart from `extensions/wtft.ts`, with its own `-w` width, no padding rows, and a limit fitted under Pi's 10-line cap by `docs/spec-269-widget-fit.md`.
 
 ## Settled
 

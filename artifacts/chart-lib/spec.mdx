@@ -1,0 +1,78 @@
+# Chart library spec
+
+A library is only a library once someone has reused it. The chart has one user, wtft. This page is the second: a booth at the state fair, sold by item and by time of day, drawn by wtft's own `buildWtftLines` with nothing changed. Where the chart won't do what the booth needs, that's a finding.
+
+The picker draws the booth twice. The first picture is what the chart returns. The second is the same lines after a table of substitutions, and shows what a caller would get if the chart took its own words from the caller. The second picture is a mockup. The substitutions are the list of places the chart says something only wtft means.
+
+<iframe src="fair.html" title="State fair booth" style="width:100%;height:2000px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
+
+[Open the picker on its own](fair.html)
+
+The wtft page runs the chart on its own data: [Chart spec](../chart-spec/spec.mdx). The encoding law and the row layout are specified there and hold here.
+
+## The booth
+
+One sale is one interaction. The chart reads these fields and nothing else of the interaction.
+
+| Booth | Chart field | Note |
+|---|---|---|
+| when the sale rang up | `timestamp` | a bin is an hour, a day, or a count of sales |
+| revenue | `cost` | dollars, always |
+| units sold | `inputTokens` | the chart's second measure is tokens |
+| item | `_cat` | one of the chart's 14 categories |
+| rush hour | `surgePriced` | an orange row |
+| the power went out | `cacheMiss` | a `Cache Miss` line under that row |
+| the booth's name | `sessionNameSuffix` | optional |
+
+Six items ride on six of the chart's categories: lattes, apples, funnel cake, pie, corn dogs, lemonade. Souvenirs, when ticked, ride on `other`. The stack order is the chart's, not the booth's.
+
+## What worked without a change
+
+- A stack per bin, coloured by category, as a running total or as this bin's own amount.
+- Scatter for the per-bin revenue, and `▃` carryover against `▇` new for units sold.
+- Four number columns, and their compaction and dropping as the terminal narrows.
+- Bins of minutes, hours, days, weeks, or a count of sales. `-i 25t` is every 25 sales.
+- A date line where the day changes, in any timezone, and a scale line with ticks.
+- Rows for a rush hour in bold orange. The chart calls it surge. The booth calls it lunch.
+- Padding rows out to the limit.
+
+## Findings
+
+Each row is a place the chart is about wtft. **Fix shape** is what a caller would hand the chart. A **caller word** is a string. A **caller list** is a list of categories with a name and a colour each. **Standing** means the chart does something else, and no fix is proposed.
+
+| # | The chart | Where | Fix shape | Mockup |
+|---|---|---|---|---|
+| F1 | Titles itself `WTF Tokens?` with a 💸 or 🔢, and the last four letters of a session file name | `renderWtftChart` | caller word | title |
+| F2 | Draws a 24-hour timeline strip on the title line. Its surge hours come from a price schedule looked up by model id. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line, or a switch | none |
+| F3 | Lists all 14 categories in the legend, by wtft's names, whether or not the data has them | `renderWtftChart` | caller list | legend |
+| F4 | Takes a closed set of 14 categories. A caller borrows a slot, and its colour and its place in the stack | `Category`, `CATEGORY_STYLE` | caller list | none |
+| F5 | Says `$` and USD everywhere, four decimals under a cent, and no thousands separator: `$14526.00` | `formatCost`, `buildTickLine` | caller word | none |
+| F6 | Says `tok` after the units total, and `t` when narrow | `columnTexts` | caller word | units |
+| F7 | Ends a units chart with `▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)` | `renderWtftChart` | caller word | key |
+| F8 | Ends a units chart with `↑ input  ↓ output  CH%` | `tokenFooterSummary` | switch | footer |
+| F9 | Ends every chart with `CH: 0% cache hit (…)`, even when nothing is cached | `computeCacheMetrics` | switch | cache-line |
+| F10 | Names the divider `Cache Miss` | `renderWtftChart` | caller word | miss |
+| F11 | Warns `"Other" category: 27% of session cost … Run wtft --other to drill down.` | `buildWtftLines` | caller word, or a switch | warning |
+| F12 | Reads the terminal's width from the process, and the caller's width is only a ceiling | `getTerminalWidth` | width in, no process read | none |
+| F13 | Reads the clock inside the draw | `renderWtftChart` | clock in | none |
+| F14 | Can't be imported without the parser, the pricing, the harness registry and the child-process module. The browser bundle is over half a megabyte minified and needs a stand-in for `node:url` | `wtft-renderer.ts` imports | split the chart from the parser | none |
+| F15 | Turns options into a chart call in four places: the CLI report arm, the daemon library behind `--watch`, the Pi widget, and the unit choice in `bin/wtft.ts`. These two pages are the fifth and sixth | `report.ts`, `wtft-daemon-lib.ts`, `extensions/wtft.ts`, `bin/wtft.ts` | one function | none |
+| F16 | Bins only along time or turns. There is no way to fold the days onto one clock face and ask "how do lattes sell across the day" | `getBinInfo` | standing | none |
+| F17 | Compacts its label area when it is more than a quarter of the width, so booth revenue in the thousands compacts at any terminal under 178 columns | `MAX_LABEL_SHARE` | standing | none |
+
+## What the chart can't say
+
+- **Time of day across days.** F16. A bin is a date and an hour. Three days of lunch rush are three separate rows.
+- **A bar per item.** The row axis is time, never a category.
+- **Anything but two measures.** The columns are one currency and one count. A booth that sells by weight has no third.
+- **A caller's own divider.** The rules between rows are the cache miss and the date. The power cut rides on the first.
+
+## Open decisions
+
+These wait on the reviewer and are listed on the tracking issue, so a decision lands in one place.
+
+- **Q-A.** One chart with caller-supplied words and categories, or two charts on a shared bin-and-encode core.
+- **Q-B.** Whether the timeline strip belongs to the library or to wtft's title line.
+- **Q-C.** Whether the option-to-chart function is extracted first, so both pickers call the CLI's own copy.
+- **Q-D.** Whether time of day across days is a second chart, or out of scope.
+- **Q-E.** Whether the turn-stride lines the old picker offered, every 10 and every 100 turns, stay gone.

@@ -8,6 +8,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - **Never edit build output.** `bin/*.mjs` and `pi/*.js` are gitignored bundles, and
   `extensions/lib/harness/builtins.generated.ts` is a tracked one. Edit the `.ts`, run
   `bun run build`, then `bin/install-wtft` — otherwise `~/bin` keeps running the old build.
+  `artifacts/renderer/wtft-chart.mjs` is a tracked bundle too: edit `artifacts/renderer/*.ts` or the
+  chart code, run `bun run artifacts`, commit the result. A test fails on a stale one.
 - **Bundles import only `node:` builtins.** bun builds them; stock node runs them. The relocatable-build
   test fails on any other import.
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the

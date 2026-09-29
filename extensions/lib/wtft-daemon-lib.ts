@@ -383,6 +383,17 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 	}
 }
 
+/** The tag file a watch on `watchedPath` (inode `watchedIno`) should move to: the same path
+ *  recreated, or the session's current tag file when the watched one is gone. `lost` (the
+ *  watcher saw a rename or unlink) accepts a file at the same path even with the same inode,
+ *  which a recreated file can reuse. Null when nothing should replace the watch yet. */
+export function replacedTagFile(watchedPath: string, watchedIno: number, sessionPath: string, lost = false): { path: string; ino: number } | null {
+	const candidate = fs.existsSync(watchedPath) ? watchedPath : getCurrentVersionTagPath(sessionPath);
+	let ino: number;
+	try { ino = fs.statSync(candidate).ino; } catch { return null; }
+	return !lost && candidate === watchedPath && ino === watchedIno ? null : { path: candidate, ino };
+}
+
 export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
 	let buf: Buffer;
 	try {
@@ -770,6 +781,7 @@ export async function watchTagFile(
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
+		if (rearmTimer) clearInterval(rearmTimer);
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
 		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
@@ -940,9 +952,15 @@ export async function watchTagFile(
 	});
 
 	let watcher: fs.FSWatcher | null = null;
+	let watchedIno = 0;
+	let watchLost = false;
+	let rearmTimer: ReturnType<typeof setInterval> | null = null;
 
-	const startWatching = () => {
+	const startWatching = (ino: number) => {
+		watchedIno = ino;
+		watchLost = false;
 		watcher = fs.watch(tagPath, (eventType) => {
+			if (eventType === "rename") { watchLost = true; return; }
 			if (eventType !== "change") return;
 
 			try {
@@ -1053,6 +1071,8 @@ export async function watchTagFile(
 		await new Promise(r => setTimeout(r, 250));
 	}
 
+	let seededIno = 0;
+	try { seededIno = fs.statSync(tagPath).ino; } catch {}
 	seed = seedClassifiedTagFile(tagPath);
 	allInteractions = seed.interactions;
 	lastReadOffset = seed.offset;
@@ -1060,7 +1080,34 @@ export async function watchTagFile(
 	needsRedraw = true;
 	render();
 
-	startWatching();
+	try {
+		startWatching(seededIno);
+	} catch {
+		watchLost = true;
+	}
+	if (seededIno === 0) watchLost = true;
+	rearmTimer = setInterval(() => {
+		const next = replacedTagFile(tagPath, watchedIno, sessionPath, watchLost);
+		if (!next) return;
+		const fresh = seedClassifiedTagFile(next.path);
+		if (!fresh.read) return;
+		if (watcher) watcher.close();
+		watcher = null;
+		tagPath = next.path;
+		seed = fresh;
+		allInteractions = fresh.interactions;
+		lastReadOffset = fresh.offset;
+		prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
+		try {
+			startWatching(next.ino);
+		} catch {
+			watchLost = true;
+		}
+		updateDaemonHealth();
+		needsRedraw = true;
+		render();
+		resetWatchdog();
+	}, HEALTHY_BEAT_MS);
 
 	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); resetWatchdog(); }, 500);
 

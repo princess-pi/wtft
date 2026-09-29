@@ -84,7 +84,7 @@ contract.
   "spawned": {
     "schema": "wtft/spawn-tree@4",
     "descendants": 1,
-    "edges": [ { "parent": "…", "child": "…", "mechanism": "pr-review-lens",
+    "edges": [ { "parent": "…", "child": "…", "mechanism": "pr-review",
                  "ts": "2026-09-16T05:00:00Z", "label": "correctness", "depth": 1,
                  "resolved": true, "path": "/home/u/.claude/projects/-tmp-x/….jsonl",
                  "total": { "costUsd": 12.34, "inputTokens": 0, "outputTokens": 0,

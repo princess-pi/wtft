@@ -10,8 +10,9 @@
 
 A launcher-spawned session is a full `claude` started by a *launcher process* the parent invoked —
 `herdr agent start`, a `pr-review` lens, a wrapper script — rather than by a `claude` command the
-parent's own transcript contains. Today it contributes **zero** to the parent, for three reasons
-that are all properties of the transcripts and none of which a parser can fix:
+parent's own transcript contains. Unrecorded, it contributes **zero** to the parent, for three
+reasons that are all properties of the transcripts and none of which a parser can fix (the
+spawners that record today, and those that still do not, are in § Not in this change):
 
 1. The shell runs the launcher, not `claude`. `commandSpawnsAgent` does fire — it matches
    `claude` anywhere in the command, including the `--kind claude` flag — but the child did not
@@ -40,7 +41,7 @@ afterwards, when it is impossible.
 Append-only. One JSON object per line. No rewriting, no compaction, no deletion by wtft.
 
 ```json
-{"schema":"wtft/spawn@1","ts":"2026-09-16T05:00:00Z","parent":"<uuid>","child":"<uuid>","mechanism":"pr-review-lens","cwd":"/tmp/pr-review-abc","label":"correctness","model":"opus"}
+{"schema":"wtft/spawn@1","ts":"2026-09-16T05:00:00Z","parent":"<uuid>","child":"<uuid>","mechanism":"pr-review","cwd":"/tmp/pr-review-abc","label":"correctness","model":"opus"}
 ```
 
 | Field | Required | Meaning |
@@ -49,7 +50,7 @@ Append-only. One JSON object per line. No rewriting, no compaction, no deletion 
 | `ts` | yes | ISO-8601 UTC, when the edge was recorded — **not** when the child finished. `wtft spawn-record` fills it from the clock; there is deliberately no `--ts`, because a spawner-supplied timestamp is a way for the ledger to disagree with itself and buys nothing. Validated for ISO-8601 shape on write. |
 | `parent` | yes | Session UUID of the spawning session. |
 | `child` | yes | Session UUID of the spawned session. |
-| `mechanism` | yes | Who made the edge: `pr-review-lens`, `herdr-agent-start`, … Free text, for the report. |
+| `mechanism` | yes | Who made the edge: `pr-review`, `herdr`, … Free text, for the report. |
 | `cwd` | no | The child's working directory, when the spawner knows it. Never used to *find* the child. |
 | `label` | no | A human name for the child (`correctness`, `agent/824`). |
 | `model` | no | The model the child was started with. |
@@ -226,10 +227,10 @@ already trust.
 "spawned": {
   "schema": "wtft/spawn-tree@4",
   "descendants": 3,
-  "edges": [{"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…",
+  "edges": [{"parent":"…","child":"…","mechanism":"pr-review","ts":"…",
              "label":"correctness","model":"opus","cwd":"/tmp/pr-review-abc","depth":1,
              "resolved":true,"path":"/home/…/<child>.jsonl","total":{…},"live":false},
-            {"parent":"…","child":"…","mechanism":"pr-review-lens","ts":"…","depth":1,
+            {"parent":"…","child":"…","mechanism":"pr-review","ts":"…","depth":1,
              "resolved":false,"path":null,"total":null,"skip":"not-found"}],
   "unattributed": [{"child":"…","mechanism":"…","ts":"…","label":"…","reason":"not-found"}],
   "depthCapped": 0,
@@ -266,18 +267,18 @@ session's, or one from a session already inside its total, spec-230), or when th
 ```
 SPAWNED    3 session(s) priced from 6 recorded edge(s) (#116) —
            NOT in TOTAL above, which is this session's own turns
-           pr-review-lens  correctness                     $12.34
-           pr-review-lens  reasoning                       $18.02
-           herdr-agent-start  agent/824                    $26.67
-           pr-review-lens  contract                    (not-found)
-           pr-review-lens  crossfile                (depth-capped)
-           herdr-agent-start  agent/831         (already-counted)
+           pr-review  correctness                         $12.34
+           pr-review  reasoning                           $18.02
+           herdr  agent/824                               $26.67
+           pr-review  contract                       (not-found)
+           pr-review  crossfile                     (depth-capped)
+           herdr  agent/831                         (already-counted)
            1 unattributed — cost unknown, deliberately not estimated
            1 edge(s) past the depth cap of 5, not walked
            1 unusable ledger line(s) skipped
            1 descendant(s) with untagged turns — $0.00 left out of their edge totals (#180)
-SPAWNED    subtotal                                        $57.03
-TREE       TOTAL + SPAWNED                                 $127.36
+SPAWNED    subtotal                                       $57.03
+TREE       TOTAL + SPAWNED                               $127.36
 ```
 
 **Every edge gets a row, skipped ones included** — the headline's two numbers agree with the rows
@@ -366,8 +367,13 @@ otherwise (spec-230).
 
 ## Not in this change
 
-- **The spawner side.** `pr-review` and `agent-new` calling `wtft spawn-record` lives in
-  `princess-pi-tools`, and this change ships first so there is something to call.
+- **The spawner side.** Lives in `princess-pi-tools`, and records only when the parent is a
+  Claude Code session (`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH: the `~/bin/claude`
+  PATH shim writes mechanism `shell` and `agent-new` writes `herdr` or `tmux`
+  (https://github.com/duppypro/princess-pi-tools/pull/1155); `pr-review` writes `pr-review` for
+  each lens, cluster and verify child (https://github.com/duppypro/princess-pi-tools/pull/1154).
+  Still unrecorded: a raw `herdr agent start` outside `agent-new`, Pi and Codex children, and any
+  child whose parent is not a Claude Code session.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
   attribution rework in #107 / #14 / #94 first.
 - **Listing an unrecorded child.** The Closer's second clause — #128, since landed

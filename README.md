@@ -100,8 +100,8 @@ The suite is where the real assertions live:
 **Job `pricing-bump` — gating, pull requests only.** Runs
 `.github/scripts/pricing-bump-check.sh` against the merge commit's first parent. When
 `docs/manifests/wtft-pricing.json` changes anything but its `note` text, the
-`WTFT_TAGGER_VERSION` line in `extensions/lib/wtft-tagger-version.ts` must change
-too: a tag line carries the cost priced when it was parsed, and only a version
+value of `WTFT_TAGGER_VERSION` in `extensions/lib/wtft-tagger-version.ts` must
+change too: a tag line carries the cost priced when it was parsed, and only a version
 bump reparses it. The script exits 0 when prices are unchanged or bumped, 1 on a
 change with no bump, and 2 when it could not run (a usage error, no base ref, or
 a manifest or version line it could not read). Locally:

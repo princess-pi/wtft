@@ -12,6 +12,7 @@ set -euo pipefail
 
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/wtft-daemon-suite.XXXXXX")"
 export TMPDIR
+export XDG_STATE_HOME="$TMPDIR/state"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

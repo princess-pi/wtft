@@ -438,7 +438,9 @@ function reapAndWarn() {
       const reapLog = reapLogPath();
       fs.mkdirSync(path.dirname(reapLog), { recursive: true });
       fs.appendFileSync(reapLog, warnings.join("\n") + "\n");
-    } catch (_) {}
+    } catch (e) {
+      process.stderr.write(`wtft-daemon: could not write the reap log: ${(e as Error).message}\n`);
+    }
   }
 }
 

@@ -90,7 +90,8 @@ blank lines, is also still an empty session. `parseSessionFile` itself is unchan
 the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pricing, and the
 `claude -p` transcripts a parse folds (inside the walk too) keep treating a bad line as a bad
 line. So a root subagent transcript, or a folded `claude -p` transcript, with no parseable line
-still reads as $0, which is accepted: an unreadable file is skipped like a non-match.
+still reads as $0, with no sign in the report. This silent $0 is a known, accepted gap
+(Duppy, 2026-09-28): no such file has been seen, so none gets code until one is.
 
 **`unrecorded` is left as it is.** Its rows still price a candidate's transcript alone, without
 the subagent transcripts an edge now adds, so a launcher child can read cheaper there than once

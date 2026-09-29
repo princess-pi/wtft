@@ -282,7 +282,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		}
 	}
 	if (interactions.length === 0) {
-		const sessionName = path.basename(finalSessionPath).replace(/.jsonl$/, "");
+		const sessionName = path.basename(finalSessionPath).replace(/\.jsonl$/, "");
 		// Ceiling 0: tag wait already spent the time; one-shot state check.
 		const startup = await awaitDaemonUp(finalSessionPath, daemonChild, 0);
 		if (startup.state === "dead") {
@@ -361,13 +361,8 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		showTokenColumns: !opts.hideTokenColumns,
 	});
 
-	if (!outputLines) {
-		console.log(padStr + "No binned data found in session logs.");
-		process.exit(0);
-	}
-
 	console.log(padStr + `\x1b[90m${finalSessionPath}\x1b[0m`);
-	for (const line of outputLines) {
+	for (const line of outputLines!) {
 		console.log(padStr + line);
 	}
 

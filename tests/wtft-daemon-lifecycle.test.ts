@@ -5,7 +5,7 @@
  *   2. Takeover protocol — lost PID lease → exit within 2 beats, no unlink
  *   3. Spawn-twice — exactly one surviving daemon, and it owns the PID file
  *   4. Session deleted → daemon exits (#129 Bug A)
- *   5. Reap on spawn kills orphans + writes warnings (#130)
+ *   5. Reap on spawn kills orphans
  *   6. Version hygiene — old-version tag files removed at startup
  *   7. getTagPath — exact version preferred, else newest mtime
  *   8. Cache TTL derived from usage.cache_creation, not the model name

@@ -90,7 +90,7 @@ blank lines, is also still an empty session. `parseSessionFile` itself is unchan
 the daemon, the root's own parse, the root's subagent loads, the `unrecorded` pricing, and the
 `claude -p` transcripts a parse folds (inside the walk too) keep treating a bad line as a bad
 line. So a root subagent transcript, or a folded `claude -p` transcript, with no parseable line
-still reads as $0: #235.
+still reads as $0, which is accepted: an unreadable file is skipped like a non-match.
 
 **`unrecorded` is left as it is.** Its rows still price a candidate's transcript alone, without
 the subagent transcripts an edge now adds, so a launcher child can read cheaper there than once
@@ -123,7 +123,7 @@ functions of `wtft-parser.ts`.
 | Pass | Scope | Outcome |
 |---|---|---|
 | 1 | README, `CONTEXT.md`, manifest, `wtft.html`, twelve specs, host documents | Every claim this branch made stale was fixed. Older drift predates this branch. |
-| 2 | Prose changed by pass 1 | Found a code bug: a folded session reached later by a shallower edge kept the deeper depth. Fixed and tested (I12). The rest was wording, fixed. #235 widened to folded `claude -p` transcripts. |
+| 2 | Prose changed by pass 1 | Found a code bug: a folded session reached later by a shallower edge kept the deeper depth. Fixed and tested (I12). The rest was wording, fixed. |
 | 3 | Prose changed by pass 2 | Found a code bug: two parts of one descendant folding one session billed it twice. Fixed and tested (H10). The rest was wording, fixed. #237 filed for the same shape in the widget's SELF. |
 | 4 | Prose changed by pass 3 | Two contradictions in this spec and three partial summaries, all fixed. The rest are noted below. |
 

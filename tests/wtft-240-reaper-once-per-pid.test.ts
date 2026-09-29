@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
+import { reapLogPath } from "../extensions/lib/daemon-log.ts";
 
 isolateTmpdir("240-reaper");
 
@@ -55,10 +56,11 @@ try {
 		"fixture: the holder's tag is over the 1 MB warning size, and all heartbeats");
 
 	const started = Date.now();
+	const childEnv = { ...process.env, TMPDIR: leaseDir, HOME: home, XDG_STATE_HOME: path.join(home, ".local", "state"), WTFT_DAEMON_DEBUG: "1" };
 	let log = "";
 	const child = spawn(process.execPath, [DAEMON_BIN, "--session", session], {
 		stdio: ["ignore", "ignore", "pipe"],
-		env: { ...process.env, TMPDIR: leaseDir, HOME: home, WTFT_DAEMON_DEBUG: "1" },
+		env: childEnv,
 	});
 	daemonPid = child.pid ?? 0;
 	child.stderr!.on("data", d => { log += String(d); });
@@ -76,7 +78,7 @@ try {
 	const cpuMs = stat && tickMs > 0 ? (Number(fields[11]) + Number(fields[12])) * tickMs : Infinity;
 	check(cpuMs < 1000, `a per-session daemon starts on under 1 s of CPU beside ${LEASES} leases of one live pid (${cpuMs} ms of CPU, ${startedAt ? `${startedAt - started} ms wall` : "never reported starting"})`);
 
-	const reapLog = path.join(home, ".local", "state", "wtft", "reap.log");
+	const reapLog = reapLogPath(childEnv);
 	const lines = fs.existsSync(reapLog) ? fs.readFileSync(reapLog, "utf8").split("\n").filter(l => l.includes(`PID ${holder.pid}`)) : [];
 	check(lines.length === 1, `reap.log gains one line about that pid, not one per lease (got ${lines.length})`);
 	check(/tag file large/.test(lines[0] ?? "") && /heartbeats/.test(lines[0] ?? "") && /zombie/.test(lines[0] ?? ""),

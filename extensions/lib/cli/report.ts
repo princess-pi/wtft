@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { buildWtftLines, chartLimit, renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
 import { computeSpawnTree, type SpawnTree } from "../wtft-spawn-tree.js";
@@ -9,6 +8,7 @@ import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
 import { spawnWtftDaemon, isEmojiDisabled } from "../wtft-cli-shared.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
 import { EXIT_PROVISIONAL } from "./exit-codes.js";
+import { reapLogPath } from "../daemon-log.js";
 
 function collectUnpricedModels(interactions: Interaction[]): string[] {
 	const seen = new Set<string>();
@@ -42,9 +42,8 @@ function describeProvisionalRemedy(provisional: { reason: string | null }, tagPa
 		: "The daemon is still reading this session's subagents into its tag — run wtft again once they have stopped writing to read the settled total";
 }
 
-const WARN_LOG = path.join(os.homedir(), ".local", "state", "wtft", "reap.log");
-
 function showReapWarnings() {
+  const WARN_LOG = reapLogPath();
   try {
     if (!fs.existsSync(WARN_LOG)) return;
     const content = fs.readFileSync(WARN_LOG, "utf8").trim();

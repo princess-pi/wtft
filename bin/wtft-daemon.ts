@@ -11,7 +11,7 @@ import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extension
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import { classifyPid, holdsLease, isDaemonCmdline, isFixtureDaemon, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
-import { daemonStdio, daemonLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
+import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
@@ -295,8 +295,6 @@ function sessionWasEverParsed(sessionCmdlinePath: string): boolean {
 
 // ---
 
-const WARN_LOG_DIR = path.join(os.homedir(), ".local", "state", "wtft");
-const WARN_LOG = path.join(WARN_LOG_DIR, "reap.log");
 const TAG_SIZE_WARN = 1_000_000; // 1 MB — tag file suspiciously large
 const HB_RATIO_WARN = 0.9; // >90% of lines are heartbeats → malfunction
 const ZERO_INTERACTIONS_AGE = 3600000; // 1h with zero real interactions → zombie
@@ -437,9 +435,12 @@ function reapAndWarn() {
 
   if (warnings.length > 0) {
     try {
-      fs.mkdirSync(WARN_LOG_DIR, { recursive: true });
-      fs.appendFileSync(WARN_LOG, warnings.join("\n") + "\n");
-    } catch (_) {}
+      const reapLog = reapLogPath();
+      fs.mkdirSync(path.dirname(reapLog), { recursive: true, mode: 0o700 });
+      fs.appendFileSync(reapLog, warnings.join("\n") + "\n", { mode: 0o600 });
+    } catch (e) {
+      process.stderr.write(`wtft-daemon: could not write the reap log: ${(e as Error).message}\n`);
+    }
   }
 }
 

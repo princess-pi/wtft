@@ -103,7 +103,8 @@ grace windows answer `starting` rather than alive, for every reader; spec-281 th
   other row prints `?`, and so does a row where `decideHealth`'s liveness disagrees with `--list`'s
   RUNNING/DEAD. Since spec-297 both are `holdsLease(classifyPid)`, so they disagree only when the
   lease or its process changes between `--list`'s read and `readHealthFacts`' own. A harness-held
-  lease line names the session that harness's `.served` hand-off lists for the lease.
+  lease line names the session that harness's `.served` hand-off lists for the lease, and
+  `(hash: …)` when the hand-off is absent or does not list it.
 
 ## 3. Closer
 

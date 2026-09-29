@@ -40,14 +40,11 @@ for (const [label, opts] of [["worktrees scope", { scope: "worktrees", windowMs:
 	resetHarnessRegistry();
 	resetCwdCache();
 	const found = discoverSessions("claude-code", path.join(app, "src"), opts).map((c: any) => c.name);
-	check(found.includes("root.jsonl"), `${label}: from a subdirectory, the repo root's session is found (got ${found.join(", ")})`);
-	check(found.includes("in-tree.jsonl"), `${label}: an in-tree worktree's session is found`);
-	check(!found.includes("other.jsonl"), `${label}: from a subdirectory, a sibling repo whose name extends this one's is not`);
+	check(found.sort().join(", ") === "in-tree.jsonl, root.jsonl", `${label}: from a subdirectory, the root's and the in-tree worktree's sessions, and no sibling repo's (got ${found.join(", ")})`);
 
 	resetCwdCache();
 	const fromRoot = discoverSessions("claude-code", app, opts).map((c: any) => c.name);
-	check(fromRoot.includes("root.jsonl") && fromRoot.includes("in-tree.jsonl"), `${label}: from the root, its own and the in-tree worktree's sessions are found (got ${fromRoot.join(", ")})`);
-	check(!fromRoot.includes("other.jsonl"), `${label}: a sibling repo whose name extends this one's is not`);
+	check(fromRoot.sort().join(", ") === "in-tree.jsonl, root.jsonl", `${label}: from the root, its own and the in-tree worktree's sessions, and no sibling repo's (got ${fromRoot.join(", ")})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

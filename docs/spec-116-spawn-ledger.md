@@ -421,8 +421,8 @@ failure and the Pi widget's prose — and each is named in the table. The suite 
 assertions in this pass, and to 112 after PR review round 1.
 
 **Filed rather than fixed** — the file-level sweep surfaced substantial drift that predates this
-branch and is not about the spawn ledger: #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice), #126 (the
-manifest's CLI-vs-Pi divergences) and #127 (two exit-code paths that report success on failure).
+branch and is not about the spawn ledger: #125 (`CONTEXT.md` `_Avoid_` lists vs settled practice) and #126 (the
+manifest's CLI-vs-Pi divergences).
 Fixing them here would have buried a 600-line change in a 2,000-line one.
 
 ## PR review round 1 (2026-09-16)

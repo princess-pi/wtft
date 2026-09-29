@@ -260,7 +260,7 @@ a session that has only ever lived in a sibling worktree has never occupied the 
    in-tree layout (`<mainSlug>--claude-worktrees-<branch>`) from anywhere in the main clone, and
    not a sibling repo whose name merely extends the root's. It no longer matches a session started
    in a subdirectory of the root (`/repo/packages/foo` from `/repo`), which the git path never did
-   either (#174). It cannot catch the out-of-tree
+   either. It cannot catch the out-of-tree
    layout (`…-worktrees-<repo>-<branch>` is not prefixed by the main slug) or the reverse
    direction; that is a known limit of the fallback, called out in #145 itself. Gated on step 1, so `~` still does not fan out even when git is missing. "Answered
    with nothing" folds into the fallback because a real repo always reports at least itself, so
@@ -540,7 +540,7 @@ with `bun run build` before running the suites, since they import the bundle, an
 The union invariant is the thing to re-check on any later edit: **no arm of this rule may ever be
 turned into a replacement** — with two exceptions: Amendment 1, where an arm was deleted outright
 after it was shown to add nothing, and the no-git fallback prefix of step 3, narrowed to in-tree
-worktrees so it stops listing sibling repos (#174).
+worktrees so it stops listing sibling repos.
 
 **`bun run typecheck` is not a gate this branch can meet, and the reason is not this branch.**
 An earlier draft of this section demanded a clean typecheck. `tsc --noEmit` is red at the branch

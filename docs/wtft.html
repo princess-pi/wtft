@@ -242,14 +242,14 @@
 
     <h3 id="config">Settings Persistence (Cross-Harness Config)</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
-        <p>WTFT settings are persisted in harness-agnostic JSON config files via <code>@princess-pi/libs/config</code>, so they survive across Pi sessions, Claude Code invocations, and machine restarts. The one <code>.jsonl</code> layer is a <code>wtft-settings</code> entry in a session log, which only <code>--watch</code> reads.</p>
+        <p>WTFT settings are persisted in harness-agnostic JSON config files via <code>@princess-pi/libs/config</code>, so they survive across Pi sessions, Claude Code invocations, and machine restarts. The one <code>.jsonl</code> layer is a session log's <code>wtft-settings</code> and <code>emoji-settings</code> entries, which only <code>--watch</code> reads.</p>
 
         <h4 style="color: var(--accent-yellow);">Config Hierarchy (lowest → highest precedence)</h4>
         <ol>
             <li><strong>Code defaults</strong> — hardcoded (interval=1h, limit=10 in the Pi widget and 17 in the CLI, mode=cumulative, timezone=America/Los_Angeles in the Pi widget and the system's local zone in the CLI, disabledEmoji=false).</li>
             <li><strong>User-global config:</strong> <code>~/.config/wtft/config.json</code> (<code>$XDG_CONFIG_HOME/wtft</code>)</li>
             <li><strong>Project-local config:</strong> <code>.wtft/config.json</code> (overrides global keys)</li>
-            <li><strong>Session log</strong>, <code>--watch</code> only: a <code>wtft-settings</code> entry in the session <code>.jsonl</code> overrides the config's interval, limit, mode and timezone.</li>
+            <li><strong>Session log</strong>, <code>--watch</code> only: a <code>wtft-settings</code> entry in the session <code>.jsonl</code> overrides the config's interval, limit, mode and timezone, and an <code>emoji-settings</code> entry its disabledEmoji.</li>
             <li><strong>CLI flags</strong> — highest precedence, applied by caller after reading config.</li>
         </ol>
         <p>Each level overrides only the keys it defines; missing keys inherit from the layer below. When settings are changed via <code>/wtft</code> in Pi, they are written to the project-local config if it already exists, otherwise to the user-global config.</p>

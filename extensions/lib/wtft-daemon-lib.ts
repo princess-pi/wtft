@@ -46,6 +46,7 @@ export interface WatchSettings {
 	hasMode?: boolean;
 	hasTimezone?: boolean;
 	disabledEmoji?: boolean;
+	defaultDisabledEmoji?: boolean;
 }
 
 
@@ -814,7 +815,7 @@ export async function watchTagFile(
 		}
 	});
 
-	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : false;
+	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : (settings.defaultDisabledEmoji ?? false);
 	let seed = seedClassifiedTagFile(tagPath);
 	let allInteractions: Interaction[] = seed.interactions;
 	let lastReadOffset = seed.offset;

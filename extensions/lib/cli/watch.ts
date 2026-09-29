@@ -1,13 +1,24 @@
 import * as path from "node:path";
 import { readConfig } from "@princess-pi/libs/config";
-import { watchTagFile, getCurrentVersionTagPath, chartLimit } from "../wtft-shared.js";
+import { watchTagFile, getCurrentVersionTagPath, chartLimit, type WatchSettings } from "../wtft-shared.js";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
 import { spawnWtftDaemon } from "../wtft-cli-shared.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
 
-function configLimit(): number | undefined {
-	const limit = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR).limit;
-	return typeof limit === "number" ? limit : undefined;
+/** The render settings `--watch` starts from: each flag given, else the wtft config's value, else the code default. */
+export function watchSettings(opts: WtftCliOptions, config: Record<string, unknown>): Pick<WatchSettings, "interval" | "limit" | "mode" | "timezone" | "hasInterval" | "hasLimit" | "hasMode" | "hasTimezone" | "disabledEmoji" | "defaultDisabledEmoji"> {
+	return {
+		interval: opts.hasInterval ? opts.interval : (typeof config.interval === "string" ? config.interval : "1h"),
+		limit: chartLimit(opts, typeof config.limit === "number" ? config.limit : undefined),
+		mode: opts.hasMode ? opts.mode : (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : "cumulative"),
+		timezone: opts.hasTimezone ? opts.timezone : (typeof config.timezone === "string" ? config.timezone : undefined),
+		hasInterval: opts.hasInterval,
+		hasLimit: opts.hasLimit,
+		hasMode: opts.hasMode,
+		hasTimezone: opts.hasTimezone,
+		disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
+		defaultDisabledEmoji: typeof config.disabledEmoji === "boolean" ? config.disabledEmoji : false,
+	};
 }
 
 /** `--watch`: spawn the daemon and render its tag until `q`. */
@@ -24,20 +35,12 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 	// No pre-sleep: watchTagFile waits on daemon state; reader catches up from lastReadOffset.
 	await watchTagFile(finalSessionPath, tagPath, {
 		daemonChild,
-		interval: opts.hasInterval ? opts.interval : "1h",
-		limit: chartLimit(opts, configLimit()),
-		mode: opts.hasMode ? opts.mode : "cumulative",
-		timezone: opts.hasTimezone ? opts.timezone : undefined,
+		...watchSettings(opts, readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR)),
 		unit,
 		showCostColumns: !opts.hideCostColumns,
 		showTokenColumns: !opts.hideTokenColumns,
 		daemonPath,
 		pad: opts.pad,
-		hasInterval: opts.hasInterval,
-		hasLimit: opts.hasLimit,
-		hasMode: opts.hasMode,
-		hasTimezone: opts.hasTimezone,
-		disabledEmoji: typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : undefined,
 	});
 	return; // watchTagFile never returns until SIGINT
 }

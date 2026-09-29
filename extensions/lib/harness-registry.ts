@@ -250,6 +250,15 @@ export function handOff(reg: Registry, keep: (record: SessionRecord) => boolean,
 	return lines;
 }
 
+/** The session each lease named in the hand-offs is for, keyed by `leaseName(session)`. */
+export function sessionsByLease(handOffs: string[], leaseName: (session: string) => string): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const text of handOffs) {
+		for (const rec of parseHandOff(text, "").records) out.set(leaseName(rec.path), rec.path);
+	}
+	return out;
+}
+
 /** Reads a hand-off. A line that is not a JSON object counts as unreadable; a
  *  record whose path is not absolute, does not resolve under `root`, or whose
  *  kind is unknown is skipped. Paths come back resolved. */

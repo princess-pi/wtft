@@ -458,8 +458,6 @@ a consequence named in its issue:
 - **#92** — the daemon-management commands have no machine-readable mode;
   `--json` does not reach them, and this spec documents that rather than
   half-implementing it.
-- **#93** — a sweep of `wtft-renderer.ts` docstrings that bind to nothing or to
-  the wrong symbol, describe retired behaviour, or keep dead fields alive.
 
 ---
 

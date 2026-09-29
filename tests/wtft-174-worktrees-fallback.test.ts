@@ -42,6 +42,7 @@ for (const [label, opts] of [["worktrees scope", { scope: "worktrees", windowMs:
 	const found = discoverSessions("claude-code", path.join(app, "src"), opts).map((c: any) => c.name);
 	check(found.includes("root.jsonl"), `${label}: from a subdirectory, the repo root's session is found (got ${found.join(", ")})`);
 	check(found.includes("in-tree.jsonl"), `${label}: an in-tree worktree's session is found`);
+	check(!found.includes("other.jsonl"), `${label}: from a subdirectory, a sibling repo whose name extends this one's is not`);
 
 	resetCwdCache();
 	const fromRoot = discoverSessions("claude-code", app, opts).map((c: any) => c.name);

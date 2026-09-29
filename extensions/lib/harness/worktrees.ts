@@ -1,18 +1,7 @@
 /**
  * @package princess-pi-tools
  * @module harness/worktrees
- * @description Fan a target directory out over every checkout of its git repo (#145).
- *
- * Discovery buckets transcripts by the cwd they were written from. Under the
- * worktree flow that is now standard here, one repo has many cwds — this clone
- * had 7 checkouts the day this was written — so "sessions for this directory"
- * answers a much narrower question than anyone asking it means.
- *
- * The fan-out is a *set of directories*, not a repo identity: identity is what
- * #164's first proposal tried and could not have (you cannot run git inside a
- * directory that no longer exists). This module answers only for checkouts that
- * currently exist; sessions stranded in removed ones are #164's problem, solved
- * from the transcript's own relocation history instead.
+ * @description Fan a target directory out over every checkout of its git repo.
  */
 
 import * as fs from "node:fs";
@@ -89,13 +78,7 @@ export interface CwdFanOut {
 	 * Only meaningful together with `inRepo`.
 	 */
 	usedFallback: boolean;
-	/**
-	 * Slug prefixes to accept when `usedFallback`. Catches the in-tree layout
-	 * (`<mainSlug>--claude-worktrees-<branch>`) from the main clone. It cannot
-	 * catch the out-of-tree layout (`…-worktrees-<repo>-<branch>` is not
-	 * prefixed by the main slug) nor the reverse direction — a known limit of
-	 * the fallback, which is why git is the primary path.
-	 */
+	/** Slug prefixes to accept when `usedFallback`. */
 	slugPrefixes: string[];
 }
 
@@ -122,9 +105,8 @@ export function currentBranch(dir: string): string | null {
 /**
  * Every checkout of `repoRoot`'s repo, mapped to the branch it has checked
  * out — the `branch` field `git worktree list --porcelain` prints per entry,
- * stripped of its `refs/heads/` prefix. A checkout in detached HEAD carries no
- * `branch` line at all and is simply absent from the map, same as a bare
- * `worktree` entry `listWorktreeDirs` already treats as "answer unavailable".
+ * stripped of its `refs/heads/` prefix. A checkout in detached HEAD is absent
+ * from the map.
  */
 export function worktreeBranches(repoRoot: string): Map<string, string> {
 	const map = new Map<string, string>();

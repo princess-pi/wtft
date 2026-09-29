@@ -15,13 +15,14 @@ function check(cond: boolean, msg: string) {
 }
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-cost.ts"), "utf8");
-const pairs = [...source.matchAll(/effectiveBefore:\s*([A-Z0-9_]+|\d+)\s*\/\*\s*(\S+)\s*\*\//g)];
-check(pairs.length === source.split("effectiveBefore:").length - 2,
-	`every effectiveBefore window in wtft-cost.ts carries an ISO comment (${pairs.length} found)`);
+const windows = [...source.matchAll(/effectiveBefore:\s*(?=[A-Z0-9])/g)].length;
+const pairs = [...source.matchAll(/effectiveBefore:\s*([A-Z0-9_]+|\d+)\s*\/\*\s*(\S+Z)\s*\*\//g)];
+check(windows > 0 && pairs.length === windows,
+	`every one of the ${windows} effectiveBefore windows in wtft-cost.ts carries a UTC ISO comment (${pairs.length} do)`);
 for (const [, expr, iso] of pairs) {
 	const epoch = /^\d+$/.test(expr) ? Number(expr) : (cost as Record<string, unknown>)[expr];
 	check(typeof epoch === "number" && epoch === Date.parse(iso),
-		`${expr} = ${typeof epoch === "number" ? new Date(epoch).toISOString() : "not an exported number"}, comment says ${iso}`);
+		`${expr} = ${typeof epoch === "number" ? `${epoch} (${new Date(epoch).toISOString()})` : "not an exported number"}, comment says ${iso}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

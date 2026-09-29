@@ -103,7 +103,8 @@ The suite is where the real assertions live:
 `WTFT_TAGGER_VERSION` line in `extensions/lib/wtft-tagger-version.ts` must change
 too: a tag line carries the cost priced when it was parsed, and only a version
 bump reparses it. The script exits 0 when prices are unchanged or bumped, 1 on a
-change with no bump, and 2 when the base ref is missing. Locally:
+change with no bump, and 2 when it could not run (no base ref, or a manifest it
+could not read). Locally:
 `.github/scripts/pricing-bump-check.sh origin/main`.
 
 **Job `stock-node-registry` is disabled** (`if: false`,

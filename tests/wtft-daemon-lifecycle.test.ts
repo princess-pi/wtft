@@ -46,6 +46,7 @@ import {
 // process is dead, so on a shared /tmp this suite is racing every other daemon
 // on the host — and its own daemons are reaching theirs.
 isolateTmpdir("lifecycle");
+process.env.XDG_STATE_HOME = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-lifecycle-state-")));
 
 const DAEMON_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft-daemon.mjs");
 

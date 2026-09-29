@@ -42,9 +42,8 @@ function describeProvisionalRemedy(provisional: { reason: string | null }, tagPa
 		: "The daemon is still reading this session's subagents into its tag — run wtft again once they have stopped writing to read the settled total";
 }
 
-const WARN_LOG = reapLogPath();
-
 function showReapWarnings() {
+  const WARN_LOG = reapLogPath();
   try {
     if (!fs.existsSync(WARN_LOG)) return;
     const content = fs.readFileSync(WARN_LOG, "utf8").trim();

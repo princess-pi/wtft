@@ -97,6 +97,15 @@ The suite is where the real assertions live:
 - `pack-and-smoke` — `npm pack`, install the tarball, run it on plain node with
   bun stripped from PATH.
 
+**Job `pricing-bump` — gating, pull requests only.** Runs
+`.github/scripts/pricing-bump-check.sh` against the PR's base branch. When
+`docs/manifests/wtft-pricing.json` changes a price (its `note` text aside), the
+`WTFT_TAGGER_VERSION` line in `extensions/lib/wtft-tagger-version.ts` must change
+too: a tag line carries the cost priced when it was parsed, and only a version
+bump reparses it. The script exits 0 when prices are unchanged or bumped, 1 on a
+change with no bump, and 2 when the base ref is missing. Locally:
+`.github/scripts/pricing-bump-check.sh origin/main`.
+
 **Job `stock-node-registry` is disabled** (`if: false`,
 [#77](https://github.com/princess-pi/wtft/issues/77), Duppy, 2026-09-18): it
 does not run on any push. An earlier cut ran it as a *known-red* job — the one

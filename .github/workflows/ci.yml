@@ -165,6 +165,18 @@ jobs:
       - name: Daemon shell suite
         run: bash tests/wtft-daemon.test.sh
 
+  pricing-bump:
+    name: a price change bumps WTFT_TAGGER_VERSION
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Compare prices and tagger version against the base branch
+        run: .github/scripts/pricing-bump-check.sh "origin/${{ github.base_ref }}"
+
   stock-node-registry:
     name: registry channel on stock node
     runs-on: ubuntu-latest

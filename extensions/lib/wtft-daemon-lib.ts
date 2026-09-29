@@ -383,6 +383,16 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 	}
 }
 
+/** The tag file a watch on `watchedPath` (inode `watchedIno`) should move to: the same path
+ *  recreated, or the session's current tag file when the watched one is gone. Null when the
+ *  watched file is still in place or nothing has replaced it yet. */
+export function replacedTagFile(watchedPath: string, watchedIno: number, sessionPath: string): { path: string; ino: number } | null {
+	const candidate = fs.existsSync(watchedPath) ? watchedPath : getCurrentVersionTagPath(sessionPath);
+	let ino: number;
+	try { ino = fs.statSync(candidate).ino; } catch { return null; }
+	return candidate === watchedPath && ino === watchedIno ? null : { path: candidate, ino };
+}
+
 export function seedClassifiedTagFile(tagPath: string): { interactions: Interaction[]; offset: number; read: boolean } {
 	let buf: Buffer;
 	try {
@@ -770,6 +780,7 @@ export async function watchTagFile(
 
 	const exitWatch = () => {
 		if (watcher) watcher.close();
+		if (rearmTimer) clearInterval(rearmTimer);
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
 		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
@@ -940,8 +951,11 @@ export async function watchTagFile(
 	});
 
 	let watcher: fs.FSWatcher | null = null;
+	let watchedIno = 0;
+	let rearmTimer: ReturnType<typeof setInterval> | null = null;
 
 	const startWatching = () => {
+		try { watchedIno = fs.statSync(tagPath).ino; } catch { watchedIno = 0; }
 		watcher = fs.watch(tagPath, (eventType) => {
 			if (eventType !== "change") return;
 
@@ -1061,6 +1075,21 @@ export async function watchTagFile(
 	render();
 
 	startWatching();
+	rearmTimer = setInterval(() => {
+		const next = replacedTagFile(tagPath, watchedIno, sessionPath);
+		if (!next) return;
+		if (watcher) watcher.close();
+		tagPath = next.path;
+		seed = seedClassifiedTagFile(tagPath);
+		allInteractions = seed.interactions;
+		lastReadOffset = seed.offset;
+		prefixSentinel = readPrefixSentinel(tagPath, lastReadOffset);
+		startWatching();
+		updateDaemonHealth();
+		needsRedraw = true;
+		render();
+		resetWatchdog();
+	}, HEALTHY_BEAT_MS);
 
 	setTimeout(() => { updateDaemonHealth(); needsRedraw = true; render(); resetWatchdog(); }, 500);
 

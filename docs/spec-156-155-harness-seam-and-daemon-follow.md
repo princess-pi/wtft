@@ -276,8 +276,9 @@ transcript carries); anything else keeps the pre-#155 full-path key. See
 ## Change 3 — A moved daemon's tag file stays reachable
 
 The daemon keeps writing to the tag path it opened at startup. That is what lets an attached
-`--watch` survive: `fs.watch` is bound once to a fixed path in `watchTagFile` and never
-re-resolves.
+`--watch` survive: `watchTagFile` keeps its `fs.watch` on that path, and moves it only when the
+file there is replaced (a new inode at the same path, or the session's current tag file once the
+watched one is gone), checked every 1334 ms by `replacedTagFile`.
 
 But a *new* `wtft` invoked from the new directory computes a tag path in the new dir and finds
 nothing. So `getTagPath()` gains a cross-dir fallback, resolved in this order:

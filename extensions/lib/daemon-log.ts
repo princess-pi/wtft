@@ -11,9 +11,16 @@ import * as path from "node:path";
 
 export const DAEMON_LOG_MAX_BYTES = 1_000_000;
 
+function wtftStateDir(env: NodeJS.ProcessEnv): string {
+	return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "wtft");
+}
+
 export function daemonLogPath(env: NodeJS.ProcessEnv = process.env): string {
-	const state = env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-	return path.join(state, "wtft", "daemon.log");
+	return path.join(wtftStateDir(env), "daemon.log");
+}
+
+export function reapLogPath(env: NodeJS.ProcessEnv = process.env): string {
+	return path.join(wtftStateDir(env), "reap.log");
 }
 
 const STALE_LOCK_MS = 60_000;

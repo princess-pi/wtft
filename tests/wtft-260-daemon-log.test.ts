@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
-import { daemonLogPath, daemonStdio, rotateDaemonLog } from "../extensions/lib/daemon-log.ts";
+import { daemonLogPath, daemonStdio, reapLogPath, rotateDaemonLog } from "../extensions/lib/daemon-log.ts";
 import { spawnWtftDaemon } from "../extensions/lib/wtft-cli-shared.ts";
 import { restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
 import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
@@ -110,6 +110,13 @@ describe("daemonLogPath", () => {
 	it("is under XDG_STATE_HOME, else ~/.local/state", () => {
 		assert.strictEqual(daemonLogPath({ XDG_STATE_HOME: "/s" }), path.join("/s", "wtft", "daemon.log"));
 		assert.strictEqual(daemonLogPath({}), path.join(os.homedir(), ".local", "state", "wtft", "daemon.log"));
+	});
+});
+
+describe("reapLogPath", () => {
+	it("is under XDG_STATE_HOME, else ~/.local/state", () => {
+		assert.strictEqual(reapLogPath({ XDG_STATE_HOME: "/s" }), path.join("/s", "wtft", "reap.log"));
+		assert.strictEqual(reapLogPath({}), path.join(os.homedir(), ".local", "state", "wtft", "reap.log"));
 	});
 });
 

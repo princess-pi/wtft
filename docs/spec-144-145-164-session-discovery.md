@@ -254,12 +254,13 @@ a session that has only ever lived in a sibling worktree has never occupied the 
    worktree, which is what "and vice versa" in the acceptance criteria requires. The subprocess
    sits on the interactive path, so it is bounded at **3 s** and its stderr is discarded; any
    breach of that bound is a fallback, not a hang.
-3. Git absent, erroring, timing out, or answering with no `worktree` lines at all: fall back to
-   **slug prefix matching** — `slug.startsWith(targetSlug + "-")` for either encoding. This
-   catches the in-tree layout (`<mainSlug>--claude-worktrees-<branch>`) from the main clone only.
-   It cannot catch the out-of-tree layout (`…-worktrees-<repo>-<branch>` is not prefixed by the
-   main slug) or the reverse direction; that is a known limit of the fallback, called out in #145
-   itself. Gated on step 1, so `~` still does not fan out even when git is missing. "Answered
+3. Git absent, erroring, timing out, or answering with no `worktree` lines at all: the targets
+   are the cwd and the repo root step 1 found, plus **slug prefix matching** —
+   `slug.startsWith(slug(<root>/.claude/worktrees) + "-")` for either encoding. This catches the
+   in-tree layout (`<mainSlug>--claude-worktrees-<branch>`) from anywhere in the main clone, and
+   not a sibling repo whose name merely extends the root's. It cannot catch the out-of-tree
+   layout (`…-worktrees-<repo>-<branch>` is not prefixed by the main slug) or the reverse
+   direction; that is a known limit of the fallback, called out in #145 itself. Gated on step 1, so `~` still does not fan out even when git is missing. "Answered
    with nothing" folds into the fallback because a real repo always reports at least itself, so
    an empty list can only mean git did not really answer.
 

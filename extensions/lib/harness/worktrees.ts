@@ -193,9 +193,9 @@ export function fanOutCwd(target: string): CwdFanOut {
 	}
 
 	return {
-		dirs: [resolved],
+		dirs: [...new Set([resolved, root])],
 		inRepo: true,
 		usedFallback: true,
-		slugPrefixes: cwdSlugVariants(resolved).map(s => s + "-"),
+		slugPrefixes: cwdSlugVariants(path.join(root, ".claude", "worktrees")).map(s => s + "-"),
 	};
 }

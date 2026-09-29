@@ -36,5 +36,8 @@ check(fs.statSync(tag).ino !== ino, "fixture: the recreated file has a new inode
 const next = replacedTagFile(tag, ino, session);
 check(next !== null && next.path === tag && next.ino === fs.statSync(tag).ino, `a file recreated at the same path is followed (got ${JSON.stringify(next)})`);
 
+const same = fs.statSync(tag).ino;
+check(replacedTagFile(tag, same, session, true)?.path === tag, "after the watcher saw a rename, a file at the same path is followed even with the same inode");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

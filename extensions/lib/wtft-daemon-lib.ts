@@ -1071,6 +1071,8 @@ export async function watchTagFile(
 		await new Promise(r => setTimeout(r, 250));
 	}
 
+	let seededIno = 0;
+	try { seededIno = fs.statSync(tagPath).ino; } catch {}
 	seed = seedClassifiedTagFile(tagPath);
 	allInteractions = seed.interactions;
 	lastReadOffset = seed.offset;
@@ -1078,7 +1080,12 @@ export async function watchTagFile(
 	needsRedraw = true;
 	render();
 
-	startWatching(fs.statSync(tagPath).ino);
+	try {
+		startWatching(seededIno);
+	} catch {
+		watchLost = true;
+	}
+	if (seededIno === 0) watchLost = true;
 	rearmTimer = setInterval(() => {
 		const next = replacedTagFile(tagPath, watchedIno, sessionPath, watchLost);
 		if (!next) return;

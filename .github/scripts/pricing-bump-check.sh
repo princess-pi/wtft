@@ -15,8 +15,8 @@ if [ "$base_prices" = "$head_prices" ]; then
 	echo "Prices unchanged against $base."
 	exit 0
 fi
-base_stamp=$(git show "$base:$version" | grep 'WTFT_TAGGER_VERSION = ') || cannot "no WTFT_TAGGER_VERSION in $version at $base"
-head_stamp=$(grep 'WTFT_TAGGER_VERSION = ' "$version") || cannot "no WTFT_TAGGER_VERSION in $version"
+base_stamp=$(git show "$base:$version" | grep '^export const WTFT_TAGGER_VERSION = ') || cannot "no WTFT_TAGGER_VERSION in $version at $base"
+head_stamp=$(grep '^export const WTFT_TAGGER_VERSION = ' "$version") || cannot "no WTFT_TAGGER_VERSION in $version"
 if [ "$base_stamp" != "$head_stamp" ]; then
 	echo "Prices changed and WTFT_TAGGER_VERSION changed too."
 	exit 0

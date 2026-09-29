@@ -175,7 +175,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Compare prices and tagger version against the base branch
-        run: .github/scripts/pricing-bump-check.sh "${{ github.event.pull_request.base.sha }}"
+        run: .github/scripts/pricing-bump-check.sh HEAD^1
 
   stock-node-registry:
     name: registry channel on stock node

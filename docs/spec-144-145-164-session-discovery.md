@@ -13,7 +13,8 @@ subsumes the other.
 
 All three extend #156's **union** rule (`docs/spec-156-155-harness-seam-and-daemon-follow.md`):
 every change below only ever *adds* matches. Nothing the current selector finds may stop being
-found. That is the single invariant this branch is measured against.
+found. That is the invariant this branch is measured against; the two later exceptions are listed
+under the Definition of done.
 
 ---
 

@@ -22,13 +22,6 @@
 # until #29 publishes — so today the registry channel is back to having no
 # check anywhere, the same gap this paragraph originally described.
 #
-# WHY TWO JOBS. The Node Toolchain Standard defines two install channels with
-# different requirements, and a workflow that only exercises the one we use
-# would keep passing while the other stays broken — the same blind spot #29
-# was. So the second channel got a job of its own — `stock-node-registry`,
-# below, currently disabled (#77), so until it is re-enabled this workflow is
-# back to exercising only the git-URL channel.
-#
 # WHY THE KNOWN-RED JOB IS NOT `continue-on-error`. The first cut made it
 # unconditionally fail-open, which is a check that cannot fail — so a published
 # tarball that would not install would have been invisible for as long as #29

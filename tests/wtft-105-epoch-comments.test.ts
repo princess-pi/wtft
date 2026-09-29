@@ -15,7 +15,7 @@ function check(cond: boolean, msg: string) {
 }
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-cost.ts"), "utf8");
-const windows = [...source.matchAll(/effectiveBefore:[ \t]*(?!number\b)\S/g)].length;
+const windows = [...source.matchAll(/effectiveBefore:\s*(?!number\b)\S/g)].length;
 const pairs = [...source.matchAll(/effectiveBefore:\s*([A-Z0-9_]+|\d+)\s*\/\*\s*(\S+Z)\s*\*\//g)];
 check(windows > 0 && pairs.length === windows,
 	`every one of the ${windows} effectiveBefore windows in wtft-cost.ts carries a UTC ISO comment (${pairs.length} do)`);

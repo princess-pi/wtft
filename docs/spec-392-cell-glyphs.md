@@ -5,7 +5,7 @@ Module: `artifacts/assets/cell-glyphs.mjs`. Test: `tests/wtft-392-cell-glyphs.te
 A terminal draws `█`, the lower eighths and the box-drawing lines itself, filling the whole cell,
 so neighbouring cells meet. A browser draws them from the font, inside a line box taller than the
 glyph and an advance wider than it, so the chart pages show hairlines between `█` cells, a band
-between bar rows, and broken `─` and `┼` lines (#392).
+between bar rows, and broken `─` and `┼` lines.
 
 ## 1. `cellsHtml(text)`
 

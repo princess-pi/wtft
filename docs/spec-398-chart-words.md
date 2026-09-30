@@ -22,6 +22,8 @@ Module: `extensions/lib/wtft-chart.ts`. Seam: `buildWtftLines` with `words`, tes
 
 - A category borrows one of wtft's 14 slots by name, so the set stays 14 and `_cat` still names a slot.
 - The list sets the legend and stack order. A slot left out of the list keeps its colour, follows the listed ones, and has no legend entry. A `label` of null leaves a listed slot out of the legend too.
+- A list that is present is the whole legend, even when it is empty or every entry is dropped; the legend line is then blank.
+- An entry whose slot is not one of the 14, or repeats an earlier entry's slot, is dropped.
 
 ## Not covered
 

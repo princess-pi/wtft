@@ -209,7 +209,7 @@
     const swatch = document.createElement("span");
     swatch.className = "swatch";
     swatch.style.background = xtermRgb(CATEGORY_STYLE[item.slot].fg);
-    slot.append(swatch, `${item.slot} (the chart's legend says ${CATEGORY_STYLE[item.slot].label})`);
+    slot.append(swatch, `${item.slot} (wtft's legend says ${CATEGORY_STYLE[item.slot].label})`);
     tr.append(cell(item.label), slot, cell(`$${item.price.toFixed(2)}`), cell(`$${(item.price * 1.5).toFixed(2)}`));
     return tr;
   }));

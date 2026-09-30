@@ -70,6 +70,12 @@ describe("each word replaces one thing", () => {
 		assert.doesNotMatch(lines[2], /\$/);
 	});
 
+	it("a categories list that is present is the whole legend, even empty", () => {
+		assert.equal(stripAnsi(chart({ categories: [] })[1]), "");
+		assert.equal(stripAnsi(chart({ categories: [{ slot: "bogus" as never, label: "Bogus", fg: 1 }] })[1]), "");
+		assert.match(stripAnsi(chart({})[1]), /^█Ovrhd /);
+	});
+
 	it("a slot listed twice, or not one of the 14, changes nothing", () => {
 		const one = chart({ categories: [{ slot: "code", label: "Lattes", fg: 196 }] });
 		const messy = chart({ categories: [{ slot: "code", label: "Lattes", fg: 196 }, { slot: "code", label: "Again", fg: 46 }, { slot: "bogus" as never, label: "Bogus", fg: 1 }] });
@@ -77,9 +83,14 @@ describe("each word replaces one thing", () => {
 	});
 
 	it("currency with a dot keeps every scale label on its tick", () => {
-		const scale = (currency: string) => plain(chart({ currency }, { unit: "cost" }))[2];
-		const at = (line: string) => [...line.matchAll(/┼/g)].map((m) => m.index);
-		assert.deepEqual(at(scale("Rs.")), at(scale("$")));
+		for (const currency of ["$", "Rs."]) {
+			const lines = plain(chart({ currency }, { unit: "cost", limit: 40, padRowsTo: undefined }));
+			const decimalPoints = [...lines[2].matchAll(/\d(\.)\d/g)].map((m) => m.index + 1);
+			const divider = lines.find((l) => l.startsWith("── ") && l.includes("┼"))!;
+			const ticks = [...divider.matchAll(/┼/g)].map((m) => m.index);
+			assert.ok(decimalPoints.length >= 3, lines[2]);
+			assert.ok(decimalPoints.every((p) => ticks.includes(p)), `${currency}: ${decimalPoints} not all on ${ticks}`);
+		}
 	});
 
 	it("cacheMissLabel names the divider", () => {
@@ -153,8 +164,11 @@ describe("a caller's own words leave none of wtft's", () => {
 describe("the fair page's word counts", () => {
 	it("counts the units word at the tightest compaction too", async () => {
 		const { renderFair, FAIR_DEFAULTS } = await import("../artifacts/renderer/fair.ts");
-		const units = (columns: number) => renderFair({ ...FAIR_DEFAULTS, columns, unit: "tokens", now: Date.UTC(2026, 8, 13, 20, 30) }).substitutions.find((w) => w.id === "units")!.count;
+		const units = (columns: number, state: Partial<typeof FAIR_DEFAULTS> = {}) => renderFair({ ...FAIR_DEFAULTS, columns, unit: "tokens", now: Date.UTC(2026, 8, 13, 20, 30), ...state }).substitutions.find((w) => w.id === "units")!.count;
 		assert.ok(units(160) > 0);
 		assert.ok(units(70) > 0);
+		assert.ok(units(160, { interval: "25t" }) > 0);
+		assert.equal(units(160, { interval: "25t", showTokenColumns: false }), 0);
+		assert.equal(units(70, { interval: "25t", showTokenColumns: false }), 0);
 	});
 });

@@ -61,28 +61,22 @@ export function isPlaceholderRow(line: string): boolean {
 }
 
 export interface ChartCategory {
-	/** One of wtft's 14 slots, borrowed for the caller's own category. */
 	slot: Category;
-	/** The legend name; null leaves the slot out of the legend. */
 	label: string | null;
 	fg: number;
 	char?: string;
 }
 
-/** The chart's own words and switches. Every field left out is wtft's. */
+/** docs/spec-398-chart-words.md */
 export interface ChartWords {
-	/** Replaces the title's name and icon; the session suffix still follows. */
 	title?: string;
-	/** Legend and stack order; a slot left out keeps its colour, follows the listed ones and has no legend entry. */
 	categories?: ChartCategory[];
-	/** The token total's unit and its short form at the tightest compaction. */
 	tokenUnit?: { name: string; short: string };
 	currency?: string;
 	cacheMissLabel?: string;
 	key?: { earlier: string; thisBin: string; costOnly?: string };
 	tokenFooter?: boolean;
 	cacheLine?: boolean;
-	/** Template with {pct} and {cost}; false drops the warning. */
 	otherWarning?: string | false;
 }
 
@@ -159,7 +153,7 @@ export function renderWtftChart(input: {
 	const order: Category[] = [...listed.map((c) => c.slot), ...CATEGORY_ORDER.filter((c) => !listed.some((l) => l.slot === c))];
 	const styleOf = (cat: Category): { fg: number; char: string; label: string | null } => {
 		const own = listed.find((l) => l.slot === cat);
-		return own ? { fg: own.fg, char: own.char ?? "█", label: own.label } : listed.length > 0 ? { ...CATEGORY_STYLE[cat], label: null } : CATEGORY_STYLE[cat];
+		return own ? { fg: own.fg, char: own.char ?? "█", label: own.label } : words?.categories ? { ...CATEGORY_STYLE[cat], label: null } : CATEGORY_STYLE[cat];
 	};
 	const ALL_CATEGORIES = order;
 

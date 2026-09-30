@@ -2,6 +2,7 @@ import { buildWtftLines, CATEGORY_ORDER, CATEGORY_STYLE } from "../../extensions
 import type { ChartWords } from "../../extensions/lib/wtft-chart.ts";
 import { fairBooth, FAIR_ITEMS, FAIR_TZ, SOUVENIRS } from "./fair-session.ts";
 import { withTerminal } from "./report.ts";
+import { stripAnsi } from "./ansi.ts";
 
 export interface FairState {
 	columns: number;
@@ -49,7 +50,7 @@ interface Word {
 const WORDS: Word[] = [
 	{ id: "title", says: "💸 WTF Tokens? ...0042", becomes: "🍎 Booth 42", seen: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line) },
 	{ id: "legend", says: "█Ovrhd █Waste █Plan … all 14 categories, named for wtft", becomes: "█Lattes █Apples … the booth's own items", seen: (line, index) => index === 1 && line.includes("Ovrhd") },
-	{ id: "units", says: "2.2k tok", becomes: "2.2k pcs", seen: (line) => / tok(?= *\x1b)|\d[kM]?t(?= *\x1b)/.test(line) },
+	{ id: "units", says: "2.2k tok", becomes: "2.2k pcs", seen: (line) => / tok\b|\d[kM]?t\b/.test(stripAnsi(line).trim().replace(/^\S+/, "")) },
 	{ id: "key", says: "▃ earlier bins  ▇ this bin", becomes: "▃ sold earlier  ▇ sold this bin", seen: (line) => line.includes("earlier bins") },
 	{ id: "footer", says: "↑2.2k", becomes: "(no line)", seen: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) },
 	{ id: "cache-line", says: "CH: 0% cache hit (0 read / 2.2k total ops)", becomes: "(no line)", seen: (line) => /^\x1b\[90m {2}CH: /.test(line) },

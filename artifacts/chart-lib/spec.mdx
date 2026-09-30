@@ -21,7 +21,7 @@ One sale is one interaction. The chart reads these fields of the interaction, an
 | units sold | `inputTokens` | the chart's second measure is tokens: input, output, cache read, cache write and reasoning added. The booth sets only `inputTokens`, which also feeds the CH line's total ops |
 | item | `_cat` | one of the chart's 14 categories |
 | rush hour | `surgePriced` | one such sale marks its whole bin: the time label and number columns turn bold orange, and a `⚡` fills the gap when it is 2 wide. The bar keeps its category colours |
-| the power went out | `cacheMiss` | a `Cache Miss` line under that row |
+| the power went out | `cacheMiss` | a divider under that row: `Cache Miss` with no words, `Power cut` with the booth's |
 | the booth's name | `sessionNameSuffix` | an option of `buildWtftLines`, not a field of the sale. `.jsonl` is stripped and `...` plus the last 4 characters print. Optional |
 
 Six items ride on six of the chart's categories: lattes, apples, funnel cake, pie, corn dogs, lemonade. Souvenirs, when ticked, ride on `other`. The stack order is the order of `words.categories`, and the booth lists its items in the chart's order.

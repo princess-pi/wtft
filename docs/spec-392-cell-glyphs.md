@@ -30,6 +30,9 @@ the shades `░ ▒ ▓` included, stays text.
   paint their charts.
 - The spec browser (`artifacts/assets/browser.js`) passes the text of every code block except
   mermaid through `cellsHtml`, so the preset blocks in the spec pages paint too.
+- Each of those `pre` blocks has a whole-pixel font size and line height (`14px/19px` on the two
+  chart pages, `13px/17px` in the spec browser, whose `code` inherits it). A fractional line
+  height puts row edges between pixels, and the anti-aliased seam shows as a line between rows.
 
 ## 3. Verification
 

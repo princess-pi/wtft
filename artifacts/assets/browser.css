@@ -45,7 +45,8 @@ body { margin: 0; font-family: system-ui, sans-serif; }
 #toc .h3 { padding-left: .75rem; }
 #content .hint { opacity: .6; }
 #content img, #content iframe { max-width: 100%; }
-#content pre { overflow-x: auto; padding: .75rem; background: rgba(127,127,127,.1); border-radius: 6px; }
+#content pre { overflow-x: auto; padding: .75rem; font: 13px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: rgba(127,127,127,.1); border-radius: 6px; }
+#content pre code { font: inherit; }
 #content table { border-collapse: collapse; }
 #content th, #content td { border: 1px solid var(--border); padding: .3rem .6rem; }
 .mermaid { text-align: center; }

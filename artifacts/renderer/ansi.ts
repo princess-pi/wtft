@@ -1,3 +1,5 @@
+import { cellsHtml } from "../assets/cell-glyphs.mjs";
+
 const SGR = /\x1b\[([0-9;]*)m/g;
 const PAGE_BG = "#0e0e0e";
 
@@ -25,10 +27,6 @@ export function xtermRgb(n: number): string {
 	return `rgb(${step[Math.floor(index / 36)]},${step[Math.floor(index / 6) % 6]},${step[index % 6]})`;
 }
 
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 interface Style { bold: boolean; inverse: boolean; fg: string | null; bg: string | null }
 
 function applyCodes(style: Style, codes: number[]): Style {
@@ -53,14 +51,14 @@ function applyCodes(style: Style, codes: number[]): Style {
 	return next;
 }
 
-/** One terminal line's colour codes as HTML spans; text is escaped. Codes it does not know are dropped. */
+/** One terminal line's colour codes as HTML spans; text is escaped and block and box glyphs painted as cells. Codes it does not know are dropped. */
 export function ansiToHtml(text: string): string {
 	let html = "";
 	let style: Style = { bold: false, inverse: false, fg: null, bg: null };
 	let last = 0;
 	const emit = (chunk: string) => {
 		if (!chunk) return;
-		const body = escapeHtml(chunk);
+		const body = cellsHtml(chunk);
 		const fg = style.inverse ? (style.bg ?? PAGE_BG) : style.fg;
 		const bg = style.inverse ? (style.fg ?? BASIC[7]) : style.bg;
 		const css = [

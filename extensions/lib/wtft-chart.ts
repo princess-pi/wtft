@@ -155,7 +155,7 @@ export function renderWtftChart(input: {
 	let showTokens = input.showTokenColumns !== false;
 	const opts = { model: input.model, sessionNameSuffix: input.sessionNameSuffix };
 	const words = input.words;
-	const listed = words?.categories ?? [];
+	const listed = (words?.categories ?? []).filter((c, i, all) => c.slot in CATEGORY_STYLE && all.findIndex((o) => o.slot === c.slot) === i);
 	const order: Category[] = [...listed.map((c) => c.slot), ...CATEGORY_ORDER.filter((c) => !listed.some((l) => l.slot === c))];
 	const styleOf = (cat: Category): { fg: number; char: string; label: string | null } => {
 		const own = listed.find((l) => l.slot === cat);

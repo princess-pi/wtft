@@ -1,8 +1,8 @@
 # Chart library spec
 
-A library is only a library once someone has reused it. The chart has one user, wtft. This page is the second: a booth at the state fair, sold by item and by time of day, drawn by wtft's own `buildWtftLines` with nothing changed in the chart. The page runs it inside `withTerminal` (`artifacts/renderer/report.ts`), which stands in for the terminal's width and the clock, and in the browser for `process`. Where the chart won't do what the booth needs, that's a finding.
+A library is only a library once someone has reused it. The chart has one user, wtft. This page is the second: a booth at the state fair, sold by item and by time of day, drawn by wtft's own `buildWtftLines`, which takes the booth's words as options. The page runs it inside `withTerminal` (`artifacts/renderer/report.ts`), which stands in for the terminal's width and the clock, and in the browser for `process`. Where the chart won't do what the booth needs, that's a finding.
 
-The picker draws the booth twice, both times through `buildWtftLines`. The first picture is what the chart returns with no words. The second is the same call with the booth's own `words`: a title, a legend of the booth's items, units, a divider, a key, a footer and cache line switched off, and a warning. The table under the pictures lists each word the booth passes and how many lines of the first picture carried wtft's. The timeline strip (F2) stays in the second picture, because it stays on wtft's title line.
+The picker draws the booth twice, both times through `buildWtftLines`. The first picture is what the chart returns with no words. The second is the same call without the session name and with the booth's own `words`: a title, a legend of the booth's items, units, a divider, a key, a footer and cache line switched off, and a warning. The table under the pictures lists each word the booth passes and how many lines of the first picture carried wtft's. The timeline strip (F2) stays in the second picture, because it stays on wtft's title line.
 
 <iframe src="fair.html" title="State fair booth" style="width:100%;height:2000px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
 
@@ -69,7 +69,7 @@ Each row is a place the chart is about wtft. **Fix shape** is the `words` field 
 
 ## Decisions
 
-- **Q-A.** One chart with caller-supplied words and categories. wtft becomes its first caller, and its 14 categories are the default list. This settles F1, F3 to F7, F10 and F11 as caller words and the category list, and F8 and F9 as switches.
+- **Q-A.** One chart with caller-supplied words and categories. wtft becomes its first caller, and its 14 categories are the default list. This settles F1, F3, F5 to F7, F10 and F11 as caller words and the category list, F8 and F9 as switches, and F4 only as a rename and recolour of a slot.
 - **Q-B.** The timeline strip stays on wtft's title line. The library takes a header line from its caller. The same work carries F12 to F14: width in, clock in, and the chart importable without the parser.
 - **Q-C.** The option-to-chart function is `chartLines`, whichever way Q-A goes.
 - **Q-D.** Time of day across days is out of scope. F16 stays standing.

@@ -48,6 +48,7 @@ describe("each word replaces one thing", () => {
 		assert.doesNotMatch(stripAnsi(legend), /Ovrhd|Code|Plan/);
 		const hidden = chart({ categories: [{ slot: "code", label: null, fg: 196 }, { slot: "plan", label: "Apples", fg: 46 }] })[1];
 		assert.ok(hidden.startsWith("\x1b[38;5;46m█\x1b[0mApples"), hidden);
+		assert.doesNotMatch(stripAnsi(hidden), /Waste|Other|Code/);
 		assert.doesNotMatch(stripAnsi(legend), /Waste|Other/);
 		assert.ok(lines.some((l) => l.includes("\x1b[38;5;196m█")));
 	});
@@ -57,7 +58,8 @@ describe("each word replaces one thing", () => {
 		assert.match(wide, / pcs\s/);
 		assert.doesNotMatch(wide, / tok\b/);
 		const narrow = plain(chart({ tokenUnit: { name: "pcs", short: "p" } }, { mode: "cumulative" }, 70)).filter((l) => /^\d\d:00 /.test(l)).join("\n");
-		assert.doesNotMatch(narrow, / tok\b|\dt\b/);
+		assert.match(narrow, /\d[kM]?p /);
+		assert.doesNotMatch(narrow, / tok\b|\dt\b|pcs/);
 	});
 
 	it("currency replaces the dollar sign in amounts and scale labels", () => {
@@ -66,6 +68,18 @@ describe("each word replaces one thing", () => {
 		assert.ok(rows.length > 0 && rows.every((r) => r.includes("€") && !r.includes("$")));
 		assert.match(lines[2], /€/);
 		assert.doesNotMatch(lines[2], /\$/);
+	});
+
+	it("a slot listed twice, or not one of the 14, changes nothing", () => {
+		const one = chart({ categories: [{ slot: "code", label: "Lattes", fg: 196 }] });
+		const messy = chart({ categories: [{ slot: "code", label: "Lattes", fg: 196 }, { slot: "code", label: "Again", fg: 46 }, { slot: "bogus" as never, label: "Bogus", fg: 1 }] });
+		assert.deepEqual(messy, one);
+	});
+
+	it("currency with a dot keeps every scale label on its tick", () => {
+		const scale = (currency: string) => plain(chart({ currency }, { unit: "cost" }))[2];
+		const at = (line: string) => [...line.matchAll(/┼/g)].map((m) => m.index);
+		assert.deepEqual(at(scale("Rs.")), at(scale("$")));
 	});
 
 	it("cacheMissLabel names the divider", () => {
@@ -114,7 +128,7 @@ describe("a caller's own words leave none of wtft's", () => {
 			cacheLine: false,
 			otherWarning: false,
 		};
-		const wtftWords = /WTF Tokens|Ovrhd|Waste|Plan\b|Spec\b|Research|Cmpct|Other|Cache Miss|cached|carryover|earlier bins|this bin|\btok\b|CH:|web tools|\$/;
+		const wtftWords = /WTF Tokens|Ovrhd|Waste|Plan\b|Spec\b|Research|Cmpct|Other|Web\b|Grep|Code\b|Tests|Git\b|Agents|Prompt|Cache Miss|cache hit|cached|carryover|earlier bins|this bin|\btok\b|\dt\b|CH:|web tools|\$/;
 		for (const unit of ["cost", "tokens"] as const) {
 			for (const mode of ["cumulative", "bucket"] as const) {
 				const lines = plain(chart(words, { unit, mode, padRowsTo: 8 }));

@@ -16,7 +16,7 @@ export interface ChartAsked {
 	showTokenColumns?: boolean;
 }
 
-/** What stands in for anything not asked. `width` is the most the chart may be, before the 1023 cap. */
+/** What stands in for anything not asked. */
 export interface ChartFallback {
 	width: number;
 	interval?: string;
@@ -97,7 +97,7 @@ export function chartLines(call: {
 		timezone,
 		disabledEmoji,
 		model: call.model,
-		sessionNameSuffix: call.sessionFile?.slice(call.sessionFile.lastIndexOf("/") + 1),
+		sessionNameSuffix: call.sessionFile?.split(/[\\/]/).pop(),
 		unit: call.unit,
 		showCostColumns: asked.showCostColumns,
 		showTokenColumns: asked.showTokenColumns,

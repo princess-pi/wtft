@@ -42,7 +42,8 @@ describe("chartLines precedence: asked, then fallback, then default", () => {
 		const padded = (cap?: number) => (draw(() => chartLines({ ...base, asked: { limit: 30, timezone: "UTC" }, padRows: true, padRowsCap: cap })) ?? []).length;
 		const unpadded = (draw(() => chartLines({ ...base, asked: { limit: 30, timezone: "UTC" } })) ?? []).length;
 		assert.ok(padded() > unpadded);
-		assert.ok(padded(unpadded) <= padded() && padded(5) <= padded());
+		assert.ok(padded(5) < padded());
+		assert.ok(padded(unpadded) < padded());
 		const wide = withTerminal(5000, NOW, () => chartLines({ ...base, fallback: { width: 5000 }, asked: { timezone: "UTC" } }) ?? []);
 		assert.ok(Math.max(...wide.map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").length)) <= 1023 + 2);
 	});
@@ -87,17 +88,17 @@ describe("chartUnit", () => {
 });
 
 describe("the one function", () => {
-	it("is the only product file that calls buildWtftLines, but for its definition and the library page's booth", () => {
+	it("is the only product file that uses buildWtftLines, but for its definition, bin/wtft.ts's re-export and the library page's booth", () => {
 		const root = new URL("..", import.meta.url).pathname;
 		const found: string[] = [];
 		const walk = (dir: string) => {
 			for (const entry of fs.readdirSync(`${root}${dir}`, { withFileTypes: true })) {
 				const path = `${dir}/${entry.name}`;
 				if (entry.isDirectory()) { if (entry.name !== "node_modules") walk(path); }
-				else if (/\.ts$/.test(entry.name) && /\bbuildWtftLines\(/.test(fs.readFileSync(`${root}${path}`, "utf8"))) found.push(path);
+				else if (/\.ts$/.test(entry.name) && /\bbuildWtftLines\b/.test(fs.readFileSync(`${root}${path}`, "utf8"))) found.push(path);
 			}
 		};
 		for (const dir of ["bin", "extensions", "artifacts/renderer"]) walk(dir);
-		assert.deepEqual(found.sort(), ["artifacts/renderer/fair.ts", "extensions/lib/chart-call.ts", "extensions/lib/wtft-renderer.ts"]);
+		assert.deepEqual(found.sort(), ["artifacts/renderer/fair.ts", "bin/wtft.ts", "extensions/lib/chart-call.ts", "extensions/lib/wtft-renderer.ts"]);
 	});
 });

@@ -2,17 +2,17 @@
 
 Module: `extensions/lib/chart-call.ts`. Seam: `chartLines`, tested in `tests/wtft-389-chart-call.test.ts`.
 
-The chart's callers turn parsed options into a `buildWtftLines` call in one function, `chartLines`. No output changes.
+The chart's callers turn parsed options into a `buildWtftLines` call in one function, `chartLines`. No output changes, but one: see *Changed on purpose*.
 
 ## Callers
 
-- The CLI report arm (`extensions/lib/cli/report.ts`), the `--watch` renderer (`extensions/lib/wtft-daemon-lib.ts`), the Pi widget (`extensions/wtft.ts`) and the chart pages' `renderReport` (`artifacts/renderer/report.ts`) call `chartLines`.
+- The CLI report arm (`extensions/lib/cli/report.ts`), the `--watch` renderer (`extensions/lib/wtft-daemon-lib.ts`), the Pi widget (`extensions/wtft.ts`) and the chart picker's `renderReport` (`artifacts/renderer/report.ts`) call `chartLines`.
 - `bin/wtft.ts` resolves the unit with `chartUnit`, and so do the Pi widget and `renderReport`.
 - `artifacts/renderer/fair.ts` calls `buildWtftLines` itself: the booth is the library page's use of the chart by an app that is not wtft.
 
 ## The rule
 
-Each of interval, limit, mode, timezone and width is what was asked, else the fallback, else a default.
+Each of interval, limit, mode, timezone and emoji is what was asked, else the fallback, else a default. Width is what was asked, else the fallback, which every caller gives.
 
 | Setting | Default |
 |---|---|
@@ -26,7 +26,7 @@ Each of interval, limit, mode, timezone and width is what was asked, else the fa
 - The fallback is the caller's persisted config; `--watch` puts the session's own settings ahead of it.
 - Width is capped at 1023.
 - `padRows` pads to the limit, or to `padRowsCap` when that is fewer. `--watch` caps at the terminal's rows.
-- The title's session suffix is the last `/`-segment of `sessionFile`; with none, the title has none. `--watch` passes none.
+- The title's session suffix is the last `/` or `\` segment of `sessionFile`; with none, the title has none. `--watch` passes none.
 - `chartUnit`: `--cost` over `--tokens` over the config's `tokens`.
 
 ## Verified by

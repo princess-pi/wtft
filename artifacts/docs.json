@@ -11,6 +11,17 @@
       "title": "Chart picker",
       "group": "Chart",
       "kind": "html"
+    },
+    {
+      "path": "chart-lib/spec.mdx",
+      "title": "Chart library spec",
+      "group": "Chart library"
+    },
+    {
+      "path": "chart-lib/fair.html",
+      "title": "State fair booth",
+      "group": "Chart library",
+      "kind": "html"
     }
   ]
 }

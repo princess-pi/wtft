@@ -65,7 +65,7 @@ Each row is a place the chart is about wtft. **Fix shape** is the `words` field 
 - **Time of day across days.** F16. An hourly bin is a date and an hour. Three days of lunch rush are three separate rows.
 - **A bar per item.** The row axis is time, never a category.
 - **Anything but two measures.** The columns are one currency and one count. A booth that sells by weight has no third.
-- **A caller's own divider.** The rules between rows are the cache miss and the date. The power cut rides on the first.
+- **A second divider.** A caller renames the one divider with `words.cacheMissLabel`, as the booth's power cut does, but cannot add another: the rules between rows are that divider, set by `cacheMiss`, and the date.
 
 ## Decisions
 

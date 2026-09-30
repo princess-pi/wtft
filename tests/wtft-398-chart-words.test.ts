@@ -4,7 +4,7 @@
 
 import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
+import { buildWtftLines, getVisualLength } from "../extensions/lib/wtft-renderer.ts";
 import type { ChartWords } from "../extensions/lib/wtft-chart.ts";
 import { stripAnsi } from "../artifacts/renderer/ansi.ts";
 import { wtftSession } from "../artifacts/renderer/fake-session.ts";
@@ -105,6 +105,27 @@ describe("each word replaces one thing", () => {
 		const lines = plain(chart({ currency: "" }, { unit: "tokens", mode: "bucket", limit: 40, padRowsTo: undefined }, 200, rows));
 		assert.ok(lines.some((l) => /^\d\d:00 .*\$$/.test(l.trimEnd())), "marker drawn");
 		assert.ok(lines.some((l) => l.trim().startsWith("$ = cost-only")), "key names it");
+	});
+
+	it("a wide currency keeps the scale labels on their ticks and the bars under the scale", () => {
+		for (const currency of ["$", "元"]) {
+			const lines = plain(chart({ currency }, { unit: "cost", limit: 40, padRowsTo: undefined }));
+			const divider = lines.find((l) => l.startsWith("── ") && l.includes("┼"))!;
+			const ticks = [...divider.matchAll(/┼/g)].map((m) => m.index);
+			const decimalColumns = [...lines[2].matchAll(/\d(\.)\d/g)].map((m) => getVisualLength(lines[2].slice(0, m.index + 1)));
+			assert.ok(decimalColumns.length >= 3 && decimalColumns.every((col) => ticks.includes(col)), `${currency}: ${decimalColumns} vs ${ticks}`);
+			const rows = lines.filter((l) => /^\d\d:00 /.test(l));
+			const barStarts = rows.map((row) => getVisualLength(row.slice(0, row.search(/[█▃▇]/))));
+			assert.ok(barStarts.every((col) => col === ticks[0]), `${currency}: bars start at ${[...new Set(barStarts)]}, first tick ${ticks[0]}`);
+		}
+	});
+
+	it("the cost-only marker takes the web slot's colour", () => {
+		const [first] = interactions;
+		const rows = [...interactions, { ...first, timestamp: first.timestamp + 60_000, cost: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 1, serverToolCost: 0.01, _cat: "web" as const }];
+		const lines = chart({ categories: [{ slot: "web", label: "Web sales", fg: 99 }] }, { unit: "tokens", mode: "bucket", limit: 40, padRowsTo: undefined }, 200, rows);
+		assert.ok(lines.some((l) => l.includes("\x1b[38;5;99m$\x1b[0m")));
+		assert.ok(!lines.some((l) => l.includes("\x1b[38;5;209m$")));
 	});
 
 	it("cacheMissLabel names the divider", () => {

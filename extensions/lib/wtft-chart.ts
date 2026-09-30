@@ -17,6 +17,7 @@ import {
 	getZonedParts,
 	resolveZonedLocalHour,
 	formatTokenCount,
+	getVisualLength,
 } from "./wtft-renderer.js";
 
 /** Local midnight that opens the strip's day, and the next local midnight. */
@@ -174,7 +175,7 @@ export function renderWtftChart(input: {
 		const shown: ((bin: Bin) => string)[] = [];
 		if (cost) shown.push(texts.incCost, texts.totalCost);
 		if (tokens) shown.push(texts.incTok, texts.totalTok);
-		const widths = shown.map((text) => Math.max(...displayedBins.map((bin) => text(bin).length), 1));
+		const widths = shown.map((text) => Math.max(...displayedBins.map((bin) => getVisualLength(text(bin))), 1));
 		const gap = compact >= 1 ? 1 : 2;
 		let prefix = labelWidth + gap;
 		for (const columnWidth of widths) prefix += columnWidth + gap;
@@ -341,7 +342,7 @@ export function renderWtftChart(input: {
 		let widthIndex = 0;
 		const colored: string[] = [];
 		const pushCol = (text: string, color: string) => {
-			colored.push(`${color}${padString(text, columnWidths[widthIndex++])}\x1b[0m`);
+			colored.push(`${color}${text}${" ".repeat(Math.max(0, columnWidths[widthIndex++] - getVisualLength(text)))}\x1b[0m`);
 		};
 		if (showCost) {
 			pushCol(incCostText(bin), surgeInc);
@@ -407,7 +408,7 @@ export function renderWtftChart(input: {
 
 			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
 			if (hasServerToolCost && allChars < barMax) {
-				barStr += `\x1b[38;5;209m${words?.currency || "$"}\x1b[0m`;
+				barStr += `\x1b[38;5;${styleOf("web").fg}m${words?.currency || "$"}\x1b[0m`;
 				allChars++;
 				drewDollar = true;
 			}

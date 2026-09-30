@@ -50,12 +50,12 @@ interface Word {
 const WORDS: Word[] = [
 	{ id: "title", says: "💸 WTF Tokens? ...0042", becomes: "🍎 Booth 42", seen: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line) },
 	{ id: "legend", says: "█Ovrhd █Waste █Plan … all 14 categories, named for wtft", becomes: "█Lattes █Apples … the booth's own items", seen: (line, index) => index === 1 && line.includes("Ovrhd") },
-	{ id: "units", says: "2.2k tok", becomes: "2.2k pcs", seen: (line) => / tok\b|\d[kM]?t\b/.test(stripAnsi(line).trim().replace(/^\S+/, "")) },
+	{ id: "units", says: "{n} tok", becomes: "{n} pcs", seen: (line) => / tok\b|\d[kM]?t\b/.test(stripAnsi(line).trim().replace(/^\S+/, "")) },
 	{ id: "key", says: "▃ earlier bins  ▇ this bin", becomes: "▃ sold earlier  ▇ sold this bin", seen: (line) => line.includes("earlier bins") },
-	{ id: "footer", says: "↑2.2k", becomes: "(no line)", seen: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) },
-	{ id: "cache-line", says: "CH: 0% cache hit (0 read / 2.2k total ops)", becomes: "(no line)", seen: (line) => /^\x1b\[90m {2}CH: /.test(line) },
+	{ id: "footer", says: "↑{n}", becomes: "(no line)", seen: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) },
+	{ id: "cache-line", says: "CH: {pct} cache hit ({n} read / {n} total ops)", becomes: "(no line)", seen: (line) => /^\x1b\[90m {2}CH: /.test(line) },
 	{ id: "miss", says: "Cache Miss", becomes: "Power cut", seen: (line) => line.includes("── Cache Miss ") },
-	{ id: "warning", says: "⚠️  \"Other\" category: 24% of session cost ($4752.00). Run wtft --other to drill down.", becomes: "⚠️  Souvenirs: 24% of revenue ($4752.00).", seen: (line) => /"Other" category: \d+% of session cost/.test(line) },
+	{ id: "warning", says: "⚠️  \"Other\" category: {pct} of session cost ({cost}). Run wtft --other to drill down.", becomes: "⚠️  Souvenirs: {pct} of revenue ({cost}).", seen: (line) => /"Other" category: \d+% of session cost/.test(line) },
 ];
 
 /** The booth's own words for the chart. */

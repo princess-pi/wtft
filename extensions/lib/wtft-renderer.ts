@@ -361,9 +361,9 @@ export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: nu
 		const text = formatCost(tickValues[i], currency);
 		const displayStr = ` ${text} `;
 		
-		const dotIdx = displayStr.indexOf(".", 1 + currency.length);
+		const dotIdx = getVisualLength(displayStr.slice(0, displayStr.indexOf(".", 1 + currency.length)));
 		const startIdx = ticks[i] - dotIdx;
-		const endIdx = startIdx + displayStr.length;
+		const endIdx = startIdx + getVisualLength(displayStr);
 
 		let overlap = false;
 		for (const l of labels) {

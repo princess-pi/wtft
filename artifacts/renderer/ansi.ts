@@ -1,4 +1,5 @@
 const SGR = /\x1b\[([0-9;]*)m/g;
+const PAGE_BG = "#0e0e0e";
 
 const BASIC = [
 	"rgb(0,0,0)", "rgb(205,49,49)", "rgb(13,188,121)", "rgb(229,229,16)",
@@ -28,15 +29,17 @@ function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-interface Style { bold: boolean; fg: string | null; bg: string | null }
+interface Style { bold: boolean; inverse: boolean; fg: string | null; bg: string | null }
 
 function applyCodes(style: Style, codes: number[]): Style {
 	const next = { ...style };
 	for (let i = 0; i < codes.length; i++) {
 		const code = codes[i];
-		if (code === 0) { next.bold = false; next.fg = null; next.bg = null; }
+		if (code === 0) { next.bold = false; next.inverse = false; next.fg = null; next.bg = null; }
 		else if (code === 1) next.bold = true;
 		else if (code === 22) next.bold = false;
+		else if (code === 7) next.inverse = true;
+		else if (code === 27) next.inverse = false;
 		else if (code >= 30 && code <= 37) next.fg = xtermRgb(code - 30);
 		else if (code >= 90 && code <= 97) next.fg = xtermRgb(code - 90 + 8);
 		else if (code === 39) next.fg = null;
@@ -53,15 +56,17 @@ function applyCodes(style: Style, codes: number[]): Style {
 /** One terminal line's colour codes as HTML spans; text is escaped. Codes it does not know are dropped. */
 export function ansiToHtml(text: string): string {
 	let html = "";
-	let style: Style = { bold: false, fg: null, bg: null };
+	let style: Style = { bold: false, inverse: false, fg: null, bg: null };
 	let last = 0;
 	const emit = (chunk: string) => {
 		if (!chunk) return;
 		const body = escapeHtml(chunk);
+		const fg = style.inverse ? (style.bg ?? PAGE_BG) : style.fg;
+		const bg = style.inverse ? (style.fg ?? BASIC[7]) : style.bg;
 		const css = [
 			style.bold ? "font-weight:700" : "",
-			style.fg ? `color:${style.fg}` : "",
-			style.bg ? `background:${style.bg}` : "",
+			fg ? `color:${fg}` : "",
+			bg ? `background:${bg}` : "",
 		].filter(Boolean).join(";");
 		html += css ? `<span style="${css}">${body}</span>` : body;
 	};

@@ -32,7 +32,7 @@
 <body>
 <main>
   <h1>Chart picker</h1>
-  <p class="meta">The lines below come from wtft's own <code>buildWtftLines</code>, bundled for the browser and fed a fake session. The command line is read by wtft's own <code>parseWtftCliArgs</code>. Terminal width is not a flag: the CLI takes it from the terminal.</p>
+  <p class="meta">The chart lines below come from wtft's own <code>buildWtftLines</code>, bundled for the browser and fed a fake session; the column ruler above them and the line count below are this page's. The command line is read by wtft's own <code>parseWtftCliArgs</code>. Changing a control rewrites the command line from the controls, so a typed flag with no control is dropped. The title's timeline strip follows your clock. Terminal width is not a flag: the CLI takes it from the terminal.</p>
   <div class="presets" id="presets"></div>
   <div class="cmd"><code>$</code><input type="text" id="cmd" spellcheck="false" autocomplete="off" aria-label="wtft command line"></div>
   <div class="grid">
@@ -51,7 +51,7 @@
       <label><input type="radio" name="unit" value="--tokens"> tokens <code>--tokens</code></label>
     </fieldset>
     <fieldset>
-      <legend>Columns</legend>
+      <legend>Columns and title</legend>
       <label><input type="checkbox" id="cost-columns"> cost pair <code>--no-cost</code></label>
       <label><input type="checkbox" id="token-columns"> token pair <code>--no-tokens</code></label>
       <label><input type="checkbox" id="emoji"> emoji <code>--no-emoji</code></label>
@@ -67,7 +67,7 @@
     </fieldset>
     <fieldset>
       <legend>Terminal</legend>
-      <label class="wide">columns <input type="range" id="columns" min="40" max="240"> <output id="columns-out"></output></label>
+      <label class="wide">width <input type="range" id="columns" min="40" max="240"> <output id="columns-out"></output></label>
     </fieldset>
     <fieldset>
       <legend>Fake session</legend>
@@ -128,14 +128,18 @@
     const interval = opts.hasInterval ? opts.interval : "1h";
     if (![...$("interval").options].some((o) => o.value === interval)) $("interval").append(new Option(`${interval} (typed)`, interval));
     $("interval").value = interval;
-    $("limit").value = opts.hasLimit ? opts.limit : CLI_DEFAULT_LIMIT;
+    const limit = opts.hasLimit ? opts.limit : CLI_DEFAULT_LIMIT;
+    $("limit").max = Math.max(40, limit);
+    $("limit").value = limit;
     const zone = opts.hasTimezone ? opts.timezone : "";
     if (!ZONES.includes(zone) && ![...$("tz").options].some((o) => o.value === zone)) $("tz").append(new Option(`${zone} (typed)`, zone));
     $("tz").value = zone;
     $("cost-columns").checked = !opts.hideCostColumns;
     $("token-columns").checked = !opts.hideTokenColumns;
     $("emoji").checked = opts.enableEmoji !== false;
-    $("pad").value = opts.hasPad ? opts.pad : 1;
+    const pad = opts.hasPad ? opts.pad : 1;
+    $("pad").max = Math.max(12, pad);
+    $("pad").value = pad;
     for (const id of ["limit", "pad", "columns"]) $(`${id}-out`).textContent = $(id).value;
   }
 

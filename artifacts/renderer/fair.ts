@@ -68,21 +68,21 @@ const RULES: Rule[] = [
 	},
 	{
 		id: "units",
-		says: "8.1k tok",
-		becomes: "8.1k pcs",
+		says: "2.2k tok",
+		becomes: "2.2k pcs",
 		rewrite: (line) => / tok(?= *\x1b)/.test(line) ? line.replace(/ tok(?= *\x1b)/g, " pcs") : undefined,
 	},
 	{
 		id: "key",
 		says: "▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)",
-		becomes: "▃ sold earlier  ▇ sold this hour",
+		becomes: "▃ sold earlier  ▇ sold this bin",
 		rewrite: (line) => line.includes("cached/carryover")
-			? "\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m sold earlier  \x1b[37m▇\x1b[0m\x1b[90m sold this hour\x1b[0m"
+			? "\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m sold earlier  \x1b[37m▇\x1b[0m\x1b[90m sold this bin\x1b[0m"
 			: undefined,
 	},
 	{
 		id: "footer",
-		says: "↑13.8M ↓124.1k CH85%",
+		says: "↑2.2k",
 		becomes: "(no line)",
 		rewrite: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) ? null : undefined,
 	},
@@ -100,8 +100,8 @@ const RULES: Rule[] = [
 	},
 	{
 		id: "warning",
-		says: "⚠️  \"Other\" category: 27% of session cost ($8.20). Run wtft --other to drill down.",
-		becomes: "⚠️  Souvenirs: 27% of revenue ($8.20).",
+		says: "⚠️  \"Other\" category: 24% of session cost ($4752.00). Run wtft --other to drill down.",
+		becomes: "⚠️  Souvenirs: 24% of revenue ($4752.00).",
 		rewrite: (line) => {
 			const m = /^\x1b\[1;33m⚠️ {2}"Other" category: (\d+%) of session cost \((\$[\d.,]+)\)\. Run wtft --other to drill down\.\x1b\[0m$/.exec(line);
 			return m ? `\x1b[1;33m⚠️  Souvenirs: ${m[1]} of revenue (${m[2]}).\x1b[0m` : undefined;

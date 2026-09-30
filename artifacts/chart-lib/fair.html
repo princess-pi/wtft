@@ -36,7 +36,7 @@
 <body>
 <main>
   <h1>State fair booth</h1>
-  <p class="meta">A booth at the state fair, drawn by wtft's own <code>buildWtftLines</code>, unchanged. One sale is one interaction: revenue is <code>cost</code>, units sold are <code>inputTokens</code>. Three days, open 10:00 to 22:00, lunch and dinner bill 1.5 times.</p>
+  <p class="meta">A booth at the state fair, drawn by wtft's own <code>buildWtftLines</code>, unchanged. One sale is one interaction: revenue is <code>cost</code>, units sold are <code>inputTokens</code>. Three days, open 10:00 to 22:00, lunch and dinner bill 1.5 times. The timeline strip on the title line follows the clock of the browser showing this page.</p>
   <div class="presets" id="presets"></div>
   <div class="grid">
     <fieldset>
@@ -44,9 +44,9 @@
       <select id="interval"></select>
     </fieldset>
     <fieldset>
-      <legend>Bar</legend>
-      <label><input type="radio" name="mode" value="cumulative"> running total</label>
-      <label><input type="radio" name="mode" value="bucket"> this bin</label>
+      <legend>Mode</legend>
+      <label><input type="radio" name="mode" value="cumulative"> cumulative</label>
+      <label><input type="radio" name="mode" value="bucket"> bucket</label>
     </fieldset>
     <fieldset>
       <legend>Measure</legend>
@@ -81,6 +81,7 @@
       <label><input type="radio" name="view" value="generic"> as a library would</label>
     </fieldset>
   </div>
+  <p class="meta">The chart drops a ticked column pair when it leaves the bar under 15 cells, the units pair first: at 40 columns the units pair is gone with its box still ticked. The chart is drawn <code>columns</code> - 2 wide, and never under 40.</p>
 
   <div id="today-block">
     <h2>As the chart draws it today</h2>
@@ -88,20 +89,21 @@
   </div>
   <div id="generic-block">
     <h2>As a generic library would draw it</h2>
-    <p class="meta">A mockup. The lines are the chart's, after the substitutions below. The chart takes none of these words from its caller.</p>
+    <p class="meta">A mockup of a chart that took these words from its caller. The lines are the chart's, after the substitutions below. The 42 in the title is the caller's own, from the session name <code>booth-0042</code>. Two rules delete a line instead of rewriting it.</p>
     <div class="frame"><pre id="generic"></pre></div>
   </div>
 
   <h2>What the chart says that only wtft means</h2>
   <table id="subs"></table>
-  <p class="meta">A row that shows 0 does not fire in this view. Switch the measure to units for the key and the footer, tick souvenirs for the warning, and show 24 rows or more of the hourly bins for the power cut.</p>
+  <p class="meta">A row that shows 0 does not fire in this view. Switch the measure to units for the key and the footer. Tick souvenirs, with the measure on revenue, for the warning. The power cut shows once the rows reach back to it: 20 hourly rows do and 19 don't, and it fires in other bins too, such as <code>1d</code> with 3 rows. It already fires in the default view. The key prints in bucket mode too, where the chart draws neither <code>▃</code> nor <code>▇</code>.</p>
 
   <h2>Categories the booth rides on</h2>
-  <p class="meta">The chart has 14 categories and takes no others. The booth's items borrow a slot each, and with it the slot's colour and its position in the stack.</p>
+  <p class="meta">The chart has 14 categories, and any other value throws. The booth's items borrow a slot each, and with it the slot's colour and its position in the stack. Cost bucket mode draws no stack, only one marker per slot. The table lists Souvenirs whether or not the booth sells them; the booth uses <code>other</code> only when souvenirs are ticked.</p>
   <table id="cats"></table>
 
   <details>
     <summary>The call</summary>
+    <p class="meta">The page runs this inside <code>withTerminal(columns, now, ...)</code>, which stands in for the terminal width and the clock. Run as shown, the caller's own terminal width is the ceiling.</p>
     <pre class="call" id="call"></pre>
   </details>
   <p class="meta" id="count"></p>

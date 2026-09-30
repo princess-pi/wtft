@@ -14,14 +14,15 @@ export interface ReportEnv {
 export interface Report {
 	opts: WtftCliOptions;
 	unit: "cost" | "tokens";
-	/** Every line the CLI prints for the report, pad included. */
+	/** The session path line and the chart lines, pad included. */
 	lines: string[];
 }
 
-/** Runs `run` with the terminal `columns` wide and, when `now` is set, the clock at `now`. Both are restored after. */
+/** Runs `run` with the terminal `columns` wide and, when `now` is set, the clock at `now`. Both are restored after, and a page with no `process` is left with none. */
 export function withTerminal<T>(columns: number, now: number | undefined, run: () => T): T {
-	const host = globalThis as { process?: { stdout?: { columns?: number } } };
-	host.process ??= { stdout: {} };
+	const host = globalThis as { process?: { stdout?: { columns?: number }; env?: Record<string, string> } };
+	const realProcess = host.process;
+	host.process ??= { stdout: {}, env: {} };
 	host.process.stdout ??= {};
 	const stdout = host.process.stdout;
 	const realColumns = stdout.columns;
@@ -33,6 +34,7 @@ export function withTerminal<T>(columns: number, now: number | undefined, run: (
 	} finally {
 		Date.now = realNow;
 		stdout.columns = realColumns;
+		host.process = realProcess;
 	}
 }
 

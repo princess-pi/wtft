@@ -3,6 +3,7 @@
  */
 
 import * as assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { describe, it } from "node:test";
 import { buildRendererBundle, RENDERER_BUNDLE } from "../build-artifacts.ts";
@@ -36,7 +37,7 @@ function direct(columns: number, args: Parameters<typeof buildWtftLines>[2], pad
 	}
 }
 
-describe("renderReport is the CLI report arm", () => {
+describe("renderReport copies the CLI report arm's option-to-chart step", () => {
 	it("prints the session path, then the chart lines buildWtftLines returns for the parsed flags", () => {
 		const env = { columns: 100, sessionFile: "/tmp/sessions/abcd1234.jsonl", interactions: wtftSession(MODEL), now: NOW };
 		const report = renderReport(["-c", "-i", "1h", "-l", "17", "--tz", "UTC"], env);
@@ -58,7 +59,12 @@ describe("renderReport is the CLI report arm", () => {
 		assert.doesNotMatch(rows(["-b", "--tokens", "--tz", "UTC"]), /▃/);
 		assert.match(plain(["-i", "5t", "-l", "40", "--tz", "UTC"]), /\b10t\b/);
 		assert.match(plain(["--no-emoji"]), /\[\$\] WTF Tokens\?/);
-		assert.doesNotMatch(rows(["--no-cost", "--no-tokens"]), /\$\d| tok/);
+		assert.doesNotMatch(rows(["--no-cost"]), /\$\d/);
+		assert.match(rows(["--no-cost"]), / tok/);
+		assert.doesNotMatch(rows(["--no-tokens"]), / tok/);
+		assert.match(rows(["--no-tokens"]), /\$\d/);
+		assert.ok(renderReport(["--pad", "5", "--tz", "UTC"], env(160)).lines.every((l) => l.startsWith("     ")));
+		assert.notEqual(plain(["--tz", "UTC"]), plain(["--tz", "Asia/Tokyo"]));
 		assert.equal(renderReport(["-l", "3", "--tz", "UTC"], env(160)).lines.filter((l) => /^ \d\d:00 /.test(stripAnsi(l))).length, 3);
 		const narrow = renderReport(["--tz", "UTC"], env(100)).lines;
 		const wide = renderReport(["--tz", "UTC"], env(200)).lines;
@@ -87,6 +93,19 @@ describe("the committed bundle is the browser build", () => {
 		assert.deepEqual(bundle.parseWtftCliArgs(argv), parseWtftCliArgs(argv));
 		assert.deepEqual(bundle.wtftSession(MODEL), wtftSession(MODEL));
 	});
+
+	it("draws in a page with no process at every width, and leaves no process behind", () => {
+		const script = `
+			const { renderReport, wtftSession } = await import(${JSON.stringify(RENDERER_BUNDLE.href ?? String(RENDERER_BUNDLE))});
+			const interactions = wtftSession("${MODEL}");
+			globalThis.process = undefined;
+			const counts = [79, 80, 81].map((columns) => renderReport(["-c"], { columns, sessionFile: "/x/a.jsonl", interactions }).lines.length);
+			console.log(JSON.stringify({ counts, left: globalThis.process }));
+		`;
+		const out = JSON.parse(execFileSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", env: process.env }));
+		assert.ok(out.counts.every((count: number) => count > 5), JSON.stringify(out.counts));
+		assert.equal(out.left, undefined);
+	});
 });
 
 describe("the wtft pages", () => {
@@ -102,7 +121,8 @@ describe("the wtft pages", () => {
 	it("the picker imports the bundle, and no second painter is left", () => {
 		const page = read("chart-spec/picker.html");
 		assert.match(page, /from "\.\.\/renderer\/wtft-chart\.mjs"/);
-		assert.match(page, /parseWtftCliArgs/);
+		assert.match(page, /import \{[^}]*\bparseWtftCliArgs\b[^}]*\} from "\.\.\/renderer\/wtft-chart\.mjs"/);
+		assert.match(page, /parseWtftCliArgs\(words\(\)\)/);
 		assert.equal(fs.existsSync(art("chart-spec/paint.mjs")), false);
 		for (const text of [page, read("chart-spec/spec.mdx")]) assert.doesNotMatch(text, /paint\.mjs/);
 	});
@@ -141,10 +161,11 @@ describe("the library page", () => {
 		}
 	});
 
-	it("feeds the chart nothing but interactions: revenue as cost, units as inputTokens", () => {
+	it("feeds the chart interactions carrying only a cost and whole units sold as inputTokens", () => {
 		const sales = fairBooth({ souvenirs: false });
 		assert.ok(sales.length > 1000);
-		assert.ok(sales.every((sale) => sale.cost > 0 && sale.inputTokens > 0 && sale.outputTokens === 0 && sale.cacheReadTokens === 0));
+		assert.ok(sales.every((sale) => sale.cost > 0 && Number.isInteger(sale.inputTokens) && sale.inputTokens >= 1 && sale.inputTokens <= 3
+			&& sale.outputTokens === 0 && sale.cacheReadTokens === 0 && sale.cacheWriteTokens === 0 && sale.reasoningTokens === 0));
 		assert.ok(sales.every((sale, i) => i === 0 || sales[i - 1].timestamp <= sale.timestamp));
 		assert.equal(sales.filter((sale) => sale.cacheMiss).length, 1);
 	});
@@ -157,10 +178,11 @@ describe("the library page", () => {
 		const ids = at().substitutions.map((sub) => sub.id);
 		assert.deepEqual([...fired].sort(), [...ids].sort());
 		const spec = read("chart-lib/spec.mdx");
-		for (const id of ids) assert.match(spec, new RegExp(`\\| ${id} \\|`), id);
+		const findings = spec.slice(spec.indexOf("## Findings"), spec.indexOf("\n## ", spec.indexOf("## Findings") + 1));
+		for (const id of ids) assert.match(findings, new RegExp(`^\\| F\\d+ \\|.*\\| ${id} \\|$`, "m"), id);
 	});
 
-	it("the second view differs from the first only where a substitution fired", () => {
+	it("the second view drops every wtft word the first view carries", () => {
 		const picture = at({ unit: "tokens", souvenirs: true });
 		assert.notDeepEqual(picture.generic, picture.today);
 		const words = /WTF Tokens|Ovrhd|cached\/carryover|CH: |Cache Miss|Other" category| tok\b/;
@@ -186,5 +208,7 @@ describe("ansiToHtml", () => {
 		assert.equal(ansiToHtml("\x1b[1;37mA\x1b[0m"), '<span style="font-weight:700;color:rgb(229,229,229)">A</span>');
 		assert.equal(ansiToHtml("\x1b[5;90mA\x1b[0mB"), '<span style="color:rgb(136,136,136)">A</span>B');
 		assert.equal(stripAnsi("\x1b[1;38;5;208mx\x1b[0m"), "x");
+		assert.equal(ansiToHtml("\x1b[7mA\x1b[27mB"), '<span style="color:#0e0e0e;background:rgb(229,229,229)">A</span>B');
+		assert.equal(ansiToHtml("\x1b[38;5;196;7mA"), '<span style="color:#0e0e0e;background:rgb(255,0,0)">A</span>');
 	});
 });

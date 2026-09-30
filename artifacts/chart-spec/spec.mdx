@@ -1,8 +1,8 @@
 # Chart spec
 
-`buildWtftLines` bins a session's interactions and hands the bins, newest first, to `renderWtftChart`, which draws the chart lines. `getBinInfo` labels one interaction. One cell is one category. The columns, the cache-miss line, the date line, the title with its timeline strip, and the legend are part of that draw.
+`buildWtftLines` drops duplicate interactions, bins the rest, and hands the newest `-l` bins, newest first, to `renderWtftChart`, which draws the chart lines. With no bins it returns no chart. `getBinInfo` labels one interaction. One cell is one category. Everything in "Lines between rows" and "Lines above and below" is part of that draw.
 
-This page is the picture of that chart, and the picker is the chart. The picker bundles wtft's own `buildWtftLines` and `parseWtftCliArgs` for the browser and runs them on a fake session. Every control is a chart flag or the terminal's width. Type a flag into the command line and the controls follow. The four blocks below are the four presets under a pinned clock, so a reader without the picker still sees them.
+This page is the picture of that chart, and the chart picker draws with the chart itself. It bundles wtft's own `buildWtftLines` and `parseWtftCliArgs` for the browser and runs them on a fake session. The step between them, from parsed flags to the chart call, is a copy of the CLI report arm's: a change there does not reach the chart picker (https://github.com/princess-pi/wtft/issues/389). The copy draws emoji unless `--no-emoji` is given, because it has no config file to read. Each control is a wtft flag, the terminal's width, the fake session's model, or its file name. Type a flag into the command line and the controls follow. Changing a control rewrites the command line from the controls, so a typed flag with no control is dropped. The chart picker draws under the real clock. The four blocks below are the four presets under a pinned clock, so a reader without the chart picker still sees them.
 
 <iframe src="picker.html" title="Chart picker" style="width:100%;height:1060px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
 
@@ -12,54 +12,54 @@ The library page runs the same chart on a booth at the state fair: [Chart librar
 
 ## The fake session
 
-Three working days of one session, Sep-24, Sep-25 and Sep-26. Each interaction is shaped as a tag file returns it, with `_cat` set, so the classifier's file, command and text inputs are not needed. Cost comes from the same `calculateClaudeCost` the parser calls. A turn after a gap of 12 minutes or more, and each day's first turn, is a cache miss and is classed `overhead`.
+Three days of one session, Thursday Sep-24 to Saturday Sep-26. Each interaction is shaped as a tag file returns it, with `_cat` set, so the classifier's file, command and text inputs are not needed. Cost comes from the same `calculateClaudeCost` the parser calls, plus `calculateServerToolCost` on web turns and on every ninth code turn. A turn after a gap of 12 minutes or more, and each day's first turn, is a cache miss and is in the `overhead` category.
 
-The model picks the timeline strip. `claude-sonnet-5-5` has no surge schedule, so the strip is one colour. `deepseek-v4-pro` has one, so the strip draws its surge hours in orange, the surge badge appears when the real clock is inside a window, and a turn billed at the surge rate makes its row orange, with a bolt when the columns have their full two-space gap.
+The model picks the timeline strip: the CLI reads the first interaction that names a model, and the Pi widget passes its current model. `claude-sonnet-5-5` has no surge schedule, so the strip is one colour. `deepseek-v4-pro` has one. Its surge hours are orange only when today, by the clock, bills surge: its schedule skips weekends, so under the Saturday pin the strip is all green. A badge follows the strip: `⚡ SURGE Nx` inside a window, `SURGE ENDING` in its last 20 minutes, and `SURGE APPROACHING` in the 20 minutes before one. One turn billed at the surge rate turns its whole row's label and number columns orange; the bar keeps its category colours. With the columns at their full two-space gap, a bolt takes the gap after the first number column, or after the label when at most one column shows.
 
 ## Encoding law
 
 A cell is one category.
 
-- Color is the category. The glyph is `█`.
-- On a running-total token bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category.
+- Color is the category. The glyph is `█`, or `$` on a token bar (see Rows).
+- On a running-total token bar, recency is the second axis, and it uses the glyph. `▃` is carryover. `▇` is new this bin. Both glyphs are that one category. Each category's segment draws its `▃` run, then its `▇` run, and a category with new tokens this bin gets at least one `▇`.
 - Recency applies to a token running total. An incremental bar is entirely new, so recency stays off. A cost bar stays `█`.
-- A scatter column that two categories round onto keeps the larger cost. The cell stays one category. An equal cost keeps the earlier category in the category order. Scatter is the cost bucket bar. A token bucket bar is a stack of `█` when that bin has token counts.
+- A scatter column that two categories round onto keeps the larger cost. The cell stays one category. An equal cost keeps the earlier category in the category order. Scatter is the cost bucket bar. A token bucket bar is a stack of `█`, empty in a bin with no tokens.
 
 ## Rows
 
 Each row prints the bin label, incremental cost, total cost so far, incremental tokens, total tokens so far, and the bar.
 
-- `--cost` and `-C` choose the cost bar. `--tokens` and `--by-model` choose the token bar. With neither, the bar is cost, unless the config sets tokens.
-- `--cumulative` and `-c`, or `--bucket` and `-b`, choose a running total versus this bin. With neither, the mode is cumulative, unless the config sets it.
+- `--cost` and `-C` choose the cost bar. `--tokens` and `--by-model` choose the token bar. With both, cost wins in any order. With neither, the bar is cost, unless the config sets tokens.
+- `--cumulative` and `-c`, or `--bucket` and `-b`, choose a running total versus this bin. With both, the later flag wins. With neither, the mode is cumulative, unless the config sets it.
 - `--no-cost` hides the cost pair. `--no-tokens` hides the token pair.
-- The layout width is at least 40. The bar is what remains after the label area and the scale's reserved cells: 3 for cost, 5 for tokens. Under 15 cells the token pair goes first, then the cost pair.
-- The label area is compacted when it is more than a quarter of the width. `docs/spec-362-compact-label-columns.md` has the five steps. On this session the first step starts under 154 columns.
+- The layout width is the terminal's width less the pad, capped at 1023, and at least 40. The bar is what remains after the label area and the scale's reserved cells: 3 for cost, 5 for tokens. A token bar draws into two cells fewer than that. Under 15 cells the token pair goes first, then the cost pair.
+- The label area is compacted when it is more than a quarter of the width. `docs/spec-362-compact-label-columns.md` has the five steps. On this session, with all four columns, the first step starts at 173 terminal columns and the second at 153.
 - A positive amount under one cent uses four decimal places.
-- A cumulative cost bar is `round(total / scale × bar)` cells. The scale is the session total for a running total, and the largest displayed bin for a bucket. A cost scale of 0 or less becomes 1; above 20 it ceils to a multiple of 5; otherwise it ceils to an integer. A token scale ceils to a multiple of 1000.
+- A cumulative cost bar is `round(total / scale × bar)` cells. Each category gets the floor of its share, then the monotonic clamp, then the leftover cells go one at a time to the category furthest below its share. A token bar gives each category `round(total / scale × (bar − 2) × share)` cells, cut off at the bar's end. The scale is the session total for a running total, and the largest displayed bin in bucket mode. The cost total includes server-tool cost, and the token total counts every interaction, displayed or not. A cost scale of 0 or less becomes 1; above 20 it ceils to a multiple of 5; otherwise it ceils to an integer. A token scale ceils to a multiple of 1000.
 - A scatter mark sits at `round(cost / scale × (bar − 1))`.
-- A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell.
+- A token bar draws one `$` when web cost is positive and web tokens are 0, and the bar still has a free cell. On a running total both are totals, so the `$` shows only until the first web-category turn.
 - The monotonic clamp is on the cost running-total bar. A category that already holds a cell does not shrink below that count. A token running total does not use it.
 
 ## Lines between rows
 
 A rule inserts one line on the older side of the boundary, which is where the cache-miss line sits.
 
-- Cache miss: the line reads `Cache Miss`, on the older side of the missed row. A miss on the oldest row still draws the line under it. When a miss and a date change share a boundary, the miss line comes first.
-- Date change: the line reads the older bin's date as `Mmm-DD`, whenever the date changes. A turn interval that crosses a date still draws it.
-- Padding: the CLI pads the chart out to `-l` rows with a dash row. The Pi widget does not. `docs/spec-264-pad-rows.md`.
+- Cache miss: the line is `── Cache Miss ──` run out to the scale's reserve, with `┼` at the scale's five ticks, on the older side of the missed row. The date line has the same shape. A miss on the oldest row still draws the line under it. When a miss and a date change share a boundary, the miss line comes first.
+- Date change: the line reads the older bin's date as `Mmm-DD`, between two bins whose dates differ. A turn bin's date is its newest turn's, so a turn bin that spans midnight draws no line inside itself.
+- Padding: the CLI pads the chart out to the limit (`-l`, else the config, else 17, at most 1000), counting bin rows only, with rows of grey dashes in the label and number columns and no bar. `--watch` pads to the smaller of the limit and the terminal's rows, and drops padding first when the frame is too tall. The Pi widget does not pad. `docs/spec-264-pad-rows.md`.
 
 ## Lines above and below
 
-- Title: `💸 WTF Tokens?` for cost and `🔢 WTF Tokens?` for tokens, then `...` and the last four characters of the session file name, then the timeline strip. `--no-emoji` draws `[$]` and `[#]`.
-- Timeline strip: 24 hours, the moon at each end, the sun at noon, a clock face at the current hour. Surge hours are orange.
+- Title: `💸 WTF Tokens?` for cost and `🔢 WTF Tokens?` for tokens, then `...` and the last four characters of the session file name without `.jsonl` (nothing with no session file), then the timeline strip. `--no-emoji` draws `[$]` and `[#]`, and ASCII in the strip: `|` for a moon, `*` for the sun, `@` for the clock and `!!` for the bolt. With neither `--emoji` nor `--no-emoji`, the CLI reads the config.
+- Timeline strip: 24 hours, green, the current hour bold. A moon at each end shows the phase at that end's midnight, so the two can differ. The sun is an extra cell between 11 and 12, in hour 12's colour. A clock face marks the current hour. Surge hours are orange, and the surge badge follows the closing moon.
 - Legend: every category, including ones with no spend in the session.
-- Scale line: draws when the scale is above 0 and the bar is at least 15 cells. It carries the newest bin's date.
-- A token chart ends with the glyph key and a token footer. Both charts end with a cache-hit line when the session has cache tokens.
-- An "Other" warning line appears in a cost chart when Other is more than a fifth of the spend and more than $6.
+- Scale line: draws when the scale is above 0 and the bar is at least 15 cells. It carries the newest bin's date and five reverse-video labels at 0, ¼, ½, ¾ and full scale; a label that would overlap an earlier one is dropped, and token labels take one decimal place.
+- A token chart ends with the glyph key, in bucket mode too, and a token footer when there is one. Both charts end with a cache-hit line when the session has any cache-read, cache-write or input tokens, so `CH: 0%` prints on a session with no cache.
+- An "Other" warning line appears in a cost chart, after the padding rows, when Other is more than a fifth of the spend and more than $6. Other's figure leaves out server-tool cost; the spend it is compared with includes it.
 
 ## Presets
 
-Pinned to `--tz UTC`, 160 columns, 1h bins, 10 rows, and the clock at 2026-09-26 15:30 UTC. The first line of each block is the command. A test compares every block to the chart's output.
+Each command pins `--tz UTC`, 1h bins and 10 rows. The page pins the rest: 160 columns, the clock at 2026-09-26 15:30 UTC, the model `claude-sonnet-5-5`, and a session file ending `ee07`. The first line of each block is the command. The blocks show the chart only: no session path line above it and, under `--tokens`, no token summary below. A test finds every block in this page, with colour codes stripped and trailing spaces trimmed.
 
 ### Cost, cumulative
 
@@ -179,16 +179,16 @@ $ wtft -b --tokens --tz UTC -i 1h -l 10
 
 ## Outside the picker
 
-- The CLI report prints more than the chart: the token summary under `--tokens`, the histogram under `--other`, and the provisional warning. The picker prints the session path line and the chart.
-- `--width` is read and ignored by the CLI. The CLI takes its width from the terminal, minus `--pad` on each side. The picker's terminal slider is that width.
-- The Pi widget builds the same chart from `extensions/wtft.ts`, with its own `-w` width, no padding rows, and a limit fitted under Pi's 10-line cap by `docs/spec-269-widget-fit.md`.
+- The CLI report prints the session path line and the chart, and more: the token summary under `--tokens` or `--by-model` (a token chart from the config prints none), the histogram under `--other` or `-o`, the provisional warning, and warnings on stderr. The chart picker prints the session path line and the chart.
+- `--width` is read and ignored by the CLI. The CLI takes its width from the terminal, minus `--pad` on each side (1 by default, at most half the terminal less one). The chart picker's terminal slider, 40 to 240, is the terminal's width, before the pad.
+- The Pi widget builds the same chart from `extensions/wtft.ts`, with its own `-w` width (at most 240, and the terminal's width less 2), no padding rows, and a limit fitted under Pi's 10-line cap by `docs/spec-269-widget-fit.md`.
 
 ## Settled
 
 - A cell is one category. https://github.com/princess-pi/wtft/pull/298
 - The scale line draws when the scale is above 0 and the bar is at least 15 cells. A date line is drawn when the date changes. https://github.com/princess-pi/wtft/pull/298
 - `renderWtftChart` draws the chart lines. https://github.com/princess-pi/wtft/pull/302
-- All four columns are the default. `--no-cost` hides the two cost columns. `--no-tokens` hides the two token columns. https://github.com/princess-pi/wtft/pull/304
+- All four columns are the default, until a narrow bar drops a pair (see Rows). `--no-cost` hides the two cost columns. `--no-tokens` hides the two token columns. https://github.com/princess-pi/wtft/pull/304
 - A second painter stays unstarted. https://github.com/princess-pi/wtft/issues/285
 
 ## Phases

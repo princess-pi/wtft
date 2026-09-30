@@ -1,8 +1,8 @@
 # Chart library spec
 
-A library is only a library once someone has reused it. The chart has one user, wtft. This page is the second: a booth at the state fair, sold by item and by time of day, drawn by wtft's own `buildWtftLines` with nothing changed. Where the chart won't do what the booth needs, that's a finding.
+A library is only a library once someone has reused it. The chart has one user, wtft. This page is the second: a booth at the state fair, sold by item and by time of day, drawn by wtft's own `buildWtftLines` with nothing changed in the chart. The page runs it inside `withTerminal` (`artifacts/renderer/report.ts`), which stands in for the terminal's width and the clock, and in the browser for `process`. Where the chart won't do what the booth needs, that's a finding.
 
-The picker draws the booth twice. The first picture is what the chart returns. The second is the same lines after a table of substitutions, and shows what a caller would get if the chart took its own words from the caller. The second picture is a mockup. The substitutions are the list of places the chart says something only wtft means.
+The picker draws the booth twice. The first picture is what the chart returns. The second is the same lines after a table of substitutions, and shows what a caller would get if the chart took its own words from the caller. The second picture is a mockup, and a partial one. Its 8 substitutions cover 8 of the 17 findings, and two of them, the footer and the cache line, delete a line instead of rewriting it. The timeline strip (F2), the `$` (F5) and the compacted `t` (F6) stay in the second picture.
 
 <iframe src="fair.html" title="State fair booth" style="width:100%;height:2000px;border:1px solid #444;border-radius:8px;background:#161616"></iframe>
 
@@ -12,29 +12,29 @@ The wtft page runs the chart on its own data: [Chart spec](../chart-spec/spec.md
 
 ## The booth
 
-One sale is one interaction. The chart reads these fields and nothing else of the interaction.
+One sale is one interaction. The chart reads these fields of the interaction, and `sessionNameSuffix` from its options. It also reads `messageId` (duplicates are dropped), `model`, `serverToolCost`, and the other token counts: `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`. With `_cat` unset it classifies from `interrupted`, `files`, `toolCats`, `commands`, `texts` and `unrecognizedTool`. The booth sets `_cat`, leaves `model` unset, and zeroes or empties the rest.
 
 | Booth | Chart field | Note |
 |---|---|---|
-| when the sale rang up | `timestamp` | a bin is an hour, a day, or a count of sales |
+| when the sale rang up | `timestamp` | a bin is minutes, hours, days, weeks, or a count of sales |
 | revenue | `cost` | dollars, always |
-| units sold | `inputTokens` | the chart's second measure is tokens |
+| units sold | `inputTokens` | the chart's second measure is tokens: input, output, cache read, cache write and reasoning added. The booth sets only `inputTokens`, which also feeds the CH line's total ops |
 | item | `_cat` | one of the chart's 14 categories |
-| rush hour | `surgePriced` | an orange row |
+| rush hour | `surgePriced` | one such sale marks its whole bin: the time label and number columns turn bold orange, and a `⚡` fills the gap when it is 2 wide. The bar keeps its category colours |
 | the power went out | `cacheMiss` | a `Cache Miss` line under that row |
-| the booth's name | `sessionNameSuffix` | optional |
+| the booth's name | `sessionNameSuffix` | an option of `buildWtftLines`, not a field of the sale. `.jsonl` is stripped and `...` plus the last 4 characters print. Optional |
 
 Six items ride on six of the chart's categories: lattes, apples, funnel cake, pie, corn dogs, lemonade. Souvenirs, when ticked, ride on `other`. The stack order is the chart's, not the booth's.
 
 ## What worked without a change
 
-- A stack per bin, coloured by category, as a running total or as this bin's own amount.
-- Scatter for the per-bin revenue, and `▃` carryover against `▇` new for units sold.
-- Four number columns, and their compaction and dropping as the terminal narrows.
-- Bins of minutes, hours, days, weeks, or a count of sales. `-i 25t` is every 25 sales.
-- A date line where the day changes, in any timezone, and a scale line with ticks.
-- Rows for a rush hour in bold orange. The chart calls it surge. The booth calls it lunch.
-- Padding rows out to the limit.
+- A stack per bin, coloured by category: a running total in cumulative mode, and in bucket mode with units the bin's own amount. Bucket mode with revenue draws no stack. Each category gets one `█`, placed by its own cost, and the larger cost wins a shared cell.
+- `▃` carryover against `▇` new for units sold, in cumulative mode only. Bucket mode draws `█`.
+- Four number columns. The label area compacts, in five steps, once it passes a quarter of the width, so long labels compact too. Under 15 bar cells the chart drops the units pair, then the revenue pair, whatever the caller asked for.
+- Bins of minutes, hours, days, weeks, or a count of sales. `-i 25t` is every 25 sales. A week bin ignores its size, so `2w` bins like `1w`. Multi-day bins restart at each month boundary.
+- A date line where the day changes, in any timezone. An invalid zone falls back to the host's local time without a message. A scale line with ticks, dropped when the bar is under 15 cells or the largest value is 0 or less.
+- Rows for a rush hour in bold orange. The chart's field is `surgePriced`, and no row says "surge". The only SURGE text is the title badge, which comes from the model's price schedule and has nothing to do with `surgePriced`. The booth's rush hours are lunch and dinner: 12:00, 13:00, 18:00 and 19:00.
+- Padding rows out to the limit, at most 1000.
 
 ## Findings
 
@@ -42,27 +42,27 @@ Each row is a place the chart is about wtft. **Fix shape** is what a caller woul
 
 | # | The chart | Where | Fix shape | Mockup |
 |---|---|---|---|---|
-| F1 | Titles itself `WTF Tokens?` with a 💸 or 🔢, and the last four letters of a session file name | `renderWtftChart` | caller word | title |
-| F2 | Draws a 24-hour timeline strip on the title line. Its surge hours come from a price schedule looked up by model id. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line, or a switch | none |
+| F1 | Titles itself `WTF Tokens?` with a 💸 or 🔢 (`[$]` or `[#]` with emoji off), then `...` and the last four characters of a session file name in grey, `.jsonl` stripped. No suffix, no `...` | `renderWtftChart` | caller word | title |
+| F2 | Draws a 24-hour timeline strip on the title line: a moon phase at each end, `☀️` at noon, a clock face at the current hour, and a SURGE, SURGE APPROACHING or SURGE ENDING badge. Its surge hours and badge come from a price schedule looked up by model id, from the `model` option or else the first interaction that has one. With no model no hours are marked and there is no badge. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line, or a switch | none |
 | F3 | Lists all 14 categories in the legend, by wtft's names, whether or not the data has them | `renderWtftChart` | caller list | legend |
-| F4 | Takes a closed set of 14 categories. A caller borrows a slot, and its colour and its place in the stack | `Category`, `CATEGORY_STYLE` | caller list | none |
-| F5 | Says `$` and USD everywhere, four decimals under a cent, and no thousands separator: `$14526.00` | `formatCost`, `buildTickLine` | caller word | none |
-| F6 | Says `tok` after the units total, and `t` when narrow | `columnTexts` | caller word | units |
-| F7 | Ends a units chart with `▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)` | `renderWtftChart` | caller word | key |
-| F8 | Ends a units chart with `↑ input  ↓ output  CH%` | `tokenFooterSummary` | switch | footer |
-| F9 | Ends every chart with `CH: 0% cache hit (…)`, even when nothing is cached | `computeCacheMetrics` | switch | cache-line |
+| F4 | Takes a closed set of 14 categories, and any other `_cat` value throws a `TypeError`. A caller borrows a slot, and its colour and its place in the stack. The `web` slot also takes any `serverToolCost` | `Category`, `CATEGORY_STYLE` | caller list | none |
+| F5 | Says `$` on every amount, four decimals under a cent, and no thousands separator: `$14526.00`. From compaction step 2 the columns show whole dollars, `$14526`. From step 4 the per-bin column drops the `$` | `formatCost`, `wholeCost`, `buildTickLine` | caller word | none |
+| F6 | Says `tok` after the units total, and `t` at compaction step 5, which the label share sets, not the width alone. The mockup's units rule matches ` tok` only, so it leaves the `t` | `columnTexts` | caller word | units |
+| F7 | Puts `▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)` under a units chart, above the token footer and the CH line. It prints in bucket mode, where neither `▃` nor `▇` is drawn, and prints `$ = cost-only` when no `$` is drawn | `renderWtftChart` | caller word | key |
+| F8 | Puts `↑ input  ↓ output  CH%` under a units chart's key, above the CH line. `↑` is input plus cache read plus cache write. `↓`, an `R` for reasoning and `CH%` each drop out when their count is zero, and the whole line when none is left. The booth draws just `↑2.2k` | `tokenFooterSummary` | switch | footer |
+| F9 | Ends every chart with `CH: 0% cache hit (…)`, even when nothing is cached. No line when cache read, cache write and input total 0 | `buildWtftLines`, `renderWtftChart`, `computeCacheMetrics` | switch | cache-line |
 | F10 | Names the divider `Cache Miss` | `renderWtftChart` | caller word | miss |
-| F11 | Warns `"Other" category: 27% of session cost … Run wtft --other to drill down.` | `buildWtftLines` | caller word, or a switch | warning |
-| F12 | Reads the terminal's width from the process, and the caller's width is only a ceiling | `getTerminalWidth` | width in, no process read | none |
+| F11 | Warns `"Other" category: 24% of session cost … Run wtft --other to drill down.` Only with the cost unit, when `other` is over 20% of the total and over $6.00 | `buildWtftLines` | caller word, or a switch | warning |
+| F12 | Reads the terminal's width from the process: stdout, then stderr, then `$COLUMNS`. At exactly 80 it also shells out to `tmux` (when `$TMUX` is set) and `tput`. A widget takes 2 off. The caller's width is only a ceiling, and the chart floors its width at 40, so a caller width under 40 is exceeded | `getTerminalWidth`, `renderWtftChart` | width in, no process read | none |
 | F13 | Reads the clock inside the draw | `renderWtftChart` | clock in | none |
-| F14 | Can't be imported without the parser, the pricing, the harness registry and the child-process module. The browser bundle is over half a megabyte minified and needs a stand-in for `node:url` | `wtft-renderer.ts` imports | split the chart from the parser | none |
-| F15 | Turns options into a chart call in four places: the CLI report arm, the daemon library behind `--watch`, the Pi widget, and the unit choice in `bin/wtft.ts`. These two pages are the fifth and sixth | `report.ts`, `wtft-daemon-lib.ts`, `extensions/wtft.ts`, `bin/wtft.ts` | one function | none |
+| F14 | Can't be imported without the parser, the pricing, `wcwidth`, the spawn tree, the subagent block, and the child-process module. It also imports `wtft-shared.js`, which re-exports the daemon library, the JSON module, the pricing config, the command shapes, the harness registry and session-cwd. The browser bundle is over half a megabyte minified and needs a stand-in for `node:url` and for `process` | `wtft-renderer.ts` imports | split the chart from the parser | none |
+| F15 | Turns options into a chart call in three places: the CLI report arm, the daemon library behind `--watch`, and the Pi widget. `bin/wtft.ts` makes no chart call; it resolves the unit and hands it to `runReport` and `runWatch`. Watch passes no `sessionNameSuffix` and caps `padRowsTo` at the terminal's rows. The widget takes its unit from `settings.tokens`. These two pages are the fourth and fifth | `runReport`, `watchTagFile`, `buildWtftLines` in `extensions/wtft.ts`, the unit choice in `bin/wtft.ts` | one function | none |
 | F16 | Bins only along time or turns. There is no way to fold the days onto one clock face and ask "how do lattes sell across the day" | `getBinInfo` | standing | none |
-| F17 | Compacts its label area when it is more than a quarter of the width, so booth revenue in the thousands compacts at any terminal under 178 columns | `MAX_LABEL_SHARE` | standing | none |
+| F17 | Compacts its label area, in five steps, when it is more than a quarter of the width. The booth compacts at 177 columns and under by default. With souvenirs it is 181, with `1d` labels 201, with `-l 3` 173, with the revenue pair alone 113, with the units pair alone 93. The booth's chart is `columns` - 2 wide | `MAX_LABEL_SHARE` | standing | none |
 
 ## What the chart can't say
 
-- **Time of day across days.** F16. A bin is a date and an hour. Three days of lunch rush are three separate rows.
+- **Time of day across days.** F16. An hourly bin is a date and an hour. Three days of lunch rush are three separate rows.
 - **A bar per item.** The row axis is time, never a category.
 - **Anything but two measures.** The columns are one currency and one count. A booth that sells by weight has no third.
 - **A caller's own divider.** The rules between rows are the cache miss and the date. The power cut rides on the first.

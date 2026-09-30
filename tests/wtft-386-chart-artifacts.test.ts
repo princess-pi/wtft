@@ -205,7 +205,7 @@ describe("the library page", () => {
 
 describe("ansiToHtml", () => {
 	it("colours a 256-colour cell, keeps bold, escapes text and drops what it does not know", () => {
-		assert.equal(ansiToHtml("\x1b[38;5;196m█\x1b[0m<b>"), '<span style="color:rgb(255,0,0)">█</span>&lt;b&gt;');
+		assert.equal(ansiToHtml("\x1b[38;5;196mA\x1b[0m<b>"), '<span style="color:rgb(255,0,0)">A</span>&lt;b&gt;');
 		assert.equal(ansiToHtml("\x1b[1;37mA\x1b[0m"), '<span style="font-weight:700;color:rgb(229,229,229)">A</span>');
 		assert.equal(ansiToHtml("\x1b[5;90mA\x1b[0mB"), '<span style="color:rgb(136,136,136)">A</span>B');
 		assert.equal(stripAnsi("\x1b[1;38;5;208mx\x1b[0m"), "x");

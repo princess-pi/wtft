@@ -1,3 +1,4 @@
+import { cellsHtml } from "./cell-glyphs.mjs";
 import { splitFrontmatter, parseRoute, resolveRelative, rewriteHref, headingDomId, headingFrag, pageTitle } from "./route.mjs";
 
 const nav = document.getElementById("nav-list");
@@ -242,6 +243,9 @@ async function renderDoc(index, path, frag, search) {
   const root = holder.content;
   fillToc(root, path);
   rewriteDocLinks(root, path, index);
+  root.querySelectorAll("pre code:not(.language-mermaid)").forEach((block) => {
+    block.innerHTML = cellsHtml(block.textContent);
+  });
   root.querySelectorAll("pre code.language-mermaid").forEach((block) => {
     const div = document.createElement("div");
     div.className = "mermaid";

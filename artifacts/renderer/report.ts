@@ -1,5 +1,5 @@
 import { parseWtftCliArgs, type WtftCliOptions } from "../../extensions/lib/wtft-cli-shared.ts";
-import { buildWtftLines, chartLimit } from "../../extensions/lib/wtft-renderer.ts";
+import { askedOf, chartLines, chartUnit } from "../../extensions/lib/chart-call.ts";
 import type { Interaction } from "../../extensions/lib/wtft-parser.ts";
 
 export interface ReportEnv {
@@ -50,41 +50,19 @@ export function withTerminal<T>(columns: number, now: number | undefined, run: (
 export function renderReport(argv: string[], env: ReportEnv): Report {
 	const opts = parseWtftCliArgs(argv);
 	const config = env.config ?? {};
-	let unit: "cost" | "tokens" = config.tokens ? "tokens" : "cost";
-	if (opts.hasTokens) unit = "tokens";
-	if (opts.hasCost) unit = "cost";
-
-	const disabledEmoji = typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : false;
+	const unit = chartUnit(opts, config.tokens);
 	const termColumns = env.columns;
 	const maxPad = Math.max(0, Math.floor(termColumns / 2) - 1);
 	const pad = Math.min(opts.hasPad ? opts.pad : 1, maxPad);
 	const padStr = " ".repeat(pad);
-	const paddedWidth = termColumns - 2 * pad;
-	const finalInterval = opts.hasInterval ? opts.interval : (config.interval ?? "1h");
-	const finalLimit = chartLimit(opts, config.limit);
-	const finalMode = opts.hasMode ? opts.mode : (config.mode ?? "cumulative");
-	const finalTimezone = opts.hasTimezone ? opts.timezone : config.timezone;
 
-	const defaultSettings = {
-		interval: "1h",
-		limit: 100,
-		width: Math.min(paddedWidth, 1023),
-		mode: "cumulative" as "cumulative" | "bucket",
-		timezone: undefined,
-	};
-
-	const chart = withTerminal(termColumns, env.now, () => buildWtftLines(env.interactions, defaultSettings, {
-		interval: finalInterval,
-		limit: finalLimit,
-		padRowsTo: finalLimit,
-		width: Math.min(paddedWidth, 1023),
-		mode: finalMode,
-		timezone: finalTimezone,
-		disabledEmoji,
-		sessionNameSuffix: env.sessionFile.slice(env.sessionFile.lastIndexOf("/") + 1),
+	const chart = withTerminal(termColumns, env.now, () => chartLines({
+		interactions: env.interactions,
+		asked: askedOf(opts),
+		fallback: { width: termColumns - 2 * pad, interval: config.interval, limit: config.limit, mode: config.mode, timezone: config.timezone },
 		unit,
-		showCostColumns: !opts.hideCostColumns,
-		showTokenColumns: !opts.hideTokenColumns,
+		sessionFile: env.sessionFile,
+		padRows: true,
 	}));
 
 	return {

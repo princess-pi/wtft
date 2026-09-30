@@ -18,8 +18,8 @@ needs a rebuild. A dependency that moves under an unchanged `package.json` is no
 
 The bundle exports:
 
-- `renderReport(argv, env)`: a copy of the CLI report arm's option-to-chart step, then `buildWtftLines`. A change to
-  the CLI's step does not reach it (#389). `argv` is a wtft command line, split into words and read by `parseWtftCliArgs`.
+- `renderReport(argv, env)`: the CLI report arm's option-to-chart step, `chartLines`, called on the flags
+  and the env. `argv` is a wtft command line, split into words and read by `parseWtftCliArgs`.
   `env` is the terminal's columns, the session file's full path, the interactions, and optionally a clock and a config of
   interval, limit, mode, timezone and tokens. It returns `{ opts, unit, lines }`: the parsed flags, the chart's unit, and
   the session path line followed by the chart lines, pad included. It leaves out what the CLI prints after the chart:
@@ -73,8 +73,7 @@ revenue is `cost` and its units are `inputTokens`. The page draws it twice:
   rewrite it, and the timeline strip, the `$` and the compacted `t` stay.
 
 The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
-The decisions the findings raise are not made here: Q-A, Q-B and Q-D are #388, and F15's one
-option-to-chart function is #389.
+The decisions the findings raise are not made here: Q-A, Q-B and Q-D are #388.
 
 ## 4. Verification
 

@@ -10,9 +10,8 @@ import {
 	parseEntryToInteraction,
 	deduplicateInteractions,
 	classifyInteraction,
-	buildWtftLines,
-	wholeLimit
 } from "./wtft-shared.js";
+import { askedOf, chartLines } from "./chart-call.js";
 import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
 import { getDiscoveries } from "./harness/registry.ts";
@@ -827,7 +826,7 @@ export async function watchTagFile(
 		}
 	});
 
-	let disabledEmoji = typeof settings.disabledEmoji === "boolean" ? settings.disabledEmoji : (settings.defaultDisabledEmoji ?? false);
+	let sessionDisabledEmoji: boolean | undefined;
 	let seed = seedClassifiedTagFile(tagPath);
 	let allInteractions: Interaction[] = seed.interactions;
 	let lastReadOffset = seed.offset;
@@ -845,8 +844,8 @@ export async function watchTagFile(
 			try {
 				const entry = JSON.parse(line);
 				if (entry.type === "custom" && entry.customType === "emoji-settings") {
-					if (entry.data && typeof entry.data.disabled === "boolean" && settings.disabledEmoji === undefined) {
-						disabledEmoji = entry.data.disabled;
+					if (entry.data && typeof entry.data.disabled === "boolean") {
+						sessionDisabledEmoji = entry.data.disabled;
 					}
 				} else if (entry.type === "custom" && entry.customType === "wtft-settings") {
 					if (entry.data) {
@@ -869,33 +868,26 @@ export async function watchTagFile(
 		const actualPad = Math.min(pad, maxPad);
 		const padStr = " ".repeat(actualPad);
 		const paddedWidth = width - 2 * actualPad;
-		const finalInterval = settings.hasInterval ? settings.interval : (sessionInterval ?? settings.interval);
-		const finalLimit = wholeLimit(settings.hasLimit ? settings.limit : (sessionLimit ?? settings.limit));
-		const finalMode = settings.hasMode ? settings.mode : (sessionMode ?? settings.mode);
-		const finalTimezone = settings.hasTimezone ? settings.timezone : (sessionTimezone ?? settings.timezone);
 		const finalWidth = Math.min(paddedWidth, 1023);
-
-		const defaultSettings = {
-			interval: "1h", limit: 100, width: finalWidth,
-			mode: "cumulative" as "cumulative" | "bucket",
-			timezone: undefined
-		};
 
 		const deduped = dedupeClassifiedById(allInteractions);
 		interactionCount = deduped.length;
 
-		const lines = buildWtftLines(deduped, defaultSettings, {
-			interval: finalInterval,
-			limit: finalLimit,
+		const lines = chartLines({
+			interactions: deduped,
+			asked: askedOf(settings),
+			fallback: {
+				width: finalWidth,
+				interval: sessionInterval ?? settings.interval,
+				limit: sessionLimit ?? settings.limit,
+				mode: sessionMode ?? settings.mode,
+				timezone: sessionTimezone ?? settings.timezone,
+				disabledEmoji: sessionDisabledEmoji ?? settings.defaultDisabledEmoji,
+			},
+			unit: settings.unit ?? "cost",
+			padRows: true,
 			// No more placeholders than the terminal has rows; the fit below trims the rest.
-			padRowsTo: Math.min(finalLimit, process.stdout.rows || finalLimit),
-			width: finalWidth,
-			mode: finalMode,
-			timezone: finalTimezone,
-			unit: settings.unit,
-			showCostColumns: settings.showCostColumns,
-			showTokenColumns: settings.showTokenColumns,
-			disabledEmoji,
+			padRowsCap: process.stdout.rows || undefined,
 		});
 
 		const buf: string[] = [];

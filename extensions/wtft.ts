@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	buildWtftLines as sharedBuildWtftLines,
 	type Interaction,
 	renderOtherHistogram,
 	renderTokenSummary,
@@ -25,6 +24,7 @@ import {
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
+import { chartLines, chartUnit } from "./lib/chart-call.js";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -216,7 +216,7 @@ function readInteractions(ctx: any): Interaction[] {
 	return merged;
 }
 
-function buildWtftLines(
+function widgetChart(
 	ctx: any,
 	pi: ExtensionAPI,
 	opts?: {
@@ -225,19 +225,27 @@ function buildWtftLines(
 		width?: number;
 		mode?: "bucket" | "cumulative";
 		timezone?: string;
-		sessionNameSuffix?: string;
+		sessionFile?: string;
+		model?: string;
 		showCostColumns?: boolean;
 		showTokenColumns?: boolean;
 	},
 	interactions: Interaction[] = readInteractions(ctx),
 ): string[] | null {
 	const settings = getSettings(ctx);
+	const { sessionFile, model, ...asked } = opts ?? {};
 
-	return sharedBuildWtftLines(interactions, settings, {
-		...opts,
-		unit: settings.tokens ? "tokens" as const : "cost" as const,
-		showCostColumns: opts?.showCostColumns ?? !widgetHideCostColumns,
-		showTokenColumns: opts?.showTokenColumns ?? !widgetHideTokenColumns,
+	return chartLines({
+		interactions,
+		asked: {
+			...asked,
+			showCostColumns: asked.showCostColumns ?? !widgetHideCostColumns,
+			showTokenColumns: asked.showTokenColumns ?? !widgetHideTokenColumns,
+		},
+		fallback: settings,
+		unit: chartUnit({}, settings.tokens),
+		sessionFile,
+		model,
 	});
 }
 
@@ -270,15 +278,14 @@ function updateWtftWidget(
 	} catch (_) {}
 
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
-	const sessionNameSuffix = sessionFile ? path.basename(sessionFile) : undefined;
-	const buildOpts = { ...opts, model: modelId, sessionNameSuffix };
+	const buildOpts = { ...opts, model: modelId, sessionFile };
 	const parserStatusStr = sessionFile ? renderDaemonStatus(getDaemonStatus(sessionFile)) : "";
 	const width = getTerminalWidth(true, false);
 	// Read once: fitWidget may render several times. The read sets what provisionalLines reports.
 	const interactions = readInteractions(ctx);
 	const tail = provisionalLines();
 	const lines = fitWidget(
-		(limit) => buildWtftLines(ctx, pi, { ...buildOpts, limit }, interactions),
+		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions),
 		parserStatusStr, width, tail, opts?.limit ?? current.limit,
 	);
 	if (!lines) {
@@ -483,7 +490,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			const nextTimezone = hasTimezone ? timezone : current.timezone;
 
 			if (pager) {
-				const lines = buildWtftLines(ctx, pi, {
+				const lines = widgetChart(ctx, pi, {
 					interval: nextInterval,
 					limit: hasLimit ? nextLimit : 100, // Large default for pager
 					width: nextWidth,

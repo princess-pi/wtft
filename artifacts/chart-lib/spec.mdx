@@ -43,7 +43,7 @@ Each row is a place the chart is about wtft. **Fix shape** is what a caller woul
 | # | The chart | Where | Fix shape | Mockup |
 |---|---|---|---|---|
 | F1 | Titles itself `WTF Tokens?` with a 💸 or 🔢 (`[$]` or `[#]` with emoji off), then `...` and the last four characters of a session file name in grey, `.jsonl` stripped. No suffix, no `...` | `renderWtftChart` | caller word | title |
-| F2 | Draws a 24-hour timeline strip on the title line: a moon phase at each end, `☀️` at noon, a clock face at the current hour, and a SURGE, SURGE APPROACHING or SURGE ENDING badge. Its surge hours and badge come from a price schedule looked up by model id, from the `model` option or else the first interaction that has one. With no model no hours are marked and there is no badge. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line, or a switch | none |
+| F2 | Draws a 24-hour timeline strip on the title line: a moon phase at each end, `☀️` at noon, a clock face at the current hour, and a SURGE, SURGE APPROACHING or SURGE ENDING badge. Its surge hours and badge come from a price schedule looked up by model id, from the `model` option or else the first interaction that has one. With no model no hours are marked and there is no badge. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line | none |
 | F3 | Lists all 14 categories in the legend, by wtft's names, whether or not the data has them | `renderWtftChart` | caller list | legend |
 | F4 | Takes a closed set of 14 categories, and any other `_cat` value throws a `TypeError`. A caller borrows a slot, and its colour and its place in the stack. The `web` slot also takes any `serverToolCost` | `Category`, `CATEGORY_STYLE` | caller list | none |
 | F5 | Says `$` on every amount, four decimals under a cent, and no thousands separator: `$14526.00`. From compaction step 2 the columns show whole dollars, `$14526`. From step 4 the per-bin column drops the `$` | `formatCost`, `wholeCost`, `buildTickLine` | caller word | none |
@@ -69,8 +69,8 @@ Each row is a place the chart is about wtft. **Fix shape** is what a caller woul
 
 ## Decisions
 
-- **Q-A.** One chart with caller-supplied words and categories. wtft becomes its first caller, and its 14 categories are the default list. This settles F1 and F3 to F11.
-- **Q-B.** The timeline strip stays on wtft's title line. The library takes a header line from its caller.
+- **Q-A.** One chart with caller-supplied words and categories. wtft becomes its first caller, and its 14 categories are the default list. This settles F1, F3 to F7, F10 and F11 as caller words and the category list, and F8 and F9 as switches.
+- **Q-B.** The timeline strip stays on wtft's title line. The library takes a header line from its caller. The same work carries F12 to F14: width in, clock in, and the chart importable without the parser.
 - **Q-C.** The option-to-chart function is `chartLines`, whichever way Q-A goes.
 - **Q-D.** Time of day across days is out of scope. F16 stays standing.
 - **Q-E.** The turn-stride lines the old picker offered, every 10 and every 100 turns, stay gone. The chart never drew them.

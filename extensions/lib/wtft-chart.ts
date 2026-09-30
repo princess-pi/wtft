@@ -407,7 +407,7 @@ export function renderWtftChart(input: {
 
 			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
 			if (hasServerToolCost && allChars < barMax) {
-				barStr += `\x1b[38;5;209m${words?.currency ?? "$"}\x1b[0m`;
+				barStr += `\x1b[38;5;209m${words?.currency || "$"}\x1b[0m`;
 				allChars++;
 				drewDollar = true;
 			}
@@ -461,7 +461,7 @@ export function renderWtftChart(input: {
 	if (unit === "tokens") {
 		const keyParts: string[] = [];
 		if (mode === "cumulative") keyParts.push(`\x1b[37m▃\x1b[0m\x1b[90m ${words?.key?.earlier ?? "earlier bins"}  \x1b[37m▇\x1b[0m\x1b[90m ${words?.key?.thisBin ?? "this bin"}`);
-		if (drewDollar) keyParts.push(`${words?.currency ?? "$"} = ${words?.key?.costOnly ?? "cost-only (web tools)"}`);
+		if (drewDollar) keyParts.push(`${words?.currency || "$"} = ${words?.key?.costOnly ?? "cost-only (web tools)"}`);
 		if (keyParts.length > 0) widgetLines.push(`\x1b[90m  ${keyParts.join("  ")}\x1b[0m`);
 		if (tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
 	}

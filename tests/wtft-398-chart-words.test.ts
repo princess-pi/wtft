@@ -93,6 +93,20 @@ describe("each word replaces one thing", () => {
 		}
 	});
 
+	it("a currency or template carrying replacement patterns fills the warning literally", () => {
+		const heavy = interactions.map((i) => ({ ...i, _cat: "other" as const, cost: i.cost * 40 }));
+		const lines = plain(chart({ currency: "$&", otherWarning: "W {pct} ({cost}) $' $$" }, { unit: "cost" }, 200, heavy));
+		assert.ok(lines.some((l) => /^⚠️? +W \d+% \(\$&[\d.]+\) \$' \$\$$/.test(l)), lines.join("\n"));
+	});
+
+	it("an empty currency still draws the cost-only marker, and its key names it", () => {
+		const [first] = interactions;
+		const rows = [...interactions, { ...first, timestamp: first.timestamp + 60_000, cost: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 1, serverToolCost: 0.01, _cat: "web" as const }];
+		const lines = plain(chart({ currency: "" }, { unit: "tokens", mode: "bucket", limit: 40, padRowsTo: undefined }, 200, rows));
+		assert.ok(lines.some((l) => /^\d\d:00 .*\$$/.test(l.trimEnd())), "marker drawn");
+		assert.ok(lines.some((l) => l.trim().startsWith("$ = cost-only")), "key names it");
+	});
+
 	it("cacheMissLabel names the divider", () => {
 		const lines = plain(chart({ cacheMissLabel: "Power cut" }));
 		assert.ok(lines.some((l) => l.startsWith("── Power cut ")));

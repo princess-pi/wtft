@@ -957,7 +957,7 @@ export function buildWtftLines(
 			const costStr = formatCost(totalOtherCost, opts?.words?.currency);
 			otherWarning = warningWord === undefined
 				? `\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`
-				: `\x1b[1;33m⚠️  ${warningWord.replaceAll("{pct}", pctStr).replaceAll("{cost}", costStr)}\x1b[0m`;
+				: `\x1b[1;33m⚠️  ${warningWord.replaceAll("{pct}", () => pctStr).replaceAll("{cost}", () => costStr)}\x1b[0m`;
 		}
 	}
 	const cacheMetrics = computeCacheMetrics(interactions);

@@ -11,7 +11,7 @@ Module: `extensions/lib/wtft-chart.ts`. Seam: `buildWtftLines` with `words`, tes
 | `title` | the title's icon and `WTF Tokens?`; the session suffix still follows |
 | `categories` | the 14 legend names and colours; a list of `{ slot, label, fg, char? }`; `char` is the legend swatch only, and the bars draw `█`, `▃` and `▇` |
 | `tokenUnit` | `tok`, and `t` at the tightest compaction: `{ name, short }` |
-| `currency` | `$` in amounts, scale labels, the cost-only marker and its key |
+| `currency` | `$` in amounts, scale labels, the cost-only marker and its key; an empty currency leaves the marker and its key at `$`, so the marker still draws |
 | `cacheMissLabel` | `Cache Miss` |
 | `key` | `earlier bins`, `this bin` and the cost-only note: `{ earlier, thisBin, costOnly? }` |
 | `tokenFooter` | `false` drops the `↑ ↓ CH%` line |

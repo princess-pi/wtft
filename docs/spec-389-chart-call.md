@@ -31,7 +31,7 @@ Each of interval, limit, mode, timezone and emoji is what was asked, else the fa
 
 ## Verified by
 
-- `tests/wtft-389-chart-call.test.ts`: the rule, `askedOf`, `chartUnit`, and a scan that no product file under `bin/`, `extensions/` and `artifacts/renderer/` calls `buildWtftLines` but `chart-call.ts`, its definition and the booth.
+- `tests/wtft-389-chart-call.test.ts`: the rule, `askedOf`, `chartUnit`, and a scan that no product file under `bin/`, `extensions/` and `artifacts/renderer/` mentions `buildWtftLines` but `chart-call.ts`, its definition in `wtft-renderer.ts`, `bin/wtft.ts`'s import and re-export, and the booth.
 - The existing suite, with no expected output edited, and `tests/wtft-386-chart-artifacts.test.ts`, which compares the picker's lines to `buildWtftLines` called the CLI's way.
 
 ## Changed on purpose

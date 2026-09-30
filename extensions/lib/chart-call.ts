@@ -65,17 +65,12 @@ export function chartUnit(opts: { hasTokens?: boolean; hasCost?: boolean }, conf
 	return unit;
 }
 
-/**
- * The chart lines for one session: each setting is what was asked, else the fallback, else a default
- * (`1h`, 17 rows, cumulative, no timezone, emoji on). Returns what `buildWtftLines` returns.
- * `padRows` fills the chart out to its limit with placeholder rows, or to `padRowsCap` when that is fewer.
- */
+/** The chart lines for one session, as `buildWtftLines` returns them. The rule for each setting is docs/spec-389-chart-call.md. */
 export function chartLines(call: {
 	interactions: Interaction[];
 	asked: ChartAsked;
 	fallback: ChartFallback;
 	unit: ChartUnit;
-	/** Full path; the title shows the last four characters of its file name. */
 	sessionFile?: string;
 	model?: string;
 	padRows?: boolean;

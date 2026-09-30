@@ -21,6 +21,7 @@ export interface Report {
 /** Runs `run` with the terminal `columns` wide and, when `now` is set, the clock at `now`. Both are restored after, and a page with no `process` is left with none. */
 export function withTerminal<T>(columns: number, now: number | undefined, run: () => T): T {
 	const host = globalThis as { process?: { stdout?: { columns?: number }; env?: Record<string, string> } };
+	const hadProcess = "process" in host;
 	const realProcess = host.process;
 	host.process ??= { stdout: {}, env: {} };
 	host.process.stdout ??= {};
@@ -34,7 +35,8 @@ export function withTerminal<T>(columns: number, now: number | undefined, run: (
 	} finally {
 		Date.now = realNow;
 		stdout.columns = realColumns;
-		host.process = realProcess;
+		if (hadProcess) host.process = realProcess;
+		else delete host.process;
 	}
 }
 

@@ -13,7 +13,8 @@ that is not wtft. Neither page has a painter of its own: both call `buildWtftLin
 `artifacts/` directory as it stands. A test builds the bundle again in memory and fails when the
 committed file differs, so an edit to anything it carries (the chart, the parser, the pricing and
 cost code, and what they import) needs a rebuild. `node:url` is replaced by a two-function shim;
-every other `node:` import becomes an empty object, so the bundle reads no config or pricing file.
+bun's browser target supplies `node:path` and `node:os`, and `node:fs` and `node:child_process` become empty
+objects, so the bundle reads no config or pricing file.
 
 The bundle exports:
 
@@ -37,7 +38,8 @@ The bundle exports:
   page's blocks are drawn under.
 - `CATEGORY_STYLE`: each category's colour and legend name.
 - `ansiToHtml(text)`, `stripAnsi(text)`, `xtermRgb(n)`: the terminal's colour codes to HTML. `ansiToHtml` handles bold,
-  reverse video, the 16 basic colours and the 256-colour palette, and drops the rest, blink included.
+  reverse video, the 16 basic foreground colours and 256-colour foregrounds and backgrounds, and drops the rest, blink
+  included.
 
 `renderReport` installs a stand-in for the terminal (`process.stdout.columns`) only while it runs, because
 `buildWtftLines` asks the terminal for its width. In a page with no `process`, the stand-in is a whole `process`
@@ -47,12 +49,12 @@ with an empty `env`, removed afterwards. It pins `Date.now` only when the caller
 
 `artifacts/chart-spec/picker.html`. The controls are the chart's flags, `--pad`, the terminal's width, the fake
 session's model and file name, four preset buttons, and a copy button. The command line shows the flags and can be
-edited; an edit is read by `parseWtftCliArgs` and moves the controls. A control change rewrites the command line from
-the controls, so a typed flag with no control, such as `-o` or `--by-model`, is dropped. A typed limit or pad past its
+edited; an edit is read by `parseWtftCliArgs` and moves the controls. A change to a flag's control rewrites the command
+line from the controls, so a typed flag with no control, such as `-o` or `--by-model`, is dropped. A typed limit or pad past its
 slider's end moves that end.
 The chart shown is `renderReport`'s output for that command line with no config: the session path line, the title
 with its timeline strip and session-name suffix, the legend, the scale line, the rows, the rules, and the footers. The
-page adds a column ruler above and a line count below. It passes no clock, so the strip follows the viewer's.
+page adds a column ruler above and a line count below. It passes no clock, so the strip follows the reader's.
 `paint.mjs` is deleted.
 
 `artifacts/chart-spec/spec.mdx` prints the four presets as the chart draws them under a pinned clock,
@@ -81,13 +83,14 @@ option-to-chart function is #389.
     the source gives;
   - the bundle draws at 79, 80 and 81 columns in a page with no `process`, and leaves none behind;
   - `renderReport`'s lines for a fixed command line equal `buildWtftLines` called with the arguments the report arm
-    passes, and each chart flag, `--pad`, `--tz` and the terminal width changes the output;
+    passes; `-c` and `-b` under `--tokens`, `-i`, `-l`, `--no-emoji`, `--no-cost`, `--no-tokens` and `--pad` each show in
+    the output, and `--tz` and the terminal width each change it;
   - `renderReport` restores the terminal width and the clock;
   - each of the four presets, colour codes stripped and trailing spaces trimmed, appears in `spec.mdx`;
   - the picker imports `parseWtftCliArgs` from the bundle and calls it on the command line;
   - the fake session spans three dates, a cache miss, surge turns and server-tool cost;
   - the fair data feeds `buildWtftLines`, every substitution fires in some view and is a row of the findings table,
-    and the second view carries none of the wtft words the first view does;
-  - both pages are listed in `artifacts/docs.json`, and `paint.mjs` is gone;
+    and in the units view with souvenirs the second view carries none of the test's list of wtft words;
+  - the two library pages are listed in `artifacts/docs.json`, and `paint.mjs` is gone;
   - `ansiToHtml` colours, bolds, reverses and escapes.
 - By eye: both pages open at https://wtft-artifacts.princess-pi.dev/.

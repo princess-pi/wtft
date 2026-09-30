@@ -98,13 +98,13 @@ describe("the committed bundle is the browser build", () => {
 		const script = `
 			const { renderReport, wtftSession } = await import(${JSON.stringify(RENDERER_BUNDLE.href ?? String(RENDERER_BUNDLE))});
 			const interactions = wtftSession("${MODEL}");
-			globalThis.process = undefined;
+			delete globalThis.process;
 			const counts = [79, 80, 81].map((columns) => renderReport(["-c"], { columns, sessionFile: "/x/a.jsonl", interactions }).lines.length);
-			console.log(JSON.stringify({ counts, left: globalThis.process }));
+			console.log(JSON.stringify({ counts, left: "process" in globalThis }));
 		`;
 		const out = JSON.parse(execFileSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", env: process.env }));
 		assert.ok(out.counts.every((count: number) => count > 5), JSON.stringify(out.counts));
-		assert.equal(out.left, undefined);
+		assert.equal(out.left, false);
 	});
 });
 

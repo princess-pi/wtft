@@ -2,7 +2,8 @@
 """Count hairlines and row bands inside one rectangle of a screenshot.
 
 usage: [INK=dark] counts.py <png> <left,top,right,bottom>
-Prints {"hgaps": n, "vgaps": n}. A hairline (hgaps) is a run of 1-3 pixels of another colour on a
+Prints {"hgaps": n, "vgaps": n, "ink": n}, where ink counts the bar-colour pixels in the rectangle;
+exits 1 when it is 0, since a rectangle with no bars would read 0/0. A hairline (hgaps) is a run of 1-3 pixels of another colour on a
 pixel row between two pixels of the same bar colour; a row band (vgaps) is the same down a pixel
 column, 1-8 pixels. A bar colour is saturated, or near-black with INK=dark (the light-themed spec
 browser draws its bars black).
@@ -48,7 +49,10 @@ def main():
     px = img.load()
     hg = sum(count([px[x, y] for x in range(w)], 3) for y in range(h))
     vg = sum(count([px[x, y] for y in range(h)], 8) for x in range(w))
-    print(json.dumps({"hgaps": hg, "vgaps": vg}))
+    ink = sum(1 for y in range(h) for x in range(w) if is_ink(px[x, y]))
+    print(json.dumps({"hgaps": hg, "vgaps": vg, "ink": ink}))
+    if ink == 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

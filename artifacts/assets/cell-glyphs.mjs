@@ -51,7 +51,7 @@ function escapeHtml(text) {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Plain text in, HTML out: the text escaped, each block or box-drawing glyph run painted as a cell span. */
+/** Plain text in, HTML out: `&`, `<` and `>` escaped, and each block or box-drawing glyph docs/spec-392-cell-glyphs.md lists painted as a cell span. */
 export function cellsHtml(text) {
 	let html = "";
 	const chars = [...text];

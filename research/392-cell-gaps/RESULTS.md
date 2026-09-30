@@ -18,3 +18,8 @@ INK=dark python3 counts.py spec.png 615,80,1080,130
 | `chart-spec/spec.mdx`, first preset block | 2301 / 605 | 0 / 0 |
 
 The rectangles are the bar areas at 1800×1400; they move if the page layout changes.
+
+`counts.py` scores only saturated bar colours (black with `INK=dark`), so the grey `Other` category
+and the box-drawing lines are not in these numbers. The `──` rules and `┼` ticks were checked by eye
+on 3× nearest-neighbour crops of the same screenshots: continuous across cells and rows after the
+change, broken before it.

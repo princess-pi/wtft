@@ -1,6 +1,6 @@
 // usage: [CHROME=<path>] node shot.mjs <url> <out.png> <waitSelector> [scrollSelector]
 // Screenshots <url> at 1800x1400 once <waitSelector> exists. Exits 1, writing nothing, when it
-// never appears within 20 s. CHROME defaults to the first chrome-headless-shell under
+// never appears within 20 s or [scrollSelector] matches nothing. CHROME defaults to the first chrome-headless-shell under
 // ~/.cache/ms-playwright.
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -51,7 +51,10 @@ try {
 		found = r.result?.result?.value === true;
 	}
 	if (!found) throw new Error(`never appeared: ${waitFor}`);
-	if (scrollTo) await send("Runtime.evaluate", { expression: `document.querySelector(${JSON.stringify(scrollTo)})?.scrollIntoView()` });
+	if (scrollTo) {
+		const r = await send("Runtime.evaluate", { expression: `(() => { const el = document.querySelector(${JSON.stringify(scrollTo)}); el?.scrollIntoView(); return !!el; })()`, returnByValue: true });
+		if (r.result?.result?.value !== true) throw new Error(`nothing to scroll to: ${scrollTo}`);
+	}
 	await sleep(800);
 	const shot = await send("Page.captureScreenshot", { format: "png" });
 	writeFileSync(out, Buffer.from(shot.result.data, "base64"));

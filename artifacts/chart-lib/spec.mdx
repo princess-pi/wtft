@@ -24,7 +24,7 @@ One sale is one interaction. The chart reads these fields of the interaction, an
 | the power went out | `cacheMiss` | a `Cache Miss` line under that row |
 | the booth's name | `sessionNameSuffix` | an option of `buildWtftLines`, not a field of the sale. `.jsonl` is stripped and `...` plus the last 4 characters print. Optional |
 
-Six items ride on six of the chart's categories: lattes, apples, funnel cake, pie, corn dogs, lemonade. Souvenirs, when ticked, ride on `other`. The stack order is the chart's, not the booth's.
+Six items ride on six of the chart's categories: lattes, apples, funnel cake, pie, corn dogs, lemonade. Souvenirs, when ticked, ride on `other`. The stack order is the order of `words.categories`, and the booth lists its items in the chart's order.
 
 ## What worked without a change
 
@@ -45,7 +45,7 @@ Each row is a place the chart is about wtft. **Fix shape** is the `words` field 
 | F1 | Titles itself `WTF Tokens?` with a 💸 or 🔢 (`[$]` or `[#]` with emoji off), then `...` and the last four characters of a session file name in grey, `.jsonl` stripped. No suffix, no `...` | `renderWtftChart` | `words.title` | title |
 | F2 | Draws a 24-hour timeline strip on the title line: a moon phase at each end, `☀️` at noon, a clock face at the current hour, and a SURGE, SURGE APPROACHING or SURGE ENDING badge. Its surge hours and badge come from a price schedule looked up by model id, from the `model` option or else the first interaction that has one. With no model no hours are marked and there is no badge. It can't be turned off or given hours | `renderWtftChart`, `getSurgeLocalHours` | a hook for the line | none |
 | F3 | Lists all 14 categories in the legend, by wtft's names, whether or not the data has them | `renderWtftChart` | `words.categories` | legend |
-| F4 | Takes a closed set of 14 categories, and any other `_cat` value throws a `TypeError`. A caller borrows a slot, and its colour and its place in the stack. The `web` slot also takes any `serverToolCost` | `Category`, `CATEGORY_STYLE` | standing: `words.categories` renames and recolours a slot, and the set stays 14 | none |
+| F4 | Takes a closed set of 14 categories, and any other `_cat` value throws a `TypeError`. A caller borrows a slot, and its colour and its place in the stack. The `web` slot also takes any `serverToolCost` | `Category`, `CATEGORY_STYLE` | `words.categories`, which renames and recolours a slot; the set stays 14 | none |
 | F5 | Says `$` on every amount, four decimals under a cent, and no thousands separator: `$14526.00`. From compaction step 2 the columns show whole dollars, `$14526`. From step 4 the per-bin column drops the `$` | `formatCost`, `wholeCost`, `buildTickLine` | `words.currency` | none |
 | F6 | Says `tok` after the units total, and `t` at compaction step 5, which the label share sets, not the width alone. | `columnTexts` | `words.tokenUnit` | units |
 | F7 | Puts `▃ earlier bins  ▇ this bin` under a running-total units chart, and `$ = cost-only (web tools)` after it when a `$` is drawn, above the token footer and the CH line. A bucket chart draws neither `▃` nor `▇`, so it gets no `▃`/`▇` key | `renderWtftChart` | `words.key` | key |

@@ -129,12 +129,32 @@ describe("a caller's own words leave none of wtft's", () => {
 			otherWarning: false,
 		};
 		const wtftWords = /WTF Tokens|Ovrhd|Waste|Plan\b|Spec\b|Research|Cmpct|Other|Web\b|Grep|Code\b|Tests|Git\b|Agents|Prompt|Cache Miss|cache hit|cached|carryover|earlier bins|this bin|\btok\b|\dt\b|CH:|web tools|\$/;
+		const [first] = interactions;
+		const rows = [...interactions, { ...first, timestamp: first.timestamp + 60_000, cost: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 1, serverToolCost: 0.01, _cat: "web" as const }];
 		for (const unit of ["cost", "tokens"] as const) {
 			for (const mode of ["cumulative", "bucket"] as const) {
-				const lines = plain(chart(words, { unit, mode, padRowsTo: 8 }));
-				const offenders = lines.filter((l) => wtftWords.test(l));
-				assert.deepEqual(offenders, [], `${unit} ${mode}`);
+				const lines = plain(chart(words, { unit, mode, limit: 40, padRowsTo: undefined }, 200, rows));
+				const at = `${unit} ${mode}`;
+				assert.deepEqual(lines.filter((l) => wtftWords.test(l)), [], at);
+				assert.ok(lines[0].startsWith("Booth 42"), at);
+				assert.ok(lines[1].startsWith("█Lattes █Apples █Souvenirs"), at);
+				assert.ok(lines.some((l) => l.startsWith("── Power cut ")), `${at} divider`);
+				assert.ok(lines.some((l) => /^\d\d:00 .*€/.test(l)), `${at} currency`);
+				if (unit === "tokens") {
+					assert.ok(lines.some((l) => /^\d\d:00 .* pcs\s/.test(l)), `${at} unit`);
+					assert.ok(lines.some((l) => l.trim() === "€ = no units" || l.trim().endsWith("€ = no units")), `${at} cost-only note`);
+					if (mode === "cumulative") assert.ok(lines.some((l) => l.includes("▃ sold earlier  ▇ sold now")), `${at} key`);
+				}
 			}
 		}
+	});
+});
+
+describe("the fair page's word counts", () => {
+	it("counts the units word at the tightest compaction too", async () => {
+		const { renderFair, FAIR_DEFAULTS } = await import("../artifacts/renderer/fair.ts");
+		const units = (columns: number) => renderFair({ ...FAIR_DEFAULTS, columns, unit: "tokens", now: Date.UTC(2026, 8, 13, 20, 30) }).substitutions.find((w) => w.id === "units")!.count;
+		assert.ok(units(160) > 0);
+		assert.ok(units(70) > 0);
 	});
 });

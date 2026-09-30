@@ -50,6 +50,8 @@ revenue is `cost` and its units are `inputTokens`. The page draws it twice:
   findings, and the page counts how often each one fired.
 
 The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
+The decisions the findings raise are not made here: Q-A, Q-B and Q-D are #388, and F15's one
+option-to-chart function is #389.
 
 ## 4. Verification
 

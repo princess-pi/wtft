@@ -69,10 +69,13 @@ Each row is a place the chart is about wtft. **Fix shape** is what a caller woul
 
 ## Open decisions
 
-These wait on the reviewer and are listed on the tracking issue, so a decision lands in one place.
+Q-A, Q-B and Q-D wait on the reviewer in https://github.com/princess-pi/wtft/issues/388, so a decision lands in one place.
 
 - **Q-A.** One chart with caller-supplied words and categories, or two charts on a shared bin-and-encode core.
 - **Q-B.** Whether the timeline strip belongs to the library or to wtft's title line.
-- **Q-C.** Whether the option-to-chart function is extracted first, so both pickers call the CLI's own copy.
 - **Q-D.** Whether time of day across days is a second chart, or out of scope.
-- **Q-E.** Whether the turn-stride lines the old picker offered, every 10 and every 100 turns, stay gone.
+
+Decided:
+
+- **Q-C.** The option-to-chart function is extracted in https://github.com/princess-pi/wtft/issues/389, whichever way Q-A goes. F15 closes there.
+- **Q-E.** The turn-stride lines the old picker offered, every 10 and every 100 turns, stay gone. The chart never drew them.

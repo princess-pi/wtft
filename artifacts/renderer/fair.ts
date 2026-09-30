@@ -75,7 +75,7 @@ const RULES: Rule[] = [
 	},
 	{
 		id: "key",
-		says: "▃ earlier bins  ▇ this bin  $ = cost-only (web tools)",
+		says: "▃ earlier bins  ▇ this bin",
 		becomes: "▃ sold earlier  ▇ sold this bin",
 		rewrite: (line) => line.includes("earlier bins")
 			? "\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m sold earlier  \x1b[37m▇\x1b[0m\x1b[90m sold this bin\x1b[0m"

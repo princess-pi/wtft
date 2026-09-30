@@ -60,13 +60,39 @@ export function isPlaceholderRow(line: string): boolean {
 	return line.startsWith(PLACEHOLDER_PREFIX);
 }
 
+export interface ChartCategory {
+	/** One of wtft's 14 slots, borrowed for the caller's own category. */
+	slot: Category;
+	/** The legend name; null leaves the slot out of the legend. */
+	label: string | null;
+	fg: number;
+	char?: string;
+}
+
+/** The chart's own words and switches. Every field left out is wtft's. */
+export interface ChartWords {
+	/** Replaces the title's name and icon; the session suffix still follows. */
+	title?: string;
+	/** Legend and stack order; a slot left out keeps its colour, follows the listed ones and has no legend entry. */
+	categories?: ChartCategory[];
+	/** The token total's unit and its short form at the tightest compaction. */
+	tokenUnit?: { name: string; short: string };
+	currency?: string;
+	cacheMissLabel?: string;
+	key?: { earlier: string; thisBin: string; costOnly?: string };
+	tokenFooter?: boolean;
+	cacheLine?: boolean;
+	/** Template with {pct} and {cost}; false drops the warning. */
+	otherWarning?: string | false;
+}
+
 /** Past this share of the width, the label area (time label and number columns) is compacted. */
 const MAX_LABEL_SHARE = 0.25;
 const MAX_COMPACT = 5;
 
 /** `$487.25` → `$487`; under $1 unchanged. */
-export function wholeCost(n: number): string {
-	return Math.abs(n) >= 1 ? `$${Math.sign(n) * Math.round(Math.abs(n))}` : formatCost(n);
+export function wholeCost(n: number, currency = "$"): string {
+	return Math.abs(n) >= 1 ? `${currency}${Math.sign(n) * Math.round(Math.abs(n))}` : formatCost(n, currency);
 }
 
 /** `778.8M` → `779M`, `589.5k` → `590k`; under 1k unchanged. */
@@ -79,22 +105,24 @@ export function wholeTokens(n: number): string {
 }
 
 /** The four number columns' text at compaction step `compact` (0 to MAX_COMPACT). */
-function columnTexts(compact: number) {
-	const cost = compact >= 2 ? wholeCost : formatCost;
+function columnTexts(compact: number, words?: ChartWords) {
+	const currency = words?.currency ?? "$";
+	const unit = words?.tokenUnit ?? { name: "tok", short: "t" };
+	const cost = (n: number) => (compact >= 2 ? wholeCost(n, currency) : formatCost(n, currency));
 	const tokens = compact >= 2 ? wholeTokens : formatTokenCount;
 	const plus = (n: number) => (n >= 0 && compact < 3 ? "+" : "");
 	return {
 		incCost: (bin: Bin) => {
 			const n = bin.incremental_cost ?? 0;
 			const text = `${plus(n)}${cost(n)}`;
-			return compact >= 4 ? text.replace("$", "") : text;
+			return compact >= 4 ? text.replace(currency, "") : text;
 		},
 		totalCost: (bin: Bin) => cost(bin.column_total_cost ?? bin.total_cost),
 		incTok: (bin: Bin) => {
 			const n = bin.incremental_tokens ?? 0;
 			return `${plus(n)}${tokens(n)}`;
 		},
-		totalTok: (bin: Bin) => `${tokens(bin.column_total_tokens ?? bin.total_tokens ?? 0)}${compact >= 5 ? "t" : " tok"}`,
+		totalTok: (bin: Bin) => `${tokens(bin.column_total_tokens ?? bin.total_tokens ?? 0)}${compact >= 5 ? unit.short : ` ${unit.name}`}`,
 	};
 }
 
@@ -116,6 +144,7 @@ export function renderWtftChart(input: {
 	showCostColumns?: boolean;
 	showTokenColumns?: boolean;
 	padRowsTo?: number;
+	words?: ChartWords;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
@@ -125,7 +154,14 @@ export function renderWtftChart(input: {
 	let showCost = input.showCostColumns !== false;
 	let showTokens = input.showTokenColumns !== false;
 	const opts = { model: input.model, sessionNameSuffix: input.sessionNameSuffix };
-	const ALL_CATEGORIES = CATEGORY_ORDER;
+	const words = input.words;
+	const listed = words?.categories ?? [];
+	const order: Category[] = [...listed.map((c) => c.slot), ...CATEGORY_ORDER.filter((c) => !listed.some((l) => l.slot === c))];
+	const styleOf = (cat: Category): { fg: number; char: string; label: string | null } => {
+		const own = listed.find((l) => l.slot === cat);
+		return own ? { fg: own.fg, char: own.char ?? "█", label: own.label } : listed.length > 0 ? { ...CATEGORY_STYLE[cat], label: null } : CATEGORY_STYLE[cat];
+	};
+	const ALL_CATEGORIES = order;
 
 	const maxBarValue = mode === "cumulative"
 		? (unit === "tokens" ? totalSessionTokens : totalSessionCost)
@@ -140,7 +176,7 @@ export function renderWtftChart(input: {
 	// buildTickLine and buildTokenTickLine return null below 15 cells.
 	const minBar = 15;
 	const layoutFor = (cost: boolean, tokens: boolean, compact: number) => {
-		const texts = columnTexts(compact);
+		const texts = columnTexts(compact, words);
 		const shown: ((bin: Bin) => string)[] = [];
 		if (cost) shown.push(texts.incCost, texts.totalCost);
 		if (tokens) shown.push(texts.incTok, texts.totalTok);
@@ -175,9 +211,9 @@ export function renderWtftChart(input: {
 
 	const widgetLines: string[] = [];
 	
-	const titleLeft = unit === "tokens"
+	const titleLeft = words?.title ?? (unit === "tokens"
 		? (disabledEmoji ? "[#] WTF Tokens?" : "🔢 WTF Tokens?")
-		: (disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?");
+		: (disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?"));
 	
 	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
@@ -192,9 +228,9 @@ export function renderWtftChart(input: {
 		proximity.status, disabledEmoji, proximity.multiplier,
 	);
 
-	const legendItems = CATEGORY_ORDER
-		.filter(c => CATEGORY_STYLE[c].label !== null)
-		.map(c => `\x1b[38;5;${CATEGORY_STYLE[c].fg}m${CATEGORY_STYLE[c].char}\x1b[0m${CATEGORY_STYLE[c].label}`);
+	const legendItems = order
+		.filter(c => styleOf(c).label !== null)
+		.map(c => `\x1b[38;5;${styleOf(c).fg}m${styleOf(c).char}\x1b[0m${styleOf(c).label}`);
 	const legendStr = legendItems.join(" ");
 
 	widgetLines.push(titleLeftFinal + "  " + timelineStr);
@@ -206,7 +242,7 @@ export function renderWtftChart(input: {
 		const labelPrefix = dateLabel + "─".repeat(paddingLen);
 		const ticksLine = unit === "tokens"
 			? buildTokenTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix)
-			: buildTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix);
+			: buildTickLine(scaleMax, maxBarWidth, prefixWidth, labelPrefix, words?.currency);
 		if (ticksLine) {
 			widgetLines.push(`\x1b[90m${ticksLine}\x1b[0m`);
 		}
@@ -221,7 +257,7 @@ export function renderWtftChart(input: {
 			const slots = {} as Record<Category, number>;
 			let allocated = 0;
 
-			for (const cat of CATEGORY_ORDER) {
+			for (const cat of order) {
 				const raw = scaleMax > 0 ? (bin.costs[cat] / scaleMax) * cellWidth : 0;
 				slots[cat] = Math.floor(raw);
 				allocated += slots[cat];
@@ -229,14 +265,14 @@ export function renderWtftChart(input: {
 
 			if (prevSlots) {
 				let clampedTotal = 0;
-				for (const cat of CATEGORY_ORDER) {
+				for (const cat of order) {
 					if (prevSlots[cat] >= 1) slots[cat] = Math.max(slots[cat], prevSlots[cat]);
 					clampedTotal += slots[cat];
 				}
 				let excess = clampedTotal - cellWidth;
 				while (excess > 0) {
 					let maxGrow = -1, maxCat: Category | null = null;
-					for (const cat of CATEGORY_ORDER) {
+					for (const cat of order) {
 						if (slots[cat] <= 0) continue;
 						const grow = slots[cat] - (prevSlots[cat] || 0);
 						if (grow > maxGrow) { maxGrow = grow; maxCat = cat; }
@@ -245,13 +281,13 @@ export function renderWtftChart(input: {
 					else break;
 				}
 				allocated = 0;
-				for (const cat of CATEGORY_ORDER) allocated += slots[cat];
+				for (const cat of order) allocated += slots[cat];
 			}
 
 			while (allocated < cellWidth && bin.total_cost > 0) {
 				let maxDeficit = -Infinity;
 				let maxCat: Category | null = null;
-				for (const cat of CATEGORY_ORDER) {
+				for (const cat of order) {
 					const ideal = (bin.costs[cat] / bin.total_cost) * cellWidth;
 					const deficit = ideal - slots[cat];
 					if (deficit > maxDeficit) {
@@ -296,7 +332,7 @@ export function renderWtftChart(input: {
 	// but says nothing about why, and TTL is only one of the causes.
 	// Drawn BELOW the missed row: rows are newest-first, so below is earlier in
 	// time, between the missed turn and the older turns it could not reuse.
-	const cacheMissLine = `\x1b[90m${buildDividerLine("Cache Miss")}\x1b[0m`;
+	const cacheMissLine = `\x1b[90m${buildDividerLine(words?.cacheMissLabel ?? "Cache Miss")}\x1b[0m`;
 	const missed = (b: typeof displayedBins[number] | undefined) => !!b?.key && cacheMissBins.has(b.key);
 
 	const rowWithColumns = (
@@ -358,7 +394,7 @@ export function renderWtftChart(input: {
 				const segWidth = scaleMax > 0 && barMax > 0 ? Math.round(((bin.total_tokens ?? 0) / scaleMax) * barMax * (t.total / (bin.total_tokens || 1))) : 0;
 				const segChars = Math.max(0, Math.min(segWidth, barMax - allChars));
 				if (segChars <= 0) continue;
-				const fg = CATEGORY_STYLE[cat]?.fg ?? 245;
+				const fg = styleOf(cat).fg;
 
 				if (mode === "cumulative") {
 					const incTokens = bin._incTokens?.[cat]?.total ?? 0;
@@ -377,7 +413,7 @@ export function renderWtftChart(input: {
 
 			const hasServerToolCost = (bin.costs["web"] || 0) > 0 && (bin.tokens["web"]?.total ?? 0) === 0;
 			if (hasServerToolCost && allChars < barMax) {
-				barStr += `\x1b[38;5;209m$\x1b[0m`;
+				barStr += `\x1b[38;5;209m${words?.currency ?? "$"}\x1b[0m`;
 				allChars++;
 				drewDollar = true;
 			}
@@ -387,15 +423,15 @@ export function renderWtftChart(input: {
 			let barStr = "";
 			if (mode === "cumulative") {
 				const counts = precomputedCells.get(bin);
-				for (const cat of CATEGORY_ORDER) {
+				for (const cat of order) {
 					const n = counts?.[cat] ?? 0;
 					if (n <= 0) continue;
-					const fg = CATEGORY_STYLE[cat]?.fg ?? 245;
+					const fg = styleOf(cat).fg;
 					barStr += `\x1b[38;5;${fg}m${"█".repeat(n)}\x1b[0m`;
 				}
 			} else {
 				const buckets = new Map<number, { cat: Category; cost: number }[]>();
-				for (const cat of CATEGORY_ORDER) {
+				for (const cat of order) {
 					const cost = bin.costs[cat] || 0;
 					if (cost > 0 && scaleMax > 0) {
 						const pos = Math.round((cost / scaleMax) * (maxBarWidth - 1));
@@ -412,7 +448,7 @@ export function renderWtftChart(input: {
 					} else {
 						let best = entries[0];
 						for (const entry of entries) if (entry.cost > best.cost) best = entry;
-						const fg = CATEGORY_STYLE[best.cat].fg;
+						const fg = styleOf(best.cat).fg;
 						barStr += `\x1b[38;5;${fg}m█\x1b[0m`;
 					}
 				}
@@ -430,8 +466,8 @@ export function renderWtftChart(input: {
 
 	if (unit === "tokens") {
 		const keyParts: string[] = [];
-		if (mode === "cumulative") keyParts.push(`\x1b[37m▃\x1b[0m\x1b[90m earlier bins  \x1b[37m▇\x1b[0m\x1b[90m this bin`);
-		if (drewDollar) keyParts.push("$ = cost-only (web tools)");
+		if (mode === "cumulative") keyParts.push(`\x1b[37m▃\x1b[0m\x1b[90m ${words?.key?.earlier ?? "earlier bins"}  \x1b[37m▇\x1b[0m\x1b[90m ${words?.key?.thisBin ?? "this bin"}`);
+		if (drewDollar) keyParts.push(`${words?.currency ?? "$"} = ${words?.key?.costOnly ?? "cost-only (web tools)"}`);
 		if (keyParts.length > 0) widgetLines.push(`\x1b[90m  ${keyParts.join("  ")}\x1b[0m`);
 		if (tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
 	}

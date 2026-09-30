@@ -78,7 +78,7 @@
       <legend>View</legend>
       <label><input type="radio" name="view" value="both"> both</label>
       <label><input type="radio" name="view" value="today"> as the chart draws it</label>
-      <label><input type="radio" name="view" value="generic"> as a library would</label>
+      <label><input type="radio" name="view" value="generic"> with the booth's words</label>
     </fieldset>
   </div>
   <p class="meta">The chart drops a ticked column pair when it leaves the bar under 15 cells, the units pair first: at 40 columns the units pair is gone with its box still ticked. The chart is drawn <code>columns</code> - 2 wide, and never under 40.</p>
@@ -88,14 +88,14 @@
     <div class="frame"><pre id="today"></pre></div>
   </div>
   <div id="generic-block">
-    <h2>As a generic library would draw it</h2>
-    <p class="meta">A mockup of a chart that took these words from its caller. The lines are the chart's, after the substitutions below. The title's <code>Booth 42</code> is this mockup's; the chart's own title carries <code>...0042</code> from the caller's session name <code>booth-0042</code>. Two rules delete a line instead of rewriting it.</p>
+    <h2>With the booth's own words</h2>
+    <p class="meta">The same call, with the booth's <code>words</code> and no session name. The title's <code>Booth 42</code> is the booth's own, so it carries no <code>...0042</code>. The timeline strip stays, because it stays on wtft's title line.</p>
     <div class="frame"><pre id="generic"></pre></div>
   </div>
 
-  <h2>What the chart says that only wtft means</h2>
+  <h2>Words the booth passes</h2>
   <table id="subs"></table>
-  <p class="meta">A row that shows 0 does not fire in this view. Switch the measure to units for the key and the footer. Tick souvenirs, with the measure on revenue, for the warning. The power cut shows once the rows reach back to it: 20 hourly rows do and 19 don't, and it fires in other bins too, such as <code>1d</code> with 3 rows. It already fires in the default view. The key prints in bucket mode too, where the chart draws neither <code>▃</code> nor <code>▇</code>.</p>
+  <p class="meta">A row that shows 0 had no line to replace in the first picture. Switch the measure to units for the key and the footer. Tick souvenirs, with the measure on revenue, for the warning. The power cut shows once the rows reach back to it: 20 hourly rows do and 19 don't, and it fires in other bins too, such as <code>1d</code> with 3 rows. It already fires in the default view.</p>
 
   <h2>Categories the booth rides on</h2>
   <p class="meta">The chart has 14 categories, and any other value throws. The booth's items borrow a slot each, and with it the slot's colour and its position in the stack. Cost bucket mode draws no stack, only one marker per slot. The table lists Souvenirs whether or not the booth sells them; the booth uses <code>other</code> only when souvenirs are ticked.</p>
@@ -186,14 +186,14 @@
       $(`${which}-block`).hidden = !VIEWS[view].includes(which);
       $(which).innerHTML = picture[which].map(ansiToHtml).join("\n");
     }
-    fillTable($("subs"), ["Says", "A library would say", "Lines"], picture.substitutions.map((sub) => {
+    fillTable($("subs"), ["The chart says", "The booth says", "Lines"], picture.substitutions.map((sub) => {
       const tr = document.createElement("tr");
       if (sub.count === 0) tr.className = "idle";
       tr.append(cell(sub.says), cell(sub.becomes), cell(sub.count, "n"));
       return tr;
     }));
     $("call").textContent = picture.call;
-    $("count").textContent = `${picture.today.length} lines from the chart, ${picture.generic.length} after the substitutions.`;
+    $("count").textContent = `${picture.today.length} lines from the chart, ${picture.generic.length} with the booth's words.`;
     $("limit-out").textContent = state.limit;
     $("columns-out").textContent = state.columns;
     presets.querySelectorAll("button").forEach((button, index) => {

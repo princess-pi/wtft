@@ -1,7 +1,7 @@
 /** Bar chart rendering, histograms, token summaries, and terminal utilities. */
 
 import type { Interaction, Category } from "./wtft-shared.js";
-import { renderWtftChart } from "./wtft-chart.js";
+import { renderWtftChart, type ChartWords } from "./wtft-chart.js";
 import type { UncountedBillables } from "./wtft-parser.ts";
 import { isModelTagged } from "./wtft-parser.js";
 import {
@@ -335,7 +335,7 @@ export function buildTokenTickLine(maxTokens: number, barWidth: number, prefixWi
 	return result;
 }
 
-export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: number, labelPrefix: string): string | null {
+export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: number, labelPrefix: string, currency = "$"): string | null {
 	if (maxCost <= 0 || barWidth < 15) return null;
 	
 	const totalWidth = prefixWidth + barWidth;
@@ -358,7 +358,7 @@ export function buildTickLine(maxCost: number, barWidth: number, prefixWidth: nu
 	const tickValues = [0, maxCost / 4, maxCost / 2, (maxCost * 3) / 4, maxCost];
 
 	for (let i = 0; i < ticks.length; i++) {
-		const text = formatCost(tickValues[i]);
+		const text = formatCost(tickValues[i], currency);
 		const displayStr = ` ${text} `;
 		
 		const dotIdx = displayStr.indexOf(".");
@@ -407,10 +407,10 @@ export function padString(str: string, len: number): string {
 	return str.length >= len ? str : str + " ".repeat(len - str.length);
 }
 
-export function formatCost(cost: number): string {
+export function formatCost(cost: number, currency = "$"): string {
 	// Adaptive precision: 4 decimal places for sub-cent values, 2 otherwise
 	const decimals = cost > 0 && cost < 0.01 ? 4 : 2;
-	return `$${cost.toFixed(decimals)}`;
+	return `${currency}${cost.toFixed(decimals)}`;
 }
 
 export function formatMmmDdStr(dateStr: string): string {
@@ -792,6 +792,7 @@ export function buildWtftLines(
 		showTokenColumns?: boolean;
 		/** Placeholder rows fill the chart out to this many interval rows. */
 		padRowsTo?: number;
+		words?: ChartWords;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -948,16 +949,19 @@ export function buildWtftLines(
 		.filter(i => classifyInteraction(i) === "other")
 		.reduce((sum, i) => sum + i.cost, 0);
 	let otherWarning: string | null = null;
-	if (unit === "cost" && totalSessionCost > 0) {
+	const warningWord = opts?.words?.otherWarning;
+	if (unit === "cost" && totalSessionCost > 0 && warningWord !== false) {
 		const otherPct = totalOtherCost / totalSessionCost;
 		if (otherPct > 0.20 && totalOtherCost > 6.00) {
 			const pctStr = `${Math.round(otherPct * 100)}%`;
-			const costStr = formatCost(totalOtherCost);
-			otherWarning = `\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`;
+			const costStr = formatCost(totalOtherCost, opts?.words?.currency);
+			otherWarning = warningWord === undefined
+				? `\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`
+				: `\x1b[1;33m⚠️  ${warningWord.replaceAll("{pct}", pctStr).replaceAll("{cost}", costStr)}\x1b[0m`;
 		}
 	}
 	const cacheMetrics = computeCacheMetrics(interactions);
-	const cacheLine = cacheMetrics
+	const cacheLine = cacheMetrics && opts?.words?.cacheLine !== false
 		? `${cacheMetrics.hitRate}% cache hit (${cacheMetrics.readTokens} read / ${cacheMetrics.totalOps} total ops)`
 		: null;
 
@@ -974,11 +978,12 @@ export function buildWtftLines(
 		totalSessionCost,
 		totalSessionTokens,
 		otherWarning,
-		tokenFooter: unit === "tokens" ? (tokenFooterSummary(interactions) || null) : null,
+		tokenFooter: unit === "tokens" && opts?.words?.tokenFooter !== false ? (tokenFooterSummary(interactions) || null) : null,
 		cacheLine,
 		showCostColumns: opts?.showCostColumns !== false,
 		showTokenColumns: opts?.showTokenColumns !== false,
 		padRowsTo: opts?.padRowsTo,
+		words: opts?.words,
 	});
 }
 

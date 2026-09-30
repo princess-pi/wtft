@@ -1,4 +1,5 @@
 import { buildWtftLines, CATEGORY_ORDER, CATEGORY_STYLE } from "../../extensions/lib/wtft-renderer.ts";
+import type { ChartWords } from "../../extensions/lib/wtft-chart.ts";
 import { fairBooth, FAIR_ITEMS, FAIR_TZ, SOUVENIRS } from "./fair-session.ts";
 import { withTerminal } from "./report.ts";
 
@@ -15,12 +16,12 @@ export interface FairState {
 	now?: number;
 }
 
-/** One place the chart says something only wtft means. */
+/** One word the booth takes from the chart's default. */
 export interface Substitution {
 	id: string;
 	says: string;
 	becomes: string;
-	/** How many lines it rewrote in this picture. */
+	/** How many lines of the first view carry the word the booth replaces. */
 	count: number;
 }
 
@@ -29,88 +30,51 @@ export interface FairPicture {
 	call: string;
 	/** What the chart returns. */
 	today: string[];
-	/** The same lines after the substitutions. */
+	/** The chart called again with the booth's own words. */
 	generic: string[];
-	/** Each substitution, with how often it fired. */
+	/** Each thing the booth says in its own words, with how many lines of the first view carried wtft's. */
 	substitutions: Substitution[];
 }
 
 const SESSION = "booth-0042.jsonl";
 
-function legendLine(souvenirs: boolean): string {
-	const items = souvenirs ? [...FAIR_ITEMS, SOUVENIRS] : FAIR_ITEMS;
-	return [...items]
-		.sort((a, b) => CATEGORY_ORDER.indexOf(a.slot) - CATEGORY_ORDER.indexOf(b.slot))
-		.map((item) => `\x1b[38;5;${CATEGORY_STYLE[item.slot].fg}m█\x1b[0m${item.label}`)
-		.join(" ");
-}
-
-interface Rule {
+interface Word {
 	id: string;
 	says: string;
 	becomes: string;
-	rewrite: (line: string, index: number, state: FairState) => string | null | undefined;
+	/** Matches a line of the first view that carries what the word replaces. */
+	seen: (line: string, index: number) => boolean;
 }
 
-const RULES: Rule[] = [
-	{
-		id: "title",
-		says: "💸 WTF Tokens? ...0042",
-		becomes: "🍎 Booth 42",
-		rewrite: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line)
-			? line.replace(/(?:💸|🔢|\[\$\]|\[#\]) WTF Tokens\?(?: \x1b\[90m\.\.\.[^\x1b]*\x1b\[0m)?/, "🍎 Booth 42")
-			: undefined,
-	},
-	{
-		id: "legend",
-		says: "█Ovrhd █Waste █Plan … all 14 categories, named for wtft",
-		becomes: "█Lattes █Apples … the booth's own items",
-		rewrite: (line, index, state) => index === 1 && line.includes("Ovrhd") ? legendLine(state.souvenirs) : undefined,
-	},
-	{
-		id: "units",
-		says: "2.2k tok",
-		becomes: "2.2k pcs",
-		rewrite: (line) => / tok(?= *\x1b)/.test(line) ? line.replace(/ tok(?= *\x1b)/g, " pcs") : undefined,
-	},
-	{
-		id: "key",
-		says: "▃ earlier bins  ▇ this bin",
-		becomes: "▃ sold earlier  ▇ sold this bin",
-		rewrite: (line) => line.includes("earlier bins")
-			? "\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m sold earlier  \x1b[37m▇\x1b[0m\x1b[90m sold this bin\x1b[0m"
-			: undefined,
-	},
-	{
-		id: "footer",
-		says: "↑2.2k",
-		becomes: "(no line)",
-		rewrite: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) ? null : undefined,
-	},
-	{
-		id: "cache-line",
-		says: "CH: 0% cache hit (0 read / 2.2k total ops)",
-		becomes: "(no line)",
-		rewrite: (line) => /^\x1b\[90m {2}CH: /.test(line) ? null : undefined,
-	},
-	{
-		id: "miss",
-		says: "Cache Miss",
-		becomes: "Power cut",
-		rewrite: (line) => line.includes("── Cache Miss ") ? line.replace("Cache Miss", "Power cut ") : undefined,
-	},
-	{
-		id: "warning",
-		says: "⚠️  \"Other\" category: 24% of session cost ($4752.00). Run wtft --other to drill down.",
-		becomes: "⚠️  Souvenirs: 24% of revenue ($4752.00).",
-		rewrite: (line) => {
-			const m = /^\x1b\[1;33m⚠️ {2}"Other" category: (\d+%) of session cost \((\$[\d.,]+)\)\. Run wtft --other to drill down\.\x1b\[0m$/.exec(line);
-			return m ? `\x1b[1;33m⚠️  Souvenirs: ${m[1]} of revenue (${m[2]}).\x1b[0m` : undefined;
-		},
-	},
+const WORDS: Word[] = [
+	{ id: "title", says: "💸 WTF Tokens? ...0042", becomes: "🍎 Booth 42", seen: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line) },
+	{ id: "legend", says: "█Ovrhd █Waste █Plan … all 14 categories, named for wtft", becomes: "█Lattes █Apples … the booth's own items", seen: (line, index) => index === 1 && line.includes("Ovrhd") },
+	{ id: "units", says: "2.2k tok", becomes: "2.2k pcs", seen: (line) => / tok(?= *\x1b)/.test(line) },
+	{ id: "key", says: "▃ earlier bins  ▇ this bin", becomes: "▃ sold earlier  ▇ sold this bin", seen: (line) => line.includes("earlier bins") },
+	{ id: "footer", says: "↑2.2k", becomes: "(no line)", seen: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) },
+	{ id: "cache-line", says: "CH: 0% cache hit (0 read / 2.2k total ops)", becomes: "(no line)", seen: (line) => /^\x1b\[90m {2}CH: /.test(line) },
+	{ id: "miss", says: "Cache Miss", becomes: "Power cut", seen: (line) => line.includes("── Cache Miss ") },
+	{ id: "warning", says: "⚠️  \"Other\" category: 24% of session cost ($4752.00). Run wtft --other to drill down.", becomes: "⚠️  Souvenirs: 24% of revenue ($4752.00).", seen: (line) => /"Other" category: \d+% of session cost/.test(line) },
 ];
 
-/** The fair's booth drawn twice through `buildWtftLines`: as it comes back, and with `RULES` applied. */
+/** The booth's own words for the chart. */
+function boothWords(souvenirs: boolean): ChartWords {
+	const items = souvenirs ? [...FAIR_ITEMS, SOUVENIRS] : FAIR_ITEMS;
+	return {
+		title: "🍎 Booth 42",
+		categories: [...items]
+			.sort((a, b) => CATEGORY_ORDER.indexOf(a.slot) - CATEGORY_ORDER.indexOf(b.slot))
+			.map((item) => ({ slot: item.slot, label: item.label, fg: CATEGORY_STYLE[item.slot].fg })),
+		tokenUnit: { name: "pcs", short: "p" },
+		cacheMissLabel: "Power cut",
+		key: { earlier: "sold earlier", thisBin: "sold this bin" },
+		tokenFooter: false,
+		cacheLine: false,
+		otherWarning: "Souvenirs: {pct} of revenue ({cost}).",
+	};
+}
+
+/** The fair's booth drawn twice through `buildWtftLines`: with the chart's own words, and with the booth's. */
 export function renderFair(state: FairState): FairPicture {
 	const interactions = fairBooth({ souvenirs: state.souvenirs });
 	const width = Math.min(state.columns - 2, 1023);
@@ -130,19 +94,11 @@ export function renderFair(state: FairState): FairPicture {
 		interval: "1h", limit: 100, width, mode: "cumulative", timezone: undefined,
 	}, options)) ?? [];
 
-	const counts = new Map<string, number>();
-	const generic: string[] = [];
-	today.forEach((line, index) => {
-		let current: string | null = line;
-		for (const rule of RULES) {
-			if (current === null) break;
-			const next = rule.rewrite(current, index, state);
-			if (next === undefined) continue;
-			counts.set(rule.id, (counts.get(rule.id) ?? 0) + 1);
-			current = next;
-		}
-		if (current !== null) generic.push(current);
-	});
+	const words = boothWords(state.souvenirs);
+	const { sessionNameSuffix: _suffix, ...bare } = options;
+	const generic = withTerminal(state.columns, state.now, () => buildWtftLines(interactions, {
+		interval: "1h", limit: 100, width, mode: "cumulative", timezone: undefined,
+	}, { ...bare, words })) ?? [];
 
 	const call = [
 		"buildWtftLines(sales, defaults, {",
@@ -151,13 +107,19 @@ export function renderFair(state: FairState): FairPicture {
 		`  sessionNameSuffix: ${JSON.stringify(SESSION)},`,
 		`  showCostColumns: ${state.showCostColumns}, showTokenColumns: ${state.showTokenColumns},`,
 		"})",
+		"",
+		"then again, without the session name and with the booth's words:",
+		"buildWtftLines(sales, defaults, {",
+		"  ...the same options,",
+		`  words: ${JSON.stringify(words, null, 2).replace(/\n/g, "\n  ")},`,
+		"})",
 	].join("\n");
 
 	return {
 		call,
 		today,
 		generic,
-		substitutions: RULES.map(({ id, says, becomes }) => ({ id, says, becomes, count: counts.get(id) ?? 0 })),
+		substitutions: WORDS.map(({ id, says, becomes, seen }) => ({ id, says, becomes, count: today.filter((line, index) => seen(line, index)).length })),
 	};
 }
 

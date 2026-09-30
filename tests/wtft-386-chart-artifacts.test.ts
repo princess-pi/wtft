@@ -38,7 +38,7 @@ function direct(columns: number, args: Parameters<typeof buildWtftLines>[2], pad
 	}
 }
 
-describe("renderReport copies the CLI report arm's option-to-chart step", () => {
+describe("renderReport draws what the CLI report arm draws", () => {
 	it("prints the session path, then the chart lines buildWtftLines returns for the parsed flags", () => {
 		const env = { columns: 100, sessionFile: "/tmp/sessions/abcd1234.jsonl", interactions: wtftSession(MODEL), now: NOW };
 		const report = renderReport(["-c", "-i", "1h", "-l", "17", "--tz", "UTC"], env);

@@ -1,11 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { buildWtftLines, chartLimit, renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
+import { renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
 import { computeSpawnTree, type SpawnTree } from "../wtft-spawn-tree.js";
 import { subagentRows, type SubagentRow } from "../wtft-subagent-block.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
 import { spawnWtftDaemon, isEmojiDisabled } from "../wtft-cli-shared.js";
+import { askedOf, chartLines } from "../chart-call.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
 import { EXIT_PROVISIONAL } from "./exit-codes.js";
 import { reapLogPath } from "../daemon-log.js";
@@ -302,8 +303,6 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	}
 
 	const config = readConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
-	// CLI flags override persisted emoji for this run only (CLI does not writeConfig).
-	const disabledEmoji = typeof opts.enableEmoji === "boolean" ? !opts.enableEmoji : isEmojiDisabled();
 	const sessionInterval = (typeof config.interval === "string" ? config.interval : undefined) as string | undefined;
 	const sessionLimit = (typeof config.limit === "number" ? config.limit : undefined) as number | undefined;
 	const sessionMode = (config.mode === "cumulative" || config.mode === "bucket" ? config.mode : undefined) as "cumulative" | "bucket" | undefined;
@@ -334,31 +333,14 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	pad = Math.min(pad, maxPad);
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
-	const finalInterval = opts.hasInterval ? opts.interval : (sessionInterval ?? "1h");
-	const finalLimit = chartLimit(opts, sessionLimit);
-	const finalMode = opts.hasMode ? opts.mode : (sessionMode ?? "cumulative");
-	const finalTimezone = opts.hasTimezone ? opts.timezone : sessionTimezone;
 
-	const defaultSettings = {
-		interval: "1h",
-		limit: 100,
-		width: Math.min(paddedWidth, 1023),
-		mode: "cumulative" as "cumulative" | "bucket",
-		timezone: undefined
-	};
-
-	const outputLines = buildWtftLines(interactions, defaultSettings, {
-		interval: finalInterval,
-		limit: finalLimit,
-		padRowsTo: finalLimit,
-		width: Math.min(paddedWidth, 1023),
-		mode: finalMode,
-		timezone: finalTimezone,
-		disabledEmoji,
-		sessionNameSuffix: path.basename(finalSessionPath),
+	const outputLines = chartLines({
+		interactions,
+		asked: askedOf(opts),
+		fallback: { width: paddedWidth, interval: sessionInterval, limit: sessionLimit, mode: sessionMode, timezone: sessionTimezone, disabledEmoji: isEmojiDisabled() },
 		unit,
-		showCostColumns: !opts.hideCostColumns,
-		showTokenColumns: !opts.hideTokenColumns,
+		sessionFile: finalSessionPath,
+		padRows: true,
 	});
 
 	console.log(padStr + `\x1b[90m${finalSessionPath}\x1b[0m`);

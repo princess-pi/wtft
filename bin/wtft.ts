@@ -184,6 +184,7 @@ import { runDaemonCommand } from "../extensions/lib/cli/daemon-command.ts";
 import { selectSession } from "../extensions/lib/cli/session.ts";
 import { runForceRebuild } from "../extensions/lib/cli/force-rebuild.ts";
 import { runWatch } from "../extensions/lib/cli/watch.ts";
+import { chartUnit } from "../extensions/lib/chart-call.ts";
 import { runReport } from "../extensions/lib/cli/report.ts";
 import {
 	mainCloneDir,
@@ -360,9 +361,7 @@ const isSpawnRecord = process.argv[2] === "spawn-record";
 
 const opts = parseWtftCliArgs(process.argv.slice(2));
 
-let unit: "cost" | "tokens" = cfg.tokens ? "tokens" : "cost";
-if (opts.hasTokens) unit = "tokens";
-if (opts.hasCost) unit = "cost";
+const unit = chartUnit(opts, cfg.tokens);
 
 
 async function main() {

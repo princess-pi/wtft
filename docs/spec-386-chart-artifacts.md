@@ -10,9 +10,10 @@ that is not wtft. Neither page has a painter of its own: both call `buildWtftLin
 
 `bun run artifacts` bundles `artifacts/renderer/entry.ts` for the browser, as minified ESM, and writes
 `artifacts/renderer/wtft-chart.mjs`. The file is tracked, because `serve` publishes the
-`artifacts/` directory as it stands. The bundle's first line names a sha-256 over every repo file it was built from, this build
-script included; a test recomputes it and fails when the two differ, so an edit to anything it carries (the chart, the parser, the pricing and
-cost code, and what they import) needs a rebuild. `node:url` is replaced by a two-function shim, and
+`artifacts/` directory as it stands. The bundle's first line names a sha-256 over every repo file it was built from outside
+`node_modules`, plus this build script and `bun.lock`; a test recomputes it and fails when the two differ, so an edit
+to anything it carries (the chart, the parser, the pricing and cost code, and what they import) or a dependency change
+needs a rebuild. The hash, unlike the bundle's bytes, is the same under every bun version. `node:url` is replaced by a two-function shim, and
 `node:fs` and `node:child_process` become empty objects, so the bundle reads no config or pricing file.
 
 The bundle exports:

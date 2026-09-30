@@ -31,15 +31,15 @@ async function build() {
 	});
 	if (!result.success || !result.metafile) throw new Error(result.logs.map(String).join("\n"));
 	const files = Object.keys(result.metafile.inputs)
-		.map((input) => path.resolve(ROOT, input))
-		.filter((file) => file.startsWith(ROOT + path.sep) && fs.existsSync(file));
-	files.push(path.join(ROOT, "build-artifacts.ts"));
+		.map((input) => path.resolve(input))
+		.filter((file) => file.startsWith(ROOT + path.sep) && !file.includes(`${path.sep}node_modules${path.sep}`) && fs.existsSync(file));
+	files.push(path.join(ROOT, "build-artifacts.ts"), path.join(ROOT, "bun.lock"));
 	const hash = createHash("sha256");
 	for (const file of [...new Set(files)].sort()) hash.update(`${path.relative(ROOT, file)}\0${fs.readFileSync(file, "utf8")}\0`);
 	return { sources: hash.digest("hex"), text: await result.outputs[0].text() };
 }
 
-/** The sha-256 over every repo file the bundle is built from, this build script included. */
+/** The sha-256 over every tracked repo file the bundle is built from, this build script and `bun.lock` included. */
 export async function rendererSourcesHash(): Promise<string> {
 	return (await build()).sources;
 }

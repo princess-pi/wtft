@@ -6,7 +6,8 @@ import * as assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { describe, it } from "node:test";
-import { buildRendererBundle, RENDERER_BUNDLE } from "../build-artifacts.ts";
+import { pathToFileURL } from "node:url";
+import { committedSourcesHash, RENDERER_BUNDLE, rendererSourcesHash } from "../build-artifacts.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { buildWtftLines } from "../extensions/lib/wtft-renderer.ts";
 import { ansiToHtml, stripAnsi } from "../artifacts/renderer/ansi.ts";
@@ -81,12 +82,12 @@ describe("renderReport copies the CLI report arm's option-to-chart step", () => 
 });
 
 describe("the committed bundle is the browser build", () => {
-	it("equals a fresh build", async () => {
-		assert.equal(fs.readFileSync(RENDERER_BUNDLE, "utf8"), await buildRendererBundle(), "run: bun run artifacts");
+	it("was built from the sources as they stand", async () => {
+		assert.equal(committedSourcesHash(), await rendererSourcesHash(), "run: bun run artifacts");
 	});
 
 	it("draws the same lines as the source, and parses flags as the source does", async () => {
-		const bundle = await import(RENDERER_BUNDLE);
+		const bundle = await import(pathToFileURL(RENDERER_BUNDLE).href);
 		const argv = ["-b", "--tokens", "-i", "2h", "-l", "8", "--tz", "Asia/Tokyo", "--no-cost"];
 		const env = { columns: 140, sessionFile: "/x/a.jsonl", interactions: wtftSession(MODEL), now: NOW };
 		assert.deepEqual(bundle.renderReport(argv, env).lines, renderReport(argv, env).lines);
@@ -96,7 +97,7 @@ describe("the committed bundle is the browser build", () => {
 
 	it("draws in a page with no process at every width, and leaves no process behind", () => {
 		const script = `
-			const { renderReport, wtftSession } = await import(${JSON.stringify(RENDERER_BUNDLE.href ?? String(RENDERER_BUNDLE))});
+			const { renderReport, wtftSession } = await import(${JSON.stringify(pathToFileURL(RENDERER_BUNDLE).href)});
 			const interactions = wtftSession("${MODEL}");
 			delete globalThis.process;
 			const counts = [79, 80, 81].map((columns) => renderReport(["-c"], { columns, sessionFile: "/x/a.jsonl", interactions }).lines.length);

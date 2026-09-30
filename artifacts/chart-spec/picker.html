@@ -175,7 +175,14 @@
     input.addEventListener("change", () => { controlsToCommand(); commandChanged(); });
   }
   for (const id of ["columns", "model", "session"]) $(id).addEventListener("input", () => { $(`${id}-out`) && ($(`${id}-out`).textContent = $(id).value); draw(); });
-  $("copy").addEventListener("click", () => navigator.clipboard?.writeText(window.__lines.join("\n")));
+  $("copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(window.__lines.join("\n"));
+      $("count").textContent += " Copied.";
+    } catch {
+      $("count").textContent += " This browser would not copy; select the chart and copy it by hand.";
+    }
+  });
 
   cmd.value = PRESETS["cost-cumulative"].argv.join(" ");
   commandChanged();

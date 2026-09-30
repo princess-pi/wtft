@@ -29,8 +29,9 @@ export interface FairPicture {
 	call: string;
 	/** What the chart returns. */
 	today: string[];
-	/** The same lines after the substitutions, and how often each fired. */
+	/** The same lines after the substitutions. */
 	generic: string[];
+	/** Each substitution, with how often it fired. */
 	substitutions: Substitution[];
 }
 

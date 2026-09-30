@@ -10,8 +10,8 @@ that is not wtft. Neither page has a painter of its own: both call `buildWtftLin
 
 `bun run artifacts` bundles `artifacts/renderer/entry.ts` for the browser, as minified ESM, and writes
 `artifacts/renderer/wtft-chart.mjs`. The file is tracked, because `serve` publishes the
-`artifacts/` directory as it stands. A test builds the bundle again in memory and fails when the
-committed file differs, so an edit to anything it carries (the chart, the parser, the pricing and
+`artifacts/` directory as it stands. The bundle's first line names a sha-256 over every repo file it was built from, this build
+script included; a test recomputes it and fails when the two differ, so an edit to anything it carries (the chart, the parser, the pricing and
 cost code, and what they import) needs a rebuild. `node:url` is replaced by a two-function shim, and
 `node:fs` and `node:child_process` become empty objects, so the bundle reads no config or pricing file.
 
@@ -78,7 +78,7 @@ option-to-chart function is #389.
 ## 4. Verification
 
 - `tests/wtft-386-chart-artifacts.test.ts` asserts:
-  - the committed bundle equals a fresh build, and its `renderReport`, `parseWtftCliArgs` and `wtftSession` give what
+  - the committed bundle names the current sources hash, and its `renderReport`, `parseWtftCliArgs` and `wtftSession` give what
     the source gives;
   - the bundle draws at 79, 80 and 81 columns in a page with no `process`, and leaves none behind;
   - `renderReport`'s lines for a fixed command line equal `buildWtftLines` called with the arguments the report arm

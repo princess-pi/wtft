@@ -18,12 +18,17 @@ export interface Report {
 	lines: string[];
 }
 
-/** Runs `run` with the terminal `columns` wide and, when `now` is set, the clock at `now`. Both are restored after, and a page with no `process` is left with none. */
+/**
+ * Runs `run` with the terminal `columns` wide and, when `now` is set, the clock at `now`. Both are restored after, and a
+ * page with no `process` or no `process.stdout` is left with none. Under Node at exactly 80 columns the chart also asks
+ * `tmux` or `tput`, which can replace the width.
+ */
 export function withTerminal<T>(columns: number, now: number | undefined, run: () => T): T {
 	const host = globalThis as { process?: { stdout?: { columns?: number }; env?: Record<string, string> } };
 	const hadProcess = "process" in host;
 	const realProcess = host.process;
 	host.process ??= { stdout: {}, env: {} };
+	const hadStdout = "stdout" in host.process;
 	host.process.stdout ??= {};
 	const stdout = host.process.stdout;
 	const realColumns = stdout.columns;
@@ -35,16 +40,13 @@ export function withTerminal<T>(columns: number, now: number | undefined, run: (
 	} finally {
 		Date.now = realNow;
 		stdout.columns = realColumns;
+		if (!hadStdout) delete host.process.stdout;
 		if (hadProcess) host.process = realProcess;
 		else delete host.process;
 	}
 }
 
-/**
- * Turns a wtft command line into the lines `wtft` prints for one report.
- * Copied from `runReport` (extensions/lib/cli/report.ts) and the unit choice in bin/wtft.ts: a change
- * there does not reach here.
- */
+/** Turns a wtft command line into the session path line and the chart lines `wtft` prints for one report. */
 export function renderReport(argv: string[], env: ReportEnv): Report {
 	const opts = parseWtftCliArgs(argv);
 	const config = env.config ?? {};

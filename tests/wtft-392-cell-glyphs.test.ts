@@ -42,6 +42,26 @@ describe("cellsHtml", () => {
 		assert.doesNotMatch(corner, /right center|center top/);
 	});
 
+	it("paints exactly the characters the spec lists, and fills each as it says", () => {
+		const listed = "─━│┃┌┐└┘├┤┬┴┼╴╵╶╷▀▁▂▃▄▅▆▇█▉▊▋▌▍▎▏▐▔▕▖▗▘▙▚▛▜▝▞▟";
+		const painted = [];
+		for (let cp = 0x2500; cp <= 0x259f; cp++) {
+			const ch = String.fromCodePoint(cp);
+			if (cellsHtml(ch) !== ch) painted.push(ch);
+		}
+		assert.equal(painted.join(""), listed);
+		const style = (ch: string) => spans(cellsHtml(ch))[0].style;
+		assert.match(style("▉"), /left top \/ 87\.5% 100%/);
+		assert.match(style("▏"), /left top \/ 12\.5% 100%/);
+		assert.match(style("▐"), /right top \/ 50% 100%/);
+		assert.match(style("▀"), /left top \/ 100% 50%/);
+		assert.match(style("▖"), /left bottom \/ 50% 50%/);
+		assert.equal(style("▟").match(/50% 50%/g)?.length, 3);
+		assert.match(style("━"), /left center \/ 100% max\(2px,\.16em\)/);
+		assert.match(style("┃"), /center top \/ max\(2px,\.16em\) 50%/);
+		assert.equal(spans(cellsHtml("┼┼▉▉")).length, 4);
+	});
+
 	it("escapes text and leaves every other character, shades included, as text", () => {
 		assert.equal(cellsHtml("<a & b> ░▒▓ 💸 x"), "&lt;a &amp; b&gt; ░▒▓ 💸 x");
 		const mixed = cellsHtml("a█<");

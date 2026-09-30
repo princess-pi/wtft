@@ -39,7 +39,7 @@ The bundle exports:
 - `CATEGORY_STYLE`: each category's colour and legend name.
 - `ansiToHtml(text)`, `stripAnsi(text)`, `xtermRgb(n)`: the terminal's colour codes to HTML. `ansiToHtml` handles bold,
   reverse video, the 16 basic foreground colours and 256-colour foregrounds and backgrounds, and drops the rest, blink
-  included. It paints block and box-drawing glyphs as cells (`docs/spec-392-cell-glyphs.md`).
+  included. It honours the resets 0, 22, 27, 39 and 49, and reads an empty `\x1b[m` as 0. It paints the chart's block and box-drawing glyphs as cells (`docs/spec-392-cell-glyphs.md`).
 
 `renderReport` installs a stand-in for the terminal (`process.stdout.columns`) only while it runs, because
 `buildWtftLines` asks the terminal for its width. In a page with no `process`, the stand-in is a whole `process`

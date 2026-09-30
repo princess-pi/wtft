@@ -186,7 +186,7 @@ describe("the library page", () => {
 	it("the second view drops every wtft word the first view carries", () => {
 		const picture = at({ unit: "tokens", souvenirs: true });
 		assert.notDeepEqual(picture.generic, picture.today);
-		const words = /WTF Tokens|Ovrhd|cached\/carryover|CH: |Cache Miss|Other" category| tok\b/;
+		const words = /WTF Tokens|Ovrhd|earlier bins|CH: |Cache Miss|Other" category| tok\b/;
 		assert.ok(picture.today.some((line) => words.test(stripAnsi(line))));
 		assert.ok(!picture.generic.some((line) => words.test(stripAnsi(line))));
 	});

@@ -54,7 +54,7 @@ A rule inserts one line on the older side of the boundary, which is where the ca
 - Timeline strip: 24 hours, green, the current hour bold. A moon at each end shows the phase at that end's midnight, so the two can differ. The sun is an extra cell between 11 and 12, in hour 12's colour. A clock face marks the current hour. Surge hours are orange, and the surge badge follows the closing moon.
 - Legend: every category, including ones with no spend in the session.
 - Scale line: draws when the scale is above 0 and the bar is at least 15 cells. It carries the newest bin's date and five reverse-video labels at 0, ¼, ½, ¾ and full scale; a label that would overlap an earlier one is dropped, and token labels take one decimal place.
-- A token chart ends with the glyph key, in bucket mode too, and a token footer when there is one. Both charts end with a cache-hit line when the session has any cache-read, cache-write or input tokens, so `CH: 0%` prints on a session with no cache.
+- A token chart ends with a glyph key when it has something to say, and a token footer when there is one. A running-total chart's key is `▃ earlier bins  ▇ this bin`. A `$` note, `$ = cost-only (web tools)`, follows it when the chart draws a `$`, and stands alone in a bucket chart, which draws no `▃` or `▇`. Both charts end with a cache-hit line when the session has any cache-read, cache-write or input tokens, so `CH: 0%` prints on a session with no cache.
 - An "Other" warning line appears in a cost chart, after the padding rows, when Other is more than a fifth of the spend and more than $6. Other's figure leaves out server-tool cost; the spend it is compared with includes it.
 
 ## Presets
@@ -142,7 +142,7 @@ $ wtft -c --tokens --tz UTC -i 1h -l 10
  ── Sep-24 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
  15:00 +$0.62 $1.30 +274.0k 596.8k tok ▃▃▇▃▃▃▇▃▃▇▇▇▇▃▃▃▇▇
  ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
-   ▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)
+   ▃ earlier bins  ▇ this bin
    ↑3.5M ↓157.8k CH79%
    CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```
@@ -172,7 +172,7 @@ $ wtft -b --tokens --tz UTC -i 1h -l 10
  ── Sep-24 ────────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
  15:00 +$0.62 $1.30 +274.0k 596.8k tok █████████████████████████████████████████████████████████████
  ── Cache Miss ────────────────────────┼───────────────────────────┼────────────────────────────┼────────────────────────────┼───────────────────────────┼
-   ▃ cached/carryover  ▇ new/uncached  $ = cost-only (web tools)
+   $ = cost-only (web tools)
    ↑3.5M ↓157.8k CH79%
    CH: 79% cache hit (2.7M read / 3.5M total ops)
 ```

@@ -328,6 +328,7 @@ export function renderWtftChart(input: {
 		return `${coloredLabel}${gap}${colored[0]}${boltGap}${colored.slice(1).join(gap)}${gap}${barStr}`;
 	};
 
+	let drewDollar = false;
 	for (let i = 0; i < displayedBins.length; i++) {
 		const bin = displayedBins[i];
 
@@ -378,6 +379,7 @@ export function renderWtftChart(input: {
 			if (hasServerToolCost && allChars < barMax) {
 				barStr += `\x1b[38;5;209m$\x1b[0m`;
 				allChars++;
+				drewDollar = true;
 			}
 
 			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
@@ -427,7 +429,10 @@ export function renderWtftChart(input: {
 	if (otherWarning) widgetLines.push(otherWarning);
 
 	if (unit === "tokens") {
-		widgetLines.push(`\x1b[90m  \x1b[37m▃\x1b[0m\x1b[90m cached/carryover  \x1b[37m▇\x1b[0m\x1b[90m new/uncached  \x1b[90m\$ = cost-only (web tools)\x1b[0m`);
+		const keyParts: string[] = [];
+		if (mode === "cumulative") keyParts.push(`\x1b[37m▃\x1b[0m\x1b[90m earlier bins  \x1b[37m▇\x1b[0m\x1b[90m this bin`);
+		if (drewDollar) keyParts.push("$ = cost-only (web tools)");
+		if (keyParts.length > 0) widgetLines.push(`\x1b[90m  ${keyParts.join("  ")}\x1b[0m`);
 		if (tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
 	}
 

@@ -45,9 +45,10 @@ the shades `░ ▒ ▓` included, stays text.
   with their fills and arms; runs; escaping; the characters left as text; `ansiToHtml` painting
   inside a coloured span; `browser.js` calling `cellsHtml` on code blocks; and the whole-pixel font
   rules on the three pages.
-- By pixel: a headless-Chrome screenshot of the picker, the fair page and `chart-spec/spec.mdx` at
-  1800×1400, cropped to the bars, counting 1–3 pixel runs of another colour between two pixels of
-  the same bar colour along a pixel row (hairlines) and 1–8 pixel runs down a pixel column (row
-  bands). All three read 0 and 0 after this change; the counts before it are on #392.
-  `research/392-cell-gaps/` holds the screenshot and count scripts (`shot.mjs`, `gaps.py`,
-  `cropgaps.py`); they need a local Chromium and a served `artifacts/`.
+- By pixel: a headless-Chrome screenshot of the chart picker, the fair page and
+  `chart-spec/spec.mdx` at 1800×1400, cropped to the bars, counting 1–3 pixel runs of another
+  colour between two pixels of the same bar colour along a pixel row (hairlines) and 1–8 pixel runs
+  down a pixel column (row bands). All three read 0 and 0 after this change.
+  `research/392-cell-gaps/` holds `shot.mjs` (screenshot), `counts.py` (count) and `RESULTS.md`
+  (the commands and the before and after counts, also on
+  https://github.com/princess-pi/wtft/issues/392#issuecomment-5913515463).

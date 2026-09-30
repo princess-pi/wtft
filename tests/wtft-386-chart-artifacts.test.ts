@@ -209,6 +209,7 @@ describe("ansiToHtml", () => {
 		assert.equal(ansiToHtml("\x1b[5;90mA\x1b[0mB"), '<span style="color:rgb(136,136,136)">A</span>B');
 		assert.equal(stripAnsi("\x1b[1;38;5;208mx\x1b[0m"), "x");
 		assert.equal(ansiToHtml("\x1b[7mA\x1b[27mB"), '<span style="color:#0e0e0e;background:rgb(229,229,229)">A</span>B');
+		assert.equal(ansiToHtml("\x1b[38;2;1;31;7mA"), "A");
 		assert.equal(ansiToHtml("\x1b[38;5;196;7mA"), '<span style="color:#0e0e0e;background:rgb(255,0,0)">A</span>');
 	});
 });

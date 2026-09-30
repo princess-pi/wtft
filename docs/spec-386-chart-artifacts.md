@@ -12,9 +12,8 @@ that is not wtft. Neither page has a painter of its own: both call `buildWtftLin
 `artifacts/renderer/wtft-chart.mjs`. The file is tracked, because `serve` publishes the
 `artifacts/` directory as it stands. A test builds the bundle again in memory and fails when the
 committed file differs, so an edit to anything it carries (the chart, the parser, the pricing and
-cost code, and what they import) needs a rebuild. `node:url` is replaced by a two-function shim;
-bun's browser target supplies `node:path` and `node:os`, and `node:fs` and `node:child_process` become empty
-objects, so the bundle reads no config or pricing file.
+cost code, and what they import) needs a rebuild. `node:url` is replaced by a two-function shim, and
+`node:fs` and `node:child_process` become empty objects, so the bundle reads no config or pricing file.
 
 The bundle exports:
 
@@ -50,7 +49,7 @@ with an empty `env`, removed afterwards. It pins `Date.now` only when the caller
 `artifacts/chart-spec/picker.html`. The controls are the chart's flags, `--pad`, the terminal's width, the fake
 session's model and file name, four preset buttons, and a copy button. The command line shows the flags and can be
 edited; an edit is read by `parseWtftCliArgs` and moves the controls. A change to a flag's control rewrites the command
-line from the controls, so a typed flag with no control, such as `-o` or `--by-model`, is dropped. A typed limit or pad past its
+line from the controls, so a typed flag with no control, such as `-o`, is dropped. A typed limit or pad past its
 slider's end moves that end.
 The chart shown is `renderReport`'s output for that command line with no config: the session path line, the title
 with its timeline strip and session-name suffix, the legend, the scale line, the rows, the rules, and the footers. The

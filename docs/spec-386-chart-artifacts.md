@@ -73,7 +73,7 @@ revenue is `cost` and its units are `inputTokens`. The page draws it twice:
   rewrite it, and the timeline strip, the `$` and the compacted `t` stay.
 
 The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
-The decisions the findings raise are not made here: Q-A, Q-B and Q-D are #388.
+The decisions the findings raise are on the spec page's *Decisions* list.
 
 ## 4. Verification
 

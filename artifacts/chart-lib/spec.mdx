@@ -67,15 +67,10 @@ Each row is a place the chart is about wtft. **Fix shape** is what a caller woul
 - **Anything but two measures.** The columns are one currency and one count. A booth that sells by weight has no third.
 - **A caller's own divider.** The rules between rows are the cache miss and the date. The power cut rides on the first.
 
-## Open decisions
+## Decisions
 
-Q-A, Q-B and Q-D wait on the reviewer in https://github.com/princess-pi/wtft/issues/388, so a decision lands in one place.
-
-- **Q-A.** One chart with caller-supplied words and categories, or two charts on a shared bin-and-encode core.
-- **Q-B.** Whether the timeline strip belongs to the library or to wtft's title line.
-- **Q-D.** Whether time of day across days is a second chart, or out of scope.
-
-Decided:
-
+- **Q-A.** One chart with caller-supplied words and categories. wtft becomes its first caller, and its 14 categories are the default list. This settles F1 and F3 to F11.
+- **Q-B.** The timeline strip stays on wtft's title line. The library takes a header line from its caller.
 - **Q-C.** The option-to-chart function is `chartLines`, whichever way Q-A goes.
+- **Q-D.** Time of day across days is out of scope. F16 stays standing.
 - **Q-E.** The turn-stride lines the old picker offered, every 10 and every 100 turns, stay gone. The chart never drew them.

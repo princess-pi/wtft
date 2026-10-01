@@ -62,7 +62,6 @@ const asJson = process.argv.includes("--json");
 // ---
 const RATE_CARD_CHANGED_AT = Date.UTC(2026, 7, 16, 16, 0, 0); // 2026-08-16T16:00:00Z
 const V41_FLASH_FROM       = Date.UTC(2026, 8, 10, 4, 0, 0);  // 2026-09-10T04:00:00Z
-const V4_PRO_REROUTE_FROM  = Date.UTC(2026, 8, 14, 4, 0, 0);  // 2026-09-14T04:00:00Z
 const WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);  // 2026-08-23T00:00:00Z
 const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 06:00–10:00
 
@@ -78,9 +77,7 @@ const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 
 // across is the one edit that destroys what this file is for.
 const CARD = {
 	"deepseek-v4-pro": {
-		// From 2026-09-14 the NAME routes to V4.1 Flash and bills at its card.
 		cards: [
-			{ from: V4_PRO_REROUTE_FROM,  input: 0.15, output: 0.60, cacheRead: 0.003 },
 			{ from: RATE_CARD_CHANGED_AT, input: 0.66, output: 1.98, cacheRead: 0.022 },
 			{ from: 0,                    input: 1.74, output: 3.48, cacheRead: 0.0145 },
 		],

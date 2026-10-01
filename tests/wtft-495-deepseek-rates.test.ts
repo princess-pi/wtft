@@ -64,12 +64,6 @@ describe("#495 getPeakMultiplier — weekends are off-peak from 2026-08-23", () 
 
 type Card = { cacheMiss: number; output: number; cacheHit: number };
 
-// The 2026-08-25 scrape's card. On 2026-08-24 it is in force for all three
-// names; it is now a dateTiers window on each, ending 2026-09-10T04:00Z for the
-// two flash names and 2026-09-14T04:00Z for pro — so on 2026-09-11 it is STILL
-// the live card for v4-pro alone. Used at three instants below for exactly that
-// reason, which is why it is named for the card and not for one instant.
-// After 2026-09-14T04:00Z it is the current card for no name at all.
 const CARD_2026_08_16: Record<string, Card> = {
 	"deepseek-v4-pro":              { cacheMiss: 0.66, output: 1.98, cacheHit: 0.022 },
 	"deepseek-v4-flash":            { cacheMiss: 0.22, output: 0.66, cacheHit: 0.007 },
@@ -97,13 +91,12 @@ const CARD_V41_FLASH: Card = { cacheMiss: 0.15, output: 0.60, cacheHit: 0.003 };
 const AFTER_2026_08_16 = Date.UTC(2026, 7, 24, 12, 0, 0);   // Mon 2026-08-24 12:00Z
 const BEFORE_2026_08_16 = Date.UTC(2026, 6, 15, 12, 0, 0);  // Wed 2026-07-15 12:00Z
 
-// #100's two cutovers, sampled on a weekday outside both peak windows so the
-// surge multiplier is 1.0 and only the CARD is under test. Thu 2026-09-10 and
-// Mon 2026-09-14 are both weekdays; 12:00Z is outside 01:00–04:00 and 06:00–10:00.
+// Weekdays outside both peak windows, so the surge multiplier is 1.0 and only
+// the card is under test. 12:00Z is outside 01:00–04:00 and 06:00–10:00.
 const AFTER_V41_FLASH = Date.UTC(2026, 8, 10, 12, 0, 0);   // Thu 2026-09-10 12:00Z
 const BEFORE_V41_FLASH = Date.UTC(2026, 8, 9, 12, 0, 0);   // Wed 2026-09-09 12:00Z
-const AFTER_PRO_REROUTE = Date.UTC(2026, 8, 14, 12, 0, 0); // Mon 2026-09-14 12:00Z
-const BEFORE_PRO_REROUTE = Date.UTC(2026, 8, 11, 12, 0, 0);// Fri 2026-09-11 12:00Z
+const AFTER_2026_09_14 = Date.UTC(2026, 8, 14, 12, 0, 0);  // Mon 2026-09-14 12:00Z
+const ON_2026_09_11 = Date.UTC(2026, 8, 11, 12, 0, 0);     // Fri 2026-09-11 12:00Z
 
 const USAGE = {
 	input_tokens: 100000,
@@ -150,17 +143,7 @@ describe("#495 DeepSeek rate card, as of 2026-08-16 and before it", () => {
 	});
 });
 
-// --- #100: V4.1 Flash ---
-//
-// One model behind three names. `deepseek-flash` IS V4.1 Flash; the two v4-flash
-// names route to it from 2026-09-10T04:00Z and `deepseek-v4-pro` from
-// 2026-09-14T04:00Z. So on a CURRENT-CARD turn all four registry entries resolve
-// to the same quad, and a numeric assertion at such an instant would pass against
-// the wrong entry — which is what the identity assertions are for. The dated
-// windows still discriminate, so the before-cutover cases and the $2.64 v4-pro
-// case do bite on identity; only the current-card cases cannot.
-
-// 1M cache-miss input + 1M output, the shape #100's closer prices. No cache
+// 1M cache-miss input + 1M output. No cache
 // reads: the cache-hit rate moved too, and mixing it in would let a wrong hit
 // rate hide inside a right total.
 const MTOK_IN_OUT = { input_tokens: 1000000, output_tokens: 1000000 };
@@ -208,15 +191,11 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 	});
 
 	it("carries no dateTiers — it did not exist before its card did", () => {
-		// Stated in prose at the registry entry and, until now, asserted nowhere.
-		// Adding a window there would leave every other case in this file green,
-		// because all four entries share one standard row: the rates cannot tell
-		// them apart, only the structure can.
 		assert.strictEqual(MODEL_PRICING["deepseek-flash"].dateTiers, undefined);
-		// The contrast that makes it meaningful — the three retired names do.
-		for (const key of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"]) {
+		for (const key of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]) {
 			assert.strictEqual(MODEL_PRICING[key].dateTiers?.length, 2, `${key} should carry two dated windows`);
 		}
+		assert.strictEqual(MODEL_PRICING["deepseek-v4-pro"].dateTiers?.length, 1);
 	});
 
 	it("prices 1M cache-miss in + 1M out at $0.75 off-peak", () => {
@@ -280,13 +259,9 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 });
 
 describe("#100 the retired names bill at the V4.1 Flash card from their cutover", () => {
-	// Both flash names retired at 2026-09-10T04:00Z; pro reroutes 4 days later.
-	// Each is checked on BOTH sides of ITS OWN cutover — a single shared date
-	// would pass while pricing one of the two lines wrong for four days.
 	const cases: Array<[string, number, number, Card]> = [
 		["deepseek-v4-flash", BEFORE_V41_FLASH, AFTER_V41_FLASH, CARD_2026_08_16["deepseek-v4-flash"]],
 		["deepseek-v4-flash-vision-exp", BEFORE_V41_FLASH, AFTER_V41_FLASH, CARD_2026_08_16["deepseek-v4-flash-vision-exp"]],
-		["deepseek-v4-pro", BEFORE_PRO_REROUTE, AFTER_PRO_REROUTE, CARD_2026_08_16["deepseek-v4-pro"]],
 	];
 
 	for (const [model, before, after, oldCard] of cases) {
@@ -307,28 +282,22 @@ describe("#100 the retired names bill at the V4.1 Flash card from their cutover"
 		});
 	}
 
-	it("charges deepseek-v4-pro the Pro card in the four-day gap between the cutovers", () => {
-		// The gap is the whole reason there are two constants. A single
-		// 2026-09-10 cutover for both lines would price a Fri 2026-09-11 pro
-		// turn at 0.75 when DeepSeek billed 2.64 — and every other case in this
-		// file would still be green.
-		const cost = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, BEFORE_PRO_REROUTE);
+	it("prices deepseek-v4-pro at 2.64 on 2026-09-11, while flash is already on the V4.1 card", () => {
+		const pro = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, ON_2026_09_11);
+		assert.ok(Math.abs(pro - 2.64) < 0.000001, `got ${pro}, want 2.64`);
+		const flash = calculateClaudeCost("deepseek-v4-flash", MTOK_IN_OUT, ON_2026_09_11);
+		assert.ok(Math.abs(flash - 0.75) < 0.000001, `got ${flash}, want 0.75`);
+	});
+
+	it("prices deepseek-v4-pro at 2.64 after 2026-09-14", () => {
+		const cost = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, AFTER_2026_09_14);
 		assert.ok(Math.abs(cost - 2.64) < 0.000001, `got ${cost}, want 2.64`);
 	});
 
 	it("prices an UNDATED turn at the standard row, not at the oldest card", () => {
-		// `resolveTieredRates` gates its dated windows on `pricing.dateTiers &&
-		// timestamp`, so a falsy timestamp — what wtft-parser stamps on a turn it
-		// could not date — skips EVERY window and lands on the unconditioned
-		// quad, however old the turn looks.
-		//
-		// Asserted because the independent oracle in
-		// research/25-pi-deepseek-pricing/corpus-check.mjs has to mirror this
-		// rule, and its first #100 draft mirrored the sensible-looking opposite
-		// (oldest card), diverging 11.6x on v4-pro. Nothing went red: the corpus
-		// happens to contain no undated DeepSeek turn. This case is the wtft-side
-		// pin that makes such a divergence findable.
-		for (const model of ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]) {
+		const pro = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, 0);
+		assert.ok(Math.abs(pro - 2.64) < 0.000001, `pro undated: got ${pro}, want 2.64`);
+		for (const model of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]) {
 			const cost = calculateClaudeCost(model, MTOK_IN_OUT, 0);
 			assert.ok(
 				Math.abs(cost - priceMTokFromCard(CARD_V41_FLASH)) < 0.000001,

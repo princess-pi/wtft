@@ -5,8 +5,8 @@
  */
 
 import {
+	DEEPSEEK_RATE_CARD_FROM,
 	DEEPSEEK_V41_FLASH_FROM,
-	DEEPSEEK_V4_PRO_REROUTE_FROM,
 	MODEL_PRICING,
 	type ModelPricing,
 } from "./wtft-cost.js";
@@ -129,14 +129,13 @@ export function buildPricingManifest(): PricingManifest {
 				+ "against now, and a turn whose instant could not be read is "
 				+ "priced at the standard row however old it is. For DeepSeek, "
 				+ "the peak multiplier applies to Input, Output and Cache Read "
-				+ "only — never to Cache Write. All four DeepSeek names carry the "
-				+ "same standard row, because all four end up serving one model: "
+				+ "only — never to Cache Write. "
 				// Derived from the SAME constants the dated rows' conditions are
 				// generated from, never re-typed.
 				+ `V4.1 Flash retired the V4 Flash line at ${isoInstant(DEEPSEEK_V41_FLASH_FROM)} `
-				+ `and takes over deepseek-v4-pro at ${isoInstant(DEEPSEEK_V4_PRO_REROUTE_FROM)}, with `
-				+ "deepseek-flash as its own name. Only deepseek-v4-pro's dated "
-				+ "row still differs from the other three.",
+				+ "and deepseek-v4-flash, deepseek-v4-flash-vision-exp and deepseek-flash "
+				+ "share that card. "
+				+ `deepseek-v4-pro keeps its own card; its dated window ends at ${isoInstant(DEEPSEEK_RATE_CARD_FROM)}.`,
 		},
 		models: Object.keys(MODEL_PRICING).sort().map(model => {
 			const pricing = MODEL_PRICING[model];

@@ -184,11 +184,15 @@ describe("the library page", () => {
 	});
 
 	it("the second view drops every wtft word the first view carries", () => {
-		const picture = at({ unit: "tokens", souvenirs: true });
-		assert.notDeepEqual(picture.generic, picture.today);
-		const words = /WTF Tokens|Ovrhd|earlier bins|CH: |Cache Miss|Other" category| tok\b/;
-		assert.ok(picture.today.some((line) => words.test(stripAnsi(line))));
-		assert.ok(!picture.generic.some((line) => words.test(stripAnsi(line))));
+		const words = /WTF Tokens|Ovrhd|earlier bins|CH: |Cache Miss|Other" category| tok\b|^ {2}[↑↓R]/;
+		for (const state of [{ unit: "tokens" as const, souvenirs: true }, { unit: "cost" as const, souvenirs: true }]) {
+			const picture = at(state);
+			assert.notDeepEqual(picture.generic, picture.today);
+			assert.ok(picture.today.some((line) => words.test(stripAnsi(line))), state.unit);
+			assert.ok(!picture.generic.some((line) => words.test(stripAnsi(line))), state.unit);
+		}
+		assert.ok(at({ unit: "tokens" }).today.some((line) => /^ {2}↑/.test(stripAnsi(line))));
+		assert.ok(at({ souvenirs: true }).today.some((line) => /Other" category/.test(stripAnsi(line))));
 	});
 
 	it("the pages are listed and import the bundle", () => {

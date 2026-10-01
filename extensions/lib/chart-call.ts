@@ -1,4 +1,5 @@
 import { buildWtftLines, chartLimit, wholeLimit } from "./wtft-renderer.js";
+import type { ChartWords } from "./wtft-chart.js";
 import type { Interaction } from "./wtft-shared.js";
 
 export type ChartUnit = "cost" | "tokens";
@@ -73,6 +74,7 @@ export function chartLines(call: {
 	unit: ChartUnit;
 	sessionFile?: string;
 	model?: string;
+	words?: ChartWords;
 	padRows?: boolean;
 	padRowsCap?: number;
 }): string[] | null {
@@ -92,6 +94,7 @@ export function chartLines(call: {
 		timezone,
 		disabledEmoji,
 		model: call.model,
+		words: call.words,
 		sessionNameSuffix: call.sessionFile?.split(/[\\/]/).pop(),
 		unit: call.unit,
 		showCostColumns: asked.showCostColumns,

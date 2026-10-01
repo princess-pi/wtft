@@ -32,8 +32,8 @@ The bundle exports:
   the models the picker offers.
 - `fairBooth({ souvenirs })`: the state-fair booth's sales as the same interaction type. `FAIR_ITEMS`, `SOUVENIRS` and
   `FAIR_TZ` are its items and its timezone.
-- `renderFair(state)`: the fair page's draw, in two views, the list of substitutions the second view made with a count
-  each, and the `buildWtftLines` call as text. `FAIR_DEFAULTS` is the page's first state.
+- `renderFair(state)`: the fair page's draw, in two views (the chart with no words, then with the booth's `words`), the list
+  of words the booth passes with how many lines of the first view carried wtft's, and the `buildWtftLines` calls as text. `FAIR_DEFAULTS` is the page's first state.
 - `PRESETS`, `SPEC_PIN`: the four presets as command lines, and the terminal, clock, model and session file the spec
   page's blocks are drawn under.
 - `CATEGORY_STYLE`: each category's colour and legend name.
@@ -67,10 +67,9 @@ state-fair booth: six items and, optionally, souvenirs, over three days. One sal
 revenue is `cost` and its units are `inputTokens`. The page draws it twice:
 
 - **As the chart draws it today**: `buildWtftLines` output, unchanged.
-- **As a generic library would draw it**: a mockup, the same lines after a table of substitutions.
-  Each substitution is one place the chart says something only wtft means, and the page counts how
-  often each one fired. They cover 8 of the 17 findings; two of them delete a line rather than
-  rewrite it, and the timeline strip, the `$` and the compacted `t` stay.
+- **With the booth's own words**: the same call with `words` (docs/spec-398-chart-words.md).
+  Each word is one place the chart says something only wtft means, and the page counts how many lines
+  of the first view carried wtft's. The timeline strip stays.
 
 The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
 The decisions the findings raise are on the spec page's *Decisions* list.
@@ -88,7 +87,7 @@ The decisions the findings raise are on the spec page's *Decisions* list.
   - each of the four presets, colour codes stripped and trailing spaces trimmed, appears in `spec.mdx`;
   - the picker imports `parseWtftCliArgs` from the bundle and calls it on the command line;
   - the fake session spans three dates, a cache miss, surge turns and server-tool cost;
-  - the fair data feeds `buildWtftLines`, every substitution fires in some view and is a row of the findings table,
+  - the fair data feeds `buildWtftLines`, every word fires in some view and is a row of the findings table,
     and in the units view with souvenirs the second view carries none of the test's list of wtft words;
   - the two library pages are listed in `artifacts/docs.json`, and `paint.mjs` is gone;
   - `ansiToHtml` colours, bolds, reverses and escapes.

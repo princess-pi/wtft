@@ -382,10 +382,6 @@ export function isModelPriced(model: string): boolean {
  * The registry key calculateClaudeCost borrows when a DeepSeek id matches
  * nothing — the "Guess" branch, named once so the warning text and the branch
  * cannot disagree. Both call this; neither re-types the condition.
- *
- * KNOWN GAP: both keys it can return
- * are names DeepSeek RETIRED, so the warning tells a user it is guessing with
- * "the deepseek-v4-flash rate card" for a model that no longer exists.
  */
 export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek-v4-flash" {
 	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";

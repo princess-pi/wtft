@@ -146,12 +146,6 @@ function expectedCost(entry, usage, ts) {
 	// caller passes 0 for a timestamp it could not parse (see below), so this
 	// path is reachable.
 	//
-	// A first draft fell through to the OLDEST card here, on the reasoning that
-	// an undated turn is probably old. Measured against wtft: 1.74 against 0.15
-	// for v4-pro, an 11.6x divergence that would have reported every undated
-	// turn as a mismatch — the checker's own bug wearing a finding's costume.
-	// The corpus has no undated DeepSeek turn today, so nothing went red.
-	//
 	// Note it SELECTS a card rather than returning one: an earlier fix here
 	// `return`ed entry.cards[0], so the caller's Math.abs(actual - expected) went
 	// NaN, NaN > EPSILON is false, and an undated turn was silently neither
@@ -254,8 +248,6 @@ for (const file of sessionFiles(SESSIONS)) {
 	}
 }
 
-// null, not 0, when nothing was compared (pr-review round 2). A percentage over
-// an empty denominator is the exact figure this check exists to stop printing.
 // ---
 // SYNTHETIC MATRIX — the periods the corpus does not contain (#100).
 //

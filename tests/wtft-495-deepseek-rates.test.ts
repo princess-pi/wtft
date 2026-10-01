@@ -210,8 +210,7 @@ describe("#100 deepseek-flash is priced from its own entry, not guessed", () => 
 		// The cache-hit rate is the third of the card's three numbers and was the
 		// one no case here touched: priceMTokFromCard sums miss + output only. It
 		// is also the rate that matters most on an agent workload, where cache
-		// hits are the bulk of input, and the one whose #100 error was largest
-		// (0.022 against 0.003 on the v4-pro line, 7.3x).
+		// hits are the bulk of input.
 		const cost = calculateClaudeCost(
 			"deepseek-flash", { cache_read_input_tokens: 1000000 }, AFTER_V41_FLASH);
 		assert.ok(
@@ -281,7 +280,9 @@ describe("#100 the retired names bill at the V4.1 Flash card from their cutover"
 			);
 		});
 	}
+});
 
+describe("#402 deepseek-v4-pro keeps the Pro card after 2026-09-14", () => {
 	it("prices deepseek-v4-pro at 2.64 on 2026-09-11, while flash is already on the V4.1 card", () => {
 		const pro = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, ON_2026_09_11);
 		assert.ok(Math.abs(pro - 2.64) < 0.000001, `got ${pro}, want 2.64`);
@@ -299,6 +300,9 @@ describe("#100 the retired names bill at the V4.1 Flash card from their cutover"
 		assert.ok(Math.abs(cost - 5.28) < 0.000001, `got ${cost}, want 5.28`);
 	});
 
+});
+
+describe("DeepSeek undated and pre-2026-08-16 turns", () => {
 	it("prices an UNDATED turn at the standard row, not at the oldest card", () => {
 		const pro = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, 0);
 		assert.ok(Math.abs(pro - 2.64) < 0.000001, `pro undated: got ${pro}, want 2.64`);

@@ -177,13 +177,6 @@ describe("lookupModelPricing", () => {
 	});
 
 	it("fuzzy-matches model IDs containing a registry key", () => {
-		// DeepSeek v4-pro with provider prefix. What this case is FOR is that
-		// the prefix does not defeat the match, so it asserts the resolved
-		// ENTRY, not a rate. It used to pin the standard row's 0.66 and broke
-		// in #100 when v4-pro's standard row became the V4.1 Flash card —
-		// red for a repricing, in a test about string matching, whose subject
-		// had not changed at all. A current rate is the one thing here
-		// guaranteed to move again.
 		const p = lookupModelPricing("deepseek/deepseek-v4-pro");
 		assert.ok(p);
 		assert.strictEqual(p, MODEL_PRICING["deepseek-v4-pro"]);

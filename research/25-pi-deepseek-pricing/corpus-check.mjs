@@ -254,7 +254,7 @@ for (const file of sessionFiles(SESSIONS)) {
 // Every card transcribed above is only exercised by a turn that happens to fall
 // in its window. The corpus has no undated DeepSeek turn and no vision-exp turn
 // before 2026-08-16, so TWO transcription bugs sat here green: an undated turn
-// priced from the oldest card instead of the standard row (11.6x on v4-pro),
+// priced from the oldest card instead of the standard row,
 // and a missing vision-exp window that would have reported 0.22 against wtft's
 // 0.14. Both were found by a reviewer reading the diff, not by this check —
 // which is the check's own gap, since it is the thing that exists to find them.

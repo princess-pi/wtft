@@ -4,7 +4,7 @@ Source: https://api-docs.deepseek.com/quick_start/pricing and https://api-docs.d
 
 Footnote (2), verbatim, on both pages: "In response to user demand, we have decided to continue providing API services for DeepSeek V4 Pro after September 14, 2026, with the billing method remaining unchanged. We will provide further notice should there be any changes. Thank you for your understanding and support!"
 
-The 2026-09-10 announcement's routing of `deepseek-v4-pro` to V4.1-Flash from 2026-09-14 (`research/100-deepseek-v41-flash/pricing-page-2026-09-10.md`) did not take effect.
+On that footnote's words, "continue providing API services for DeepSeek V4 Pro after September 14, 2026, with the billing method remaining unchanged", the 2026-09-10 announcement's routing of `deepseek-v4-pro` to V4.1-Flash from 2026-09-14 (`research/100-deepseek-v41-flash/pricing-page-2026-09-10.md`) is withdrawn.
 
 | Model | Version | Cache hit off-peak / peak | Cache miss off-peak / peak | Output off-peak / peak |
 |---|---|---|---|---|

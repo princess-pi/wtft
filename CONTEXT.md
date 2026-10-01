@@ -297,9 +297,8 @@ reports no cache-creation tokens and bills a miss as plain input, so `cacheWrite
 rather than missing. A superseded card lives on as a `dateTiers` window so historical sessions
 keep pricing right, and a model may carry more than one: `resolveTieredRates` walks them
 earliest-cutoff-first and takes the first whose date has not passed, so the FIRST matching
-window wins, not the last. Three cutovers exist — `DEEPSEEK_RATE_CARD_FROM`
-(2026-08-16T16:00Z), `DEEPSEEK_V41_FLASH_FROM` (2026-09-10T04:00Z) and
-`DEEPSEEK_V4_PRO_REROUTE_FROM` (2026-09-14T04:00Z).
+window wins, not the last. Two cutovers exist — `DEEPSEEK_RATE_CARD_FROM`
+(2026-08-16T16:00Z) and `DEEPSEEK_V41_FLASH_FROM` (2026-09-10T04:00Z).
 Three consequences worth stating, because all three are silent when wrong:
 `lookupModelPricing` resolves **longest registry key first**, because `deepseek-v4-flash` is a
 substring of `deepseek-v4-flash-vision-exp` and insertion order would otherwise decide a pricing
@@ -307,10 +306,11 @@ question; the newer key `deepseek-flash` is exempt from that hazard rather than 
 because neither it nor `deepseek-v4-flash` is a substring of the other, so no realistic id — a
 provider prefix or a date suffix — can produce both (a contrived
 `deepseek-flash/deepseek-v4-flash` does contain both, and longest-first decides it, the same
-guarantee `-vision-exp` relies on); and a **name is not a model** — from its cutover each of `deepseek-v4-flash`,
-`deepseek-v4-flash-vision-exp` and `deepseek-v4-pro` routes to V4.1 Flash and bills at its card
-(#100), which is why all four DeepSeek entries share one standard row and differ only in their
-windows. (`-vision-exp` carried **no** `dateTiers` until #100, correctly, because it had no past
+guarantee `-vision-exp` relies on); and a **name is not a model** — from `DEEPSEEK_V41_FLASH_FROM` each of `deepseek-v4-flash`
+and `deepseek-v4-flash-vision-exp` routes to V4.1 Flash and bills at its card,
+which those two share with `deepseek-flash`. `deepseek-v4-pro` keeps its own card
+(cache miss 0.66, output 1.98, cache hit 0.022) on every turn from `DEEPSEEK_RATE_CARD_FROM`
+onward, including an undated turn. (`-vision-exp` carried **no** `dateTiers` until #100, correctly, because it had no past
 card; it has one now, and the pre-2026-08-16 window it also gained is unreachable by any observed
 turn — carried for symmetry with `-flash`, whose retirement it shares.)
 The same `dateTiers` field also carries `claude-sonnet-5`'s intro window (#148).

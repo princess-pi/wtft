@@ -96,13 +96,6 @@ export const DEEPSEEK_RATE_CARD_FROM = Date.UTC(2026, 7, 16, 16, 0, 0);
  */
 export const DEEPSEEK_V41_FLASH_FROM = Date.UTC(2026, 8, 10, 4, 0, 0);
 
-/**
- * The instant `deepseek-v4-pro` starts routing to V4.1 Flash. Separate from
- * DEEPSEEK_V41_FLASH_FROM because the two dates are four days apart; a single
- * constant would misprice one line or the other.
- */
-export const DEEPSEEK_V4_PRO_REROUTE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0);
-
 // ---
 
 /** The schedule DeepSeek's four cards share. */
@@ -182,15 +175,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	},
 	"deepseek-v4-pro": {
 		surge: peakSchedule,
-		// Standard row is the V4.1 Flash card — the name routes there from
-		// 2026-09-14T04:00Z, four days after the Flash line, and there is no
-		// opt-out and no V4.1 Pro to route to instead.
-		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
+		input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0,
 		dateTiers: [
 			{ effectiveBefore: DEEPSEEK_RATE_CARD_FROM /* 2026-08-16T16:00:00Z */,
 			  input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 0 },
-			{ effectiveBefore: DEEPSEEK_V4_PRO_REROUTE_FROM /* 2026-09-14T04:00:00Z */,
-			  input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
 		],
 	},
 	"deepseek-flash": {
@@ -394,10 +382,6 @@ export function isModelPriced(model: string): boolean {
  * The registry key calculateClaudeCost borrows when a DeepSeek id matches
  * nothing — the "Guess" branch, named once so the warning text and the branch
  * cannot disagree. Both call this; neither re-types the condition.
- *
- * KNOWN GAP: both keys it can return
- * are names DeepSeek RETIRED, so the warning tells a user it is guessing with
- * "the deepseek-v4-flash rate card" for a model that no longer exists.
  */
 export function deepSeekSiblingKey(model: string): "deepseek-v4-pro" | "deepseek-v4-flash" {
 	return (model || "").toLowerCase().includes("v4-pro") ? "deepseek-v4-pro" : "deepseek-v4-flash";

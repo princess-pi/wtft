@@ -62,7 +62,6 @@ const asJson = process.argv.includes("--json");
 // ---
 const RATE_CARD_CHANGED_AT = Date.UTC(2026, 7, 16, 16, 0, 0); // 2026-08-16T16:00:00Z
 const V41_FLASH_FROM       = Date.UTC(2026, 8, 10, 4, 0, 0);  // 2026-09-10T04:00:00Z
-const V4_PRO_REROUTE_FROM  = Date.UTC(2026, 8, 14, 4, 0, 0);  // 2026-09-14T04:00:00Z
 const WEEKEND_OFFPEAK_FROM = Date.UTC(2026, 7, 23, 0, 0, 0);  // 2026-08-23T00:00:00Z
 const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 06:00–10:00
 
@@ -78,9 +77,7 @@ const PEAK_WINDOWS_UTC = [[60, 240], [360, 600]];             // 01:00–04:00, 
 // across is the one edit that destroys what this file is for.
 const CARD = {
 	"deepseek-v4-pro": {
-		// From 2026-09-14 the NAME routes to V4.1 Flash and bills at its card.
 		cards: [
-			{ from: V4_PRO_REROUTE_FROM,  input: 0.15, output: 0.60, cacheRead: 0.003 },
 			{ from: RATE_CARD_CHANGED_AT, input: 0.66, output: 1.98, cacheRead: 0.022 },
 			{ from: 0,                    input: 1.74, output: 3.48, cacheRead: 0.0145 },
 		],
@@ -148,12 +145,6 @@ function expectedCost(entry, usage, ts) {
 	// and lands on the unconditioned quad, however old the turn looks. The
 	// caller passes 0 for a timestamp it could not parse (see below), so this
 	// path is reachable.
-	//
-	// A first draft fell through to the OLDEST card here, on the reasoning that
-	// an undated turn is probably old. Measured against wtft: 1.74 against 0.15
-	// for v4-pro, an 11.6x divergence that would have reported every undated
-	// turn as a mismatch — the checker's own bug wearing a finding's costume.
-	// The corpus has no undated DeepSeek turn today, so nothing went red.
 	//
 	// Note it SELECTS a card rather than returning one: an earlier fix here
 	// `return`ed entry.cards[0], so the caller's Math.abs(actual - expected) went
@@ -257,15 +248,13 @@ for (const file of sessionFiles(SESSIONS)) {
 	}
 }
 
-// null, not 0, when nothing was compared (pr-review round 2). A percentage over
-// an empty denominator is the exact figure this check exists to stop printing.
 // ---
 // SYNTHETIC MATRIX — the periods the corpus does not contain (#100).
 //
 // Every card transcribed above is only exercised by a turn that happens to fall
 // in its window. The corpus has no undated DeepSeek turn and no vision-exp turn
 // before 2026-08-16, so TWO transcription bugs sat here green: an undated turn
-// priced from the oldest card instead of the standard row (11.6x on v4-pro),
+// priced from the oldest card instead of the standard row,
 // and a missing vision-exp window that would have reported 0.22 against wtft's
 // 0.14. Both were found by a reviewer reading the diff, not by this check —
 // which is the check's own gap, since it is the thing that exists to find them.
@@ -280,8 +269,8 @@ const MATRIX_INSTANTS = [
 	["undated", 0],
 	["2026-07-15 (pre-2026-08-16)",  Date.UTC(2026, 6, 15, 12, 0, 0)],
 	["2026-08-24 (pre-V4.1 Flash)",  Date.UTC(2026, 7, 24, 12, 0, 0)],
-	["2026-09-11 (post-Flash, pre-pro reroute)", Date.UTC(2026, 8, 11, 12, 0, 0)],
-	["2026-09-15 (post-pro reroute)", Date.UTC(2026, 8, 15, 12, 0, 0)],
+	["2026-09-11 (post-Flash)", Date.UTC(2026, 8, 11, 12, 0, 0)],
+	["2026-09-15", Date.UTC(2026, 8, 15, 12, 0, 0)],
 	["2026-09-15 02:00Z (peak)",      Date.UTC(2026, 8, 15, 2, 0, 0)],
 ];
 

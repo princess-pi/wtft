@@ -145,8 +145,8 @@ describe("#169 every priced model reaches the manifest", () => {
 		const claims: Array<[RegExp, string, string]> = [
 			[/retired the V4 Flash line at (\S+?) /, newestCutoverFor("deepseek-v4-flash"),
 			 "the V4 Flash retirement should be deepseek-v4-flash's last cutover"],
-			[/takes over deepseek-v4-pro at (\S+?),/, newestCutoverFor("deepseek-v4-pro"),
-			 "the v4-pro reroute should be deepseek-v4-pro's last cutover"],
+			[/deepseek-v4-pro keeps its own card; its dated window ends at (\S+?)\./, newestCutoverFor("deepseek-v4-pro"),
+			 "deepseek-v4-pro's dated window should end at its last cutover"],
 		];
 
 		for (const [pattern, expected, why] of claims) {

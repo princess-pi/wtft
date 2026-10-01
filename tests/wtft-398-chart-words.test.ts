@@ -128,6 +128,15 @@ describe("each word replaces one thing", () => {
 		assert.ok(!lines.some((l) => l.includes("\x1b[38;5;209m$")));
 	});
 
+	it("a wide divider label keeps the divider as wide as the date divider, its ticks on theirs", () => {
+		const lines = plain(chart({ cacheMissLabel: "停電" }, { limit: 40, padRowsTo: undefined }));
+		const miss = lines.find((l) => l.startsWith("── 停電 "))!;
+		const date = lines.slice(3).find((l) => /^── [A-Z][a-z]{2}-\d\d /.test(l))!;
+		const tickColumns = (line: string) => [...line.matchAll(/┼/g)].map((m) => getVisualLength(line.slice(0, m.index)));
+		assert.equal(getVisualLength(miss), getVisualLength(date));
+		assert.deepEqual(tickColumns(miss), tickColumns(date));
+	});
+
 	it("cacheMissLabel names the divider", () => {
 		const lines = plain(chart({ cacheMissLabel: "Power cut" }));
 		assert.ok(lines.some((l) => l.startsWith("── Power cut ")));

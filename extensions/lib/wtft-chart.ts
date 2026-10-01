@@ -305,7 +305,7 @@ export function renderWtftChart(input: {
 
 	const buildDividerLine = (labelText: string): string => {
 		const prefix = `── ${labelText} `;
-		const dividerLen = Math.max(0, (finalWidth - tickReserve) - prefix.length);
+		const dividerLen = Math.max(0, (finalWidth - tickReserve) - getVisualLength(prefix));
 		const chars = Array.from({ length: dividerLen }, () => "─");
 		const tickPositions = [
 			prefixWidth,
@@ -315,7 +315,7 @@ export function renderWtftChart(input: {
 			prefixWidth + maxBarWidth - 1
 		];
 		for (const t of tickPositions) {
-			const idx = t - prefix.length;
+			const idx = t - getVisualLength(prefix);
 			if (idx >= 0 && idx < chars.length) {
 				chars[idx] = "┼";
 			}

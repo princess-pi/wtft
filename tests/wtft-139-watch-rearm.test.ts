@@ -26,15 +26,16 @@ const ino = fs.statSync(tag).ino;
 
 check(replacedTagFile(tag, ino, session) === null, "the watched file, unchanged, is not a replacement");
 
-fs.unlinkSync(tag);
-check(replacedTagFile(tag, ino, session) === null, "a deleted file with nothing in its place is not a replacement yet");
+fs.renameSync(tag, path.join(dir, "old-tag"));
+check(replacedTagFile(tag, ino, session) === null, "a file moved away with nothing in its place is not a replacement yet");
 
-const holder = path.join(dir, "keep-inode-busy");
-fs.writeFileSync(holder, "");
 fs.writeFileSync(tag, "b\n");
-check(fs.statSync(tag).ino !== ino, "fixture: the recreated file has a new inode");
-const next = replacedTagFile(tag, ino, session);
-check(next !== null && next.path === tag && next.ino === fs.statSync(tag).ino, `a file recreated at the same path is followed (got ${JSON.stringify(next)})`);
+const fresh = fs.statSync(tag).ino !== ino;
+check(fresh, "fixture: the recreated file has a new inode");
+if (fresh) {
+	const next = replacedTagFile(tag, ino, session);
+	check(next !== null && next.path === tag && next.ino === fs.statSync(tag).ino, `a file recreated at the same path is followed (got ${JSON.stringify(next)})`);
+}
 
 const same = fs.statSync(tag).ino;
 check(replacedTagFile(tag, same, session, true)?.path === tag, "after the watcher saw a rename, a file at the same path is followed even with the same inode");

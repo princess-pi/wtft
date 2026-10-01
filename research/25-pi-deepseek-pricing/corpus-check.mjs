@@ -277,8 +277,8 @@ const MATRIX_INSTANTS = [
 	["undated", 0],
 	["2026-07-15 (pre-2026-08-16)",  Date.UTC(2026, 6, 15, 12, 0, 0)],
 	["2026-08-24 (pre-V4.1 Flash)",  Date.UTC(2026, 7, 24, 12, 0, 0)],
-	["2026-09-11 (post-Flash, pre-pro reroute)", Date.UTC(2026, 8, 11, 12, 0, 0)],
-	["2026-09-15 (post-pro reroute)", Date.UTC(2026, 8, 15, 12, 0, 0)],
+	["2026-09-11 (post-Flash)", Date.UTC(2026, 8, 11, 12, 0, 0)],
+	["2026-09-15", Date.UTC(2026, 8, 15, 12, 0, 0)],
 	["2026-09-15 02:00Z (peak)",      Date.UTC(2026, 8, 15, 2, 0, 0)],
 ];
 

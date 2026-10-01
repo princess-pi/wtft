@@ -40,6 +40,8 @@ temporarily route to V4.1-Flash." · "Starting at 04:00 UTC on Sept 14, 2026, al
 `deepseek-v4-pro` requests will route to V4.1-Flash at V4.1-Flash rates. This will continue
 until V4.1-Pro launches."
 
+Withdrawn before it took effect: `deepseek-v4-pro` keeps its own card after 2026-09-14. See `research/402-deepseek-pro-card/pricing-page-2026-10-01.md`.
+
 | Name | Serves V4.1 Flash from | Billed at the Flash card from |
 |---|---|---|
 | `deepseek-flash` | 2026-09-10T04:00:00Z (it is the model) | always |

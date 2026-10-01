@@ -294,6 +294,11 @@ describe("#100 the retired names bill at the V4.1 Flash card from their cutover"
 		assert.ok(Math.abs(cost - 2.64) < 0.000001, `got ${cost}, want 2.64`);
 	});
 
+	it("doubles deepseek-v4-pro's card at a weekday peak after 2026-09-14", () => {
+		const cost = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, Date.UTC(2026, 8, 15, 2, 0, 0));
+		assert.ok(Math.abs(cost - 5.28) < 0.000001, `got ${cost}, want 5.28`);
+	});
+
 	it("prices an UNDATED turn at the standard row, not at the oldest card", () => {
 		const pro = calculateClaudeCost("deepseek-v4-pro", MTOK_IN_OUT, 0);
 		assert.ok(Math.abs(pro - 2.64) < 0.000001, `pro undated: got ${pro}, want 2.64`);

@@ -42,11 +42,14 @@ export function getHarnessConfigPath(): string {
 	return path.join(xdgHome, WTFT_CONFIG_DIR, "harnesses.json");
 }
 
-/** Read the harness config. Missing/unreadable/invalid → {} (never blocks wtft). */
+/** Read the harness config. Missing/unreadable/invalid → {} (never blocks wtft).
+ *  The default path is resolved inside the guard: a host with no `process` or
+ *  home directory (the browser bundle under artifacts/) has no config, not an error. */
 export function loadHarnessConfig(
-	filePath: string = getHarnessConfigPath()
+	filePath?: string
 ): Record<string, HarnessConfigEntry> {
 	try {
+		filePath ??= getHarnessConfigPath();
 		if (!fs.existsSync(filePath)) return {};
 		const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};

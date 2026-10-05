@@ -22,6 +22,17 @@
       "title": "State fair booth",
       "group": "Chart library",
       "kind": "html"
+    },
+    {
+      "path": "parser/spec.mdx",
+      "title": "Parser",
+      "group": "Parser"
+    },
+    {
+      "path": "parser/playground.html",
+      "title": "Parser playground",
+      "group": "Parser",
+      "kind": "html"
     }
   ]
 }

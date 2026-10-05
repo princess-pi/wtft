@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="662" height="846" viewBox="0 0 662 846" role="img" aria-labelledby="title">
+<title id="title">classifyInteraction's priority order: the first question answered yes names the category</title>
+<style>
+  .card { fill: #ffffff; stroke: #d0d7de; }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; fill: #1f2328; }
+  text.label { fill: #57606a; }
+  .node { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+  .node.hot { fill: #f3e2b8; stroke: #b08a3e; }
+  .edge { fill: none; stroke: #57606a; stroke-width: 1.5; }
+  .dashed { stroke-dasharray: 6 4; }
+  .arrow { fill: #57606a; }
+  .label-bg { fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .card { fill: #0d1117; stroke: #30363d; }
+    text { fill: #e6edf3; }
+    text.label { fill: #9198a1; }
+    .node { fill: #161b22; stroke: #8b949e; }
+    .node.hot { fill: #4a3b17; stroke: #d4a94a; }
+    .edge { stroke: #8b949e; }
+    .arrow { fill: #8b949e; }
+    .label-bg { fill: #0d1117; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 Z"/></marker></defs>
+<rect class="card" x="0.5" y="0.5" width="661" height="845" rx="8"/>
+<path class="edge" d="M222.0,65.0 L407.0,65.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,109.0 L129.0,151.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M208.5,185.5 L415.0,185.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,220.0 L129.0,262.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M214.5,306.0 L311.0,306.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,350.0 L129.0,392.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M222.0,436.0 L331.0,436.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,480.0 L129.0,522.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M214.5,566.0 L323.0,566.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,610.0 L129.0,652.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M237.0,696.0 L435.0,696.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M129.0,740.0 L129.0,782.0" marker-end="url(#arrow)"/>
+<path class="node" d="M129,24 L219,65 L129,106 L39,65 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="60.5">_cat from a</tspan><tspan x="129.0" y="79.5">tag file?</tspan></text>
+<rect class="node" x="410" y="46.5" width="132" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="70.0">that category</tspan></text>
+<path class="node" d="M129,154 L205.5,185.5 L129,217 L52.5,185.5 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="190.5">interrupted?</tspan></text>
+<rect class="node" x="418" y="167" width="116" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="190.5">interrupted</tspan></text>
+<path class="node" d="M129,265 L211.5,306 L129,347 L46.5,306 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="301.5">file paths</tspan><tspan x="129.0" y="320.5">grade?</tspan></text>
+<rect class="node" x="314" y="287.5" width="324" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="311.0">tests / code / research / spec / plan</tspan></text>
+<path class="node" d="M129,395 L219,436 L129,477 L39,436 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="431.5">tool</tspan><tspan x="129.0" y="450.5">categories?</tspan></text>
+<rect class="node" x="334" y="417.5" width="284" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="441.0">agents &gt; web &gt; git &gt; plan &gt; grep</tspan></text>
+<path class="node" d="M129,525 L211.5,566 L129,607 L46.5,566 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="561.5">real shell</tspan><tspan x="129.0" y="580.5">commands?</tspan></text>
+<rect class="node" x="326" y="538" width="300" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="561.5">agents &gt; spec &gt; git &gt; tests &gt; code</tspan><tspan x="476.0" y="580.5">&gt; grep, else other</tspan></text>
+<path class="node" d="M129,655 L234,696 L129,737 L24,696 Z"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="691.5">text and no</tspan><tspan x="129.0" y="710.5">unknown tool?</tspan></text>
+<rect class="node" x="438" y="677.5" width="76" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="476.0" y="701.0">prompt</tspan></text>
+<rect class="node" x="95" y="785" width="68" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="129.0" y="808.5">other</tspan></text>
+<rect class="label-bg" x="297.5" y="53.5" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="314.5" y="70.0">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="118.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="135.0">no</tspan></text>
+<rect class="label-bg" x="294.8" y="174.0" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="311.8" y="190.5">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="229.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="246.0">no</tspan></text>
+<rect class="label-bg" x="245.8" y="294.5" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="262.8" y="311.0">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="359.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="376.0">no</tspan></text>
+<rect class="label-bg" x="259.5" y="424.5" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="276.5" y="441.0">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="489.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="506.0">no</tspan></text>
+<rect class="label-bg" x="251.8" y="554.5" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="268.8" y="571.0">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="619.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="636.0">no</tspan></text>
+<rect class="label-bg" x="319.0" y="684.5" width="34.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="336.0" y="701.0">yes</tspan></text>
+<rect class="label-bg" x="116.0" y="749.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="129.0" y="766.0">no</tspan></text>
+</svg>

@@ -59,6 +59,35 @@ function rewriteDocLinks(root, basePath, index) {
   }
 }
 
+function panDiagrams(root) {
+  root.querySelectorAll(".diagram").forEach((frame) => {
+    frame.querySelectorAll("img").forEach((img) => {
+      img.draggable = false;
+    });
+    frame.addEventListener("pointerdown", (down) => {
+      if (down.pointerType !== "mouse" || down.button !== 0) return;
+      down.preventDefault();
+      frame.setPointerCapture(down.pointerId);
+      frame.classList.add("panning");
+      const startX = down.clientX + frame.scrollLeft;
+      const startY = down.clientY + frame.scrollTop;
+      const move = (ev) => {
+        frame.scrollLeft = startX - ev.clientX;
+        frame.scrollTop = startY - ev.clientY;
+      };
+      const stop = () => {
+        frame.classList.remove("panning");
+        frame.removeEventListener("pointermove", move);
+        frame.removeEventListener("pointerup", stop);
+        frame.removeEventListener("pointercancel", stop);
+      };
+      frame.addEventListener("pointermove", move);
+      frame.addEventListener("pointerup", stop);
+      frame.addEventListener("pointercancel", stop);
+    });
+  });
+}
+
 function hint(text) {
   renderGen += 1;
   shownPath = "";
@@ -243,43 +272,12 @@ async function renderDoc(index, path, frag, search) {
   const root = holder.content;
   fillToc(root, path);
   rewriteDocLinks(root, path, index);
-  root.querySelectorAll("pre code:not(.language-mermaid)").forEach((block) => {
+  root.querySelectorAll("pre code").forEach((block) => {
     block.innerHTML = cellsHtml(block.textContent);
   });
-  root.querySelectorAll("pre code.language-mermaid").forEach((block) => {
-    const div = document.createElement("div");
-    div.className = "mermaid";
-    div.textContent = block.textContent;
-    block.closest("pre").replaceWith(div);
-  });
+  panDiagrams(root);
   content.replaceChildren(root);
   document.title = pageTitle(split.meta, index.title || "Artifacts");
-  if (content.querySelector(".mermaid")) {
-    for (let i = 0; i < 20 && !window.mermaid; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      if (gen !== renderGen) return;
-    }
-    if (!window.mermaid) {
-      content.querySelectorAll(".mermaid").forEach((el) => {
-        el.textContent = "Diagram did not load.";
-      });
-      if (gen !== renderGen) return;
-      shownPath = path;
-      shownKind = "md";
-      if (inflightPath === path) inflightPath = "";
-      scrollTo(liveFrag(path, frag));
-      return;
-    }
-    try {
-      await window.mermaid.run({ querySelector: ".mermaid" });
-    } catch {
-      if (gen !== renderGen) return;
-      content.querySelectorAll(".mermaid").forEach((el) => {
-        if (!el.querySelector("svg")) el.textContent = "Diagram did not render.";
-      });
-    }
-  }
-  if (gen !== renderGen) return;
   shownPath = path;
   shownKind = "md";
   if (inflightPath === path) inflightPath = "";

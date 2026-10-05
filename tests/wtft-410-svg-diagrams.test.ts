@@ -49,7 +49,7 @@ describe("diagrams are SVG files shown at their own size", () => {
 	it("the frame scrolls, and never scales its image down", () => {
 		const css = read("assets/browser.css");
 		assert.match(css.match(/\.diagram \{[^}]*\}/)?.[0] ?? "", /overflow: auto;/);
-		assert.match(css.match(/#content \.diagram img \{[^}]*\}/)?.[0] ?? "", /max-width: none;/);
+		assert.match(css.match(/#content \.diagram img, #content \.diagram svg \{[^}]*\}/)?.[0] ?? "", /max-width: none;/);
 	});
 
 	it("the frame pans on drag", () => {

@@ -66,21 +66,29 @@ function panDiagrams(root) {
     });
     frame.addEventListener("pointerdown", (down) => {
       if (down.pointerType !== "mouse" || down.button !== 0 || down.target === frame) return;
-      down.preventDefault();
-      frame.setPointerCapture(down.pointerId);
-      frame.classList.add("panning");
       const startX = down.clientX + frame.scrollLeft;
       const startY = down.clientY + frame.scrollTop;
-      const move = (ev) => {
-        frame.scrollLeft = startX - ev.clientX;
-        frame.scrollTop = startY - ev.clientY;
-      };
+      let panning = false;
       const stop = () => {
         frame.classList.remove("panning");
         frame.removeEventListener("pointermove", move);
+        frame.removeEventListener("pointerup", stop);
+        frame.removeEventListener("lostpointercapture", stop);
+      };
+      const move = (ev) => {
+        if ((ev.buttons & 1) === 0) return stop();
+        if (!panning) {
+          if (Math.abs(ev.clientX - down.clientX) + Math.abs(ev.clientY - down.clientY) < 4) return;
+          panning = true;
+          frame.setPointerCapture(down.pointerId);
+          frame.classList.add("panning");
+        }
+        frame.scrollLeft = startX - ev.clientX;
+        frame.scrollTop = startY - ev.clientY;
       };
       frame.addEventListener("pointermove", move);
-      frame.addEventListener("lostpointercapture", stop, { once: true });
+      frame.addEventListener("pointerup", stop);
+      frame.addEventListener("lostpointercapture", stop);
     });
   });
 }

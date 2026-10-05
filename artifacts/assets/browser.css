@@ -31,7 +31,7 @@ body { margin: 0; font-family: system-ui, sans-serif; }
 }
 #nav-list li a:hover { background: rgba(37,99,235,.1); }
 #nav-list li a.active { background: var(--accent); color: #fff; }
-#content { flex: 1; padding: 2rem; max-width: 860px; overflow-x: auto; }
+#content { flex: 1; padding: 2rem; max-width: 1600px; overflow-x: auto; }
 #toc {
   width: 200px;
   flex-shrink: 0;

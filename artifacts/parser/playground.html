@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parser playground</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #161616; color: #e8e8e8; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; }
+    main { padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    h2 { font-size: 15px; margin: 14px 0 6px; color: #ccc; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+    .meta { color: #999; font-size: 13px; margin: 4px 0 10px; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    button, input[type="text"] {
+      background: #2a2a2a; color: inherit; border: 1px solid #444; border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 13px;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #666; }
+    button.on { border-color: #d7b56d; color: #f3e2b8; }
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "input turns" "details turns"; gap: 0 14px; align-items: start; }
+    .a-input { grid-area: input; } .a-turns { grid-area: turns; } .a-details { grid-area: details; }
+    textarea {
+      width: 100%; height: 330px; resize: vertical; background: #0e0e0e; color: #e8e8e8; border: 1px solid #333; border-radius: 8px;
+      padding: 8px 10px; font: 12px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow: auto;
+    }
+    .note { background: #1d1d1d; border-left: 3px solid #d7b56d; padding: 6px 10px; margin: 8px 0; font-size: 13px; color: #ccc; border-radius: 0 6px 6px 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .frame { background: #0e0e0e; border: 1px solid #333; border-radius: 8px; padding: 8px 10px; }
+    .lines { max-height: 190px; overflow: auto; font: 12px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .lines div { white-space: nowrap; }
+    .k-turn { color: #9fd18b; } .k-control { color: #8fc1e8; } .k-ignored, .k-blank { color: #777; }
+    .k-bad-json, .k-error { color: #f07a7a; } .k-partial { color: #d7b56d; }
+    .turns { display: flex; flex-direction: column; gap: 10px; max-height: 720px; overflow: auto; padding-right: 2px; }
+    .turn { background: #0e0e0e; border: 1px solid #333; border-radius: 8px; padding: 8px 10px; }
+    .turn header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+    .cat { font-weight: 600; }
+    .swatch { font-family: ui-monospace, monospace; }
+    .why { color: #aaa; font-size: 12px; }
+    .cost { margin-left: auto; font-family: ui-monospace, monospace; color: #f3e2b8; }
+    dl { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 2px 8px; margin: 4px 0 0; font-size: 13px; }
+    dt { color: #888; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .flag { display: inline-block; border: 1px solid #555; border-radius: 10px; padding: 0 7px; margin: 0 4px 2px 0; font-size: 12px; }
+    .flag.hot { border-color: #c05050; color: #f3a0a0; }
+    .flag.cool { border-color: #4a7aa0; color: #a8cfee; }
+    .cmd { cursor: pointer; text-decoration: underline dotted #666; }
+    .cmd:hover { color: #f3e2b8; }
+    .arrow { color: #777; }
+    .chip { display: inline-block; background: #262626; border: 1px solid #3a3a3a; border-radius: 4px; padding: 0 5px; margin: 0 4px 2px 0; }
+    .empty { color: #888; font-style: italic; }
+    #shell { width: 100%; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .err { color: #f07a7a; }
+    @media (max-width: 820px) {
+      .cols { grid-template-columns: minmax(0, 1fr); grid-template-areas: "input" "turns" "details"; }
+      textarea { height: 190px; }
+      .turns { max-height: 520px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Parser playground</h1>
+  <p class="meta">Paste Claude Code or Pi transcript lines, one JSON object per line. Each line runs through wtft's own <code>applyControlEntry</code> and <code>parseEntryToInteraction</code>, bundled for the browser; then <code>deduplicateInteractions</code>, <code>classifyInteraction</code> and <code>splitOverheadCost</code> run as the log parser daemon runs them. The one step missing is the <code>claude -p</code> fold, which reads other transcripts from disk.</p>
+  <div class="presets" id="presets"></div>
+  <div class="note" id="note"></div>
+  <div class="cols">
+    <section class="a-input">
+      <h2>Transcript lines (JSONL)</h2>
+      <textarea id="input" spellcheck="false" autocomplete="off" aria-label="JSONL transcript lines"></textarea>
+      <div class="row"><button type="button" id="copy">Copy JSONL</button><button type="button" id="copy-json">Copy result as JSON</button><span class="meta" id="status"></span></div>
+    </section>
+    <section class="a-turns">
+      <h2>Interactions after the dedupe</h2>
+      <div class="turns" id="turns"></div>
+    </section>
+    <section class="a-details">
+      <h2>What each line was</h2>
+      <div class="frame lines" id="lines"></div>
+      <h2>Shell stripping: <code>extractRealCommands</code></h2>
+      <p class="meta">Click a command in a turn, or type one. Navigation, assignments and wrappers are dropped; what is left is what the classifier reads.</p>
+      <input type="text" id="shell" spellcheck="false" autocomplete="off" aria-label="Bash command">
+      <div class="frame" id="shell-out" style="margin-top:6px"></div>
+    </section>
+  </div>
+</main>
+<script type="module">
+  import {
+    CATEGORY_STYLE, PARSER_PRESETS, commandSpawnsAgent, extractRealCommands, normalizeCommand,
+    parseJsonlText, presetText, splitCommandWords, xtermRgb,
+  } from "../renderer/wtft-chart.mjs";
+
+  const $ = (id) => document.getElementById(id);
+  const input = $("input");
+  const shell = $("shell");
+  let last = null;
+
+  /** Builds an element; strings become text nodes, so pasted input is never parsed as HTML. */
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === "style") node.style.cssText = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value);
+    }
+    for (const child of children.flat()) if (child !== null && child !== undefined && child !== false) node.append(child instanceof Node ? child : String(child));
+    return node;
+  }
+
+  const money = (n) => (n === 0 ? "$0" : Math.abs(n) < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+  const num = (n) => (n || 0).toLocaleString("en-US");
+  const when = (ms) => (ms ? new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC") : "no timestamp");
+  const DECIDED = {
+    tag: "a tag file's saved category",
+    interrupted: "an interrupt marker after it: interrupted wins the whole message",
+    files: "file paths: the latest workflow stage wins, writes beat reads",
+    tools: "a tool's category: agents > web > git > plan > grep",
+    commands: "shell commands: spawn > spec > git > tests > code > grep",
+    texts: "text only: a pure reply is a prompt",
+    fallback: "nothing modeled: an unknown tool or no content is other",
+  };
+  const LINE_KIND = {
+    blank: () => "blank",
+    "bad-json": (n) => `bad JSON, skipped (${n.error})`,
+    partial: (n) => `last line does not parse: still being written, not counted (${n.error})`,
+    control: (n) => `control entry: ${n.control}`,
+    turn: (n) => `assistant turn → raw #${n.raw + 1}`,
+    ignored: () => "JSON, but not a turn or a control entry: ignored",
+    error: (n) => `parser threw, line skipped (${n.error})`,
+  };
+
+  function category(cat) {
+    const style = CATEGORY_STYLE[cat];
+    const color = style ? xtermRgb(style.fg) : "#ccc";
+    return el("span", {}, el("span", { class: "swatch", style: `color:${color}` }, "██ "), el("span", { class: "cat", style: `color:${color}` }, cat), style?.label && style.label.toLowerCase() !== cat ? el("span", { class: "why" }, ` (legend: ${style.label})`) : null);
+  }
+
+  function renderShell() {
+    const out = $("shell-out");
+    out.replaceChildren();
+    const cmd = shell.value;
+    if (!cmd.trim()) { out.append(el("span", { class: "empty" }, "No command.")); return; }
+    try {
+      const real = extractRealCommands(cmd);
+      out.append(el("dl", {},
+        el("dt", {}, "real"), el("dd", {}, real.length ? real.map((r) => el("span", { class: "chip mono" }, r)) : el("span", { class: "empty" }, "none: navigation or assignment only")),
+        el("dt", {}, "primary"), el("dd", { class: "mono" }, normalizeCommand(cmd) || "—"),
+        el("dt", {}, "spawns agent"), el("dd", {}, commandSpawnsAgent(cmd) ? "yes: claude runs here" : "no"),
+        ...real.flatMap((r) => {
+          const words = splitCommandWords(r);
+          return [el("dt", {}, "words"), el("dd", { class: "mono" }, JSON.stringify(words.words), words.reads.length ? `  < ${words.reads.join(" ")}` : "", words.writes.length ? `  > ${words.writes.join(" ")}` : "")];
+        }),
+      ));
+    } catch (err) {
+      out.append(el("span", { class: "err" }, String(err)));
+    }
+  }
+
+  function useCommand(cmd) { shell.value = cmd; renderShell(); }
+
+  function renderTurn(turn, index) {
+    const i = turn.interaction;
+    const flags = [];
+    if (i.interrupted) flags.push(el("span", { class: "flag hot" }, "interrupted"));
+    if (i.cacheMiss) flags.push(el("span", { class: "flag hot" }, "cache miss"));
+    if (i.afterCompaction) flags.push(el("span", { class: "flag cool" }, "after compaction"));
+    if (i.cacheTtl) flags.push(el("span", { class: "flag cool" }, `cache TTL ${i.cacheTtl}`));
+    if (i.isSidechain) flags.push(el("span", { class: "flag cool" }, "sidechain"));
+    if (i.surgePriced) flags.push(el("span", { class: "flag hot" }, "surge priced"));
+    if (i.unrecognizedTool) flags.push(el("span", { class: "flag" }, "unrecognized tool"));
+    if (i.thinkingLevel) flags.push(el("span", { class: "flag" }, `thinking ${i.thinkingLevel}`));
+    if (turn.spawnsAgent) flags.push(el("span", { class: "flag cool" }, "spawns claude: fold skipped here"));
+    const rows = [
+      ["lines", `${turn.lines.join(", ")}${turn.lines.length > 1 ? " (merged by message id)" : ""}`],
+      ["time", when(i.timestamp)],
+      ["model", i.model || el("span", { class: "empty" }, "none: cost is 0 unless the harness priced it")],
+      ["tokens", `in ${num(i.inputTokens)} · out ${num(i.outputTokens)} · cache read ${num(i.cacheReadTokens)} · cache write ${num(i.cacheWriteTokens)}${i.reasoningTokens ? ` · reasoning ${num(i.reasoningTokens)}` : ""}`],
+      ["files", i.files.length ? i.files.map((f) => el("span", { class: "chip mono" }, `${f.action === "write" ? "✎" : "👁"} ${f.path}`)) : null],
+      ["commands", i.commands.length ? i.commands.map((c) => el("div", {}, el("span", { class: "cmd mono", title: "Show in the shell stripping box", onclick: () => useCommand(c) }, c),
+        el("div", { class: "mono" }, el("span", { class: "arrow" }, "→ "), extractRealCommands(c).map((r) => el("span", { class: "chip" }, r))))) : null],
+      ["tool cats", i.toolCats?.length ? i.toolCats.join(", ") : null],
+      ["texts", i.texts.length ? i.texts.map((t) => el("div", { class: "why" }, t.length > 120 ? `${t.slice(0, 120)}…` : t)) : null],
+      ["flags", flags.length ? flags : null],
+    ];
+    if (turn.overhead) {
+      const { kind, overheadCost } = turn.overhead;
+      rows.push(["split", el("span", {}, `the daemon writes ${money(i.cost - overheadCost)} as `, el("b", {}, turn.category), ` and ${money(overheadCost)} as `, category(kind),
+        kind === "overhead" ? ` (recache: context ${num(i.inputTokens + i.cacheReadTokens + i.cacheWriteTokens)} vs previous ${num(turn.prevCtxTokens)})` : " (the cache write after a compaction)")]);
+    }
+    return el("article", { class: "turn" },
+      el("header", {}, el("span", { class: "why" }, `#${index + 1}`), category(turn.category), el("span", { class: "cost" }, money(i.cost + (i.serverToolCost || 0)))),
+      el("div", { class: "why" }, "decided by ", DECIDED[turn.decidedBy] || turn.decidedBy),
+      el("dl", {}, rows.filter(([, v]) => v !== null && v !== undefined).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+    );
+  }
+
+  function render() {
+    let result;
+    try {
+      result = parseJsonlText(input.value);
+    } catch (err) {
+      $("turns").replaceChildren(el("p", { class: "err" }, `The parse failed: ${err}`));
+      return;
+    }
+    last = result;
+    $("lines").replaceChildren(...result.notes.map((n) => el("div", { class: `k-${n.kind}` }, `${String(n.line).padStart(3)}  ${LINE_KIND[n.kind](n)}`)));
+    const total = result.turns.reduce((sum, t) => sum + t.interaction.cost + (t.interaction.serverToolCost || 0), 0);
+    $("status").textContent = `${result.lines} lines, ${result.jsonLines} JSON, ${result.raw.length} raw turns → ${result.turns.length} after the dedupe, ${money(total)}.`;
+    $("turns").replaceChildren(...(result.turns.length ? result.turns.map(renderTurn) : [el("p", { class: "empty" }, "No assistant turns in this input.")]));
+    for (const button of $("presets").querySelectorAll("button")) button.classList.toggle("on", presetText(PARSER_PRESETS[button.dataset.preset]) === input.value);
+  }
+
+  let timer = 0;
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(render, 200); $("note").hidden = true; });
+  shell.addEventListener("input", renderShell);
+
+  function usePreset(id) {
+    const preset = PARSER_PRESETS[id];
+    input.value = presetText(preset);
+    $("note").hidden = false;
+    // Backticks in a note are code; split, so the note is never parsed as HTML.
+    $("note").replaceChildren(...preset.note.split("`").map((part, at) => (at % 2 ? el("code", {}, part) : part)));
+    const firstCommand = parseJsonlText(input.value).turns.flatMap((t) => t.interaction.commands)[0];
+    useCommand(firstCommand || "cd ~/proj && FOO=1 timeout -k 5 200 bun test tests/foo.test.ts 2>&1 | tail -20");
+    render();
+  }
+  for (const [id, preset] of Object.entries(PARSER_PRESETS)) {
+    $("presets").append(el("button", { type: "button", "data-preset": id, title: preset.note, onclick: () => usePreset(id) }, preset.label));
+  }
+
+  async function copy(text, what) {
+    try {
+      await navigator.clipboard.writeText(text);
+      $("status").textContent = `Copied ${what}.`;
+    } catch {
+      $("status").textContent = "This browser would not copy; select the text and copy it by hand.";
+    }
+  }
+  $("copy").addEventListener("click", () => copy(input.value, "the JSONL"));
+  $("copy-json").addEventListener("click", () => last && copy(JSON.stringify(last.turns.map((t) => ({ category: t.category, decidedBy: t.decidedBy, overhead: t.overhead, ...t.interaction })), null, 2), "the interactions"));
+
+  const asked = new URLSearchParams(location.search).get("preset");
+  usePreset(asked && PARSER_PRESETS[asked] ? asked : "bash-tests");
+  window.__parsed = () => last;
+</script>
+</body>
+</html>

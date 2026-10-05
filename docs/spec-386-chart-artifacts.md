@@ -41,6 +41,19 @@ The bundle exports:
   reverse video, the 16 basic foreground colours and 256-colour foregrounds and backgrounds, and drops the rest, blink
   included. It honours the resets 0, 22, 27, 39 and 49, and reads an empty `\x1b[m` as 0. It paints the chart's block and box-drawing glyphs as cells (`docs/spec-392-cell-glyphs.md`).
 
+- The parser's per-line half, for the parser playground: `parseEntryToInteraction`, `newParseStreamState`,
+  `applyControlEntry`, `readControlEntry`, `isInterruptMarker`, `INTERRUPT_PREFIX`, `deduplicateInteractions`,
+  `classifyInteraction`, `splitOverheadCost`, `normalizeCommand` and `commandSpawnsAgent` from `wtft-parser.ts`, and
+  `extractRealCommands` and `splitCommandWords` from `wtft-command-shapes.ts`. Nothing that reads a file is exported:
+  in the bundle `node:fs` is empty.
+- `parseJsonlText(text)`: the per-line loop `parseSessionFile` runs, over pasted text, then the dedupe, the classifier
+  and the overhead split as the daemon applies them. It notes what it did with each line, which input decided each
+  category (`decidedBy`), and which lines a merged turn came from. It skips the `claude -p` fold, which reads other
+  transcripts from disk. `PARSER_PRESETS` and `presetText(preset)` are the playground's examples.
+
+The harness registry resolves its config path inside its own guard (`loadHarnessConfig`), so a page with no `process`
+reads no harness config and the built-in adapters still parse.
+
 `renderReport` installs a stand-in for the terminal (`process.stdout.columns`) only while it runs, because
 `buildWtftLines` asks the terminal for its width. In a page with no `process`, the stand-in is a whole `process`
 with an empty `env`, removed afterwards. It pins `Date.now` only when the caller passes a clock.
@@ -74,6 +87,13 @@ revenue is `cost` and its units are `inputTokens`. The page draws it twice:
 The spec page lists what the chart cannot say in the fair's terms, and gives each finding a fix shape or marks it standing.
 The decisions the findings raise are on the spec page's *Decisions* list.
 
+## 3b. The parser pages
+
+`artifacts/parser/spec.mdx` explains the session log parser: the pipeline, the adapter seam, the functions that carry
+the weight, the classifier's priority ladder, control entries, cache misses and the `claude -p` fold. It embeds
+`artifacts/parser/playground.html`, which reads pasted JSONL with `parseJsonlText` and shows each interaction with its
+category in `CATEGORY_STYLE`'s colour, and strips a typed Bash command with `extractRealCommands`.
+
 ## 4. Verification
 
 - `tests/wtft-386-chart-artifacts.test.ts` asserts:
@@ -91,4 +111,10 @@ The decisions the findings raise are on the spec page's *Decisions* list.
     and in the units view with souvenirs the second view carries none of the test's list of wtft words;
   - the two library pages are listed in `artifacts/docs.json`, and `paint.mjs` is gone;
   - `ansiToHtml` colours, bolds, reverses and escapes.
+- `tests/wtft-parser-artifact.test.ts` asserts:
+  - the two parser pages are listed in `artifacts/docs.json` under "Parser", and the explainer embeds the playground;
+  - the playground imports only names the bundle exports, and the bundle parses every preset with no `process`, as the
+    source does;
+  - for every preset, `parseJsonlText` gives what `parseSessionFile`, `deduplicateInteractions`, `classifyInteraction`
+    and `splitOverheadCost` give on the same lines written to a file, and the category the preset names.
 - By eye: both pages open at https://wtft-artifacts.princess-pi.dev/.

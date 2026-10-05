@@ -65,7 +65,7 @@ function panDiagrams(root) {
       img.draggable = false;
     });
     frame.addEventListener("pointerdown", (down) => {
-      if (down.pointerType !== "mouse" || down.button !== 0) return;
+      if (down.pointerType !== "mouse" || down.button !== 0 || down.target === frame) return;
       down.preventDefault();
       frame.setPointerCapture(down.pointerId);
       frame.classList.add("panning");
@@ -78,12 +78,9 @@ function panDiagrams(root) {
       const stop = () => {
         frame.classList.remove("panning");
         frame.removeEventListener("pointermove", move);
-        frame.removeEventListener("pointerup", stop);
-        frame.removeEventListener("pointercancel", stop);
       };
       frame.addEventListener("pointermove", move);
-      frame.addEventListener("pointerup", stop);
-      frame.addEventListener("pointercancel", stop);
+      frame.addEventListener("lostpointercapture", stop, { once: true });
     });
   });
 }

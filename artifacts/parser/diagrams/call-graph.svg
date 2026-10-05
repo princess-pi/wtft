@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1540" height="693" viewBox="0 0 1540 693" role="img" aria-labelledby="title">
-<title id="title">Which parser functions call which; the shaded ones are where most changes land</title>
+<title id="title">Which parser functions call which; the shaded ones carry most of the parser's weight</title>
 <style>
   .card { fill: #ffffff; stroke: #d0d7de; }
   text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; fill: #1f2328; }

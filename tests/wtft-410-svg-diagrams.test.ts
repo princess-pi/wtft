@@ -17,24 +17,32 @@ function filesUnder(dir: string): string[] {
 const diagramFiles = () => filesUnder(artifacts).filter((file) => /\/diagrams\/[^/]+\.svg$/.test(file));
 
 describe("diagrams are SVG files shown at their own size", () => {
-	it("the parser spec embeds four diagrams, each in a .diagram frame with alt text, and each file exists", () => {
+	it("the parser spec embeds four diagrams, each in a .diagram frame with alt text and the SVG's own size", () => {
 		const spec = read("parser/spec.mdx");
-		const frames = [...spec.matchAll(/<div class="diagram"><img src="(diagrams\/[a-z-]+\.svg)" alt="([^"]+)"[^>]*><\/div>/g)];
+		const frames = [...spec.matchAll(/<div class="diagram"><img src="(diagrams\/[a-z-]+\.svg)" alt="[^"]+" width="(\d+)" height="(\d+)"><\/div>/g)];
 		assert.equal(frames.length, 4);
-		for (const [, src] of frames) assert.ok(fs.existsSync(path.join(artifacts, "parser", src)), src);
+		for (const [, src, width, height] of frames) {
+			const root = /<svg\b[^>]*>/.exec(read(path.join("parser", src)))?.[0] ?? "";
+			assert.match(root, new RegExp(` width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"`), src);
+		}
 	});
 
-	it("every diagram declares its pixel size and sets no text under 14px", () => {
+	it("every diagram is drawn at its own pixel size, with no text under 14px", () => {
 		const files = diagramFiles();
 		assert.ok(files.length >= 4, "the fixture has diagrams to check");
 		for (const file of files) {
 			const svg = fs.readFileSync(file, "utf8");
 			const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? "";
-			assert.match(root, /\swidth="\d+"/, file);
-			assert.match(root, /\sheight="\d+"/, file);
-			const sizes = [...svg.matchAll(/font(?:-size)?[:=]\s*"?(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
-			assert.ok(sizes.length > 0, `${file} sets a font size`);
-			for (const size of sizes) assert.ok(size >= MIN_FONT_PX, `${file} has ${size}px text`);
+			const size = / width="(\d+)" height="(\d+)" viewBox="0 0 (\d+) (\d+)"/.exec(root);
+			assert.ok(size, `${file} declares width, height and viewBox`);
+			assert.deepEqual([size[3], size[4]], [size[1], size[2]], `${file} viewBox matches its pixel size`);
+			assert.doesNotMatch(svg, /\b(transform|scale)\b|font:/, `${file} has no transform or font shorthand`);
+			const declared = [...svg.matchAll(/font-size\s*[:=]\s*"?([^;"\s}]+)/g)].map((m) => m[1]);
+			assert.ok(declared.length > 0, `${file} sets a font size`);
+			for (const value of declared) {
+				const px = /^(\d+(?:\.\d+)?)(px)?$/.exec(value);
+				assert.ok(px && Number(px[1]) >= MIN_FONT_PX, `${file} has font-size ${value}`);
+			}
 		}
 	});
 

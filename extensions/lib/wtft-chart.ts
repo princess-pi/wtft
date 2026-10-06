@@ -47,14 +47,35 @@ export function timelineGlyphs(now: number, tz: string | undefined, disabledEmoj
 	return { start: getMoonPhase(start), end: getMoonPhase(end), noon: "☀️" };
 }
 
-const BLOCK_OLD = "\u2583" as const;
-const BLOCK_NEW = "\u2587" as const;
 const BLOCK_BUCKET = "\u2588" as const;
 
 const PLACEHOLDER_PREFIX = "\x1b[90m-";
 
 /** Padding stops here whatever the limit: `-l 1000000000` is a valid row limit, not a request for a billion rows. */
 export const MAX_PADDED_ROWS = 1000;
+
+const XTERM_LEVELS = [0, 95, 135, 175, 215, 255];
+// WCAG relative luminance of every ✨ cell's background, which sets ✨'s contrast against it.
+// About 0.08 is as dark as it goes with the hue still readable, 0.09 is a good starting point,
+// and from about 0.12 ✨ starts to lose contrast.
+const SPARKLE_BG_LUMINANCE = 0.20;
+
+function xtermRgb(n: number): number[] {
+	if (n >= 232) return Array(3).fill(8 + (n - 232) * 10);
+	const i = n - 16;
+	return [XTERM_LEVELS[Math.floor(i / 36)], XTERM_LEVELS[Math.floor(i / 6) % 6], XTERM_LEVELS[i % 6]];
+}
+
+/** xterm 256-colour index in, the same hue as 24-bit sRGB out, scaled to SPARKLE_BG_LUMINANCE. */
+export function sparkleBackground(fg: number): number[] {
+	const linear = xtermRgb(fg).map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+	const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+	if (luminance === 0) return [0, 0, 0];
+	return linear.map((c) => {
+		const v = Math.min(1, c * SPARKLE_BG_LUMINANCE / luminance);
+		return Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
+	});
+}
 
 /** A padding row: the watch drops these first when the frame is taller than the terminal. */
 export function isPlaceholderRow(line: string): boolean {
@@ -157,6 +178,17 @@ export function renderWtftChart(input: {
 		return own ? { fg: own.fg, char: own.char ?? "█", label: own.label } : words?.categories ? { ...CATEGORY_STYLE[cat], label: null } : CATEGORY_STYLE[cat];
 	};
 	const ALL_CATEGORIES = order;
+	const THIS_BIN = disabledEmoji ? "**" : "✨";
+	const splitSegment = (cells: number, newShare: number, fg: number): string => {
+		const raw = cells * newShare;
+		const evenCells = cells - (cells % 2);
+		const fresh = raw > 0 && evenCells >= 2 ? Math.min(evenCells, Math.max(2, 2 * Math.round(raw / 2))) : 0;
+		const earlier = cells - fresh;
+		let out = "";
+		if (earlier > 0) out += `\x1b[38;5;${fg}m${"█".repeat(earlier)}\x1b[0m`;
+		if (fresh > 0) out += `\x1b[48;2;${sparkleBackground(fg).join(";")}m${disabledEmoji ? "*".repeat(fresh) : "✨".repeat(fresh / 2)}\x1b[0m`;
+		return out;
+	};
 
 	const maxBarValue = mode === "cumulative"
 		? (unit === "tokens" ? totalSessionTokens : totalSessionCost)
@@ -393,13 +425,7 @@ export function renderWtftChart(input: {
 
 				if (mode === "cumulative") {
 					const incTokens = bin._incTokens?.[cat]?.total ?? 0;
-					const catIncRatio = t.total > 0 ? incTokens / t.total : 0;
-					const rawNew = segChars * catIncRatio;
-					const newChars = rawNew > 0 ? Math.max(1, Math.round(rawNew)) : 0;
-					const oldChars = segChars - newChars;
-
-					if (oldChars > 0) barStr += `\x1b[38;5;${fg}m${BLOCK_OLD.repeat(oldChars)}\x1b[0m`;
-					if (newChars > 0) barStr += `\x1b[38;5;${fg}m${BLOCK_NEW.repeat(newChars)}\x1b[0m`;
+					barStr += splitSegment(segChars, t.total > 0 ? incTokens / t.total : 0, fg);
 				} else {
 					barStr += `\x1b[38;5;${fg}m${BLOCK_BUCKET.repeat(segChars)}\x1b[0m`;
 				}
@@ -421,8 +447,8 @@ export function renderWtftChart(input: {
 				for (const cat of order) {
 					const n = counts?.[cat] ?? 0;
 					if (n <= 0) continue;
-					const fg = styleOf(cat).fg;
-					barStr += `\x1b[38;5;${fg}m${"█".repeat(n)}\x1b[0m`;
+					const total = bin.costs[cat] || 0;
+					barStr += splitSegment(n, total > 0 ? (bin._incCosts?.[cat] ?? 0) / total : 0, styleOf(cat).fg);
 				}
 			} else {
 				const buckets = new Map<number, { cat: Category; cost: number }[]>();
@@ -459,12 +485,12 @@ export function renderWtftChart(input: {
 
 	if (otherWarning) widgetLines.push(otherWarning);
 
-	if (unit === "tokens") {
+	{
 		const keyParts: string[] = [];
-		if (mode === "cumulative") keyParts.push(`\x1b[37m▃\x1b[0m\x1b[90m ${words?.key?.earlier ?? "earlier bins"}  \x1b[37m▇\x1b[0m\x1b[90m ${words?.key?.thisBin ?? "this bin"}`);
+		if (mode === "cumulative") keyParts.push(`\x1b[37m█\x1b[0m\x1b[90m ${words?.key?.earlier ?? "earlier bins"}  ${THIS_BIN}\x1b[90m ${words?.key?.thisBin ?? "this bin"}`);
 		if (drewDollar) keyParts.push(`${words?.currency || "$"} = ${words?.key?.costOnly ?? "cost-only (web tools)"}`);
 		if (keyParts.length > 0) widgetLines.push(`\x1b[90m  ${keyParts.join("  ")}\x1b[0m`);
-		if (tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
+		if (unit === "tokens" && tokenFooter) widgetLines.push(`\x1b[37m  ${tokenFooter}\x1b[0m`);
 	}
 
 	if (cacheLine) {

@@ -33,6 +33,7 @@ export interface Bin {
 	incremental_tokens?: number;
 	column_total_tokens?: number;
 	_incTokens?: Record<Category, { total: number }>;
+	_incCosts?: Record<Category, number>;
 	surgePriced?: boolean;
 }
 
@@ -895,6 +896,7 @@ export function buildWtftLines(
 
 		for (const bin of sortedBins) {
 			bin.incremental_cost = bin.total_cost;
+			bin._incCosts = { ...bin.costs };
 			running_total += bin.total_cost;
 
 			for (const cat of Object.keys(bin.costs) as Category[]) {

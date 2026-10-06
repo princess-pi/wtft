@@ -46,7 +46,11 @@ function applyCodes(style: Style, codes: number[]): Style {
 			const color = xtermRgb(codes[i + 2] ?? 7);
 			if (code === 38) next.fg = color; else next.bg = color;
 			i += 2;
-		} else if ((code === 38 || code === 48) && codes[i + 1] === 2) i += 4;
+		} else if ((code === 38 || code === 48) && codes[i + 1] === 2) {
+			const color = `rgb(${codes[i + 2] ?? 0},${codes[i + 3] ?? 0},${codes[i + 4] ?? 0})`;
+			if (code === 38) next.fg = color; else next.bg = color;
+			i += 4;
+		}
 	}
 	return next;
 }

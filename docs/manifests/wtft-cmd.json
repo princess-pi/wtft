@@ -239,7 +239,7 @@
     },
     {
       "flags": "-S, --show, -H, --hide",
-      "desc": "Show or hide the WTFT widget below the editor. Pi extension only; both are accepted and inert in the CLI. -H hides it until a /wtft call that draws it (plain, with chart settings, -S, --tokens or --cost) or a new Pi session; an emoji flag, -F, -o, -p, --help, --why and --version leave it hidden. -S does nothing of its own beyond being such a call, and --hide --show and --show --hide both hide it. With --tokens or --cost in the same call, -H is ignored and the widget is drawn."
+      "desc": "Show or hide the WTFT widget below the editor. Pi extension only; both are accepted and inert in the CLI. -H hides it until a /wtft call that draws it (plain, with chart settings, -S, --tokens or --cost) or a new Pi session; an emoji flag, -F, -o, -p, --help, --why and --version leave it hidden. -S does nothing of its own beyond being such a call, and --hide --show and --show --hide both hide it. -H is ignored in a call that also carries -F, an emoji flag, --version, --help, --why, -o, --tokens or --cost: that flag runs instead, and --tokens or --cost draws the widget."
     },
     {
       "flags": "--emoji, --no-emoji",

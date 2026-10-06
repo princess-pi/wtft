@@ -57,7 +57,7 @@ for (const [unit, mode] of [["cost", "cumulative"], ["cost", "bucket"], ["tokens
 	check(line.includes("+1.5k"), `${unit} ${mode} prints incremental tokens`);
 	check(line.includes("3.0k tok"), `${unit} ${mode} prints total tokens`);
 	if (unit === "tokens" && mode === "cumulative") {
-		check(line.includes("▇") || line.includes("▃"), `${unit} ${mode} keeps the recency glyph`);
+		check(line.includes("*"), `${unit} ${mode} keeps the recency glyph, * with emoji off`);
 	} else if (unit === "cost" && mode === "bucket") {
 		check(/\s{2,}█/.test(line), `${unit} ${mode} keeps a scatter mark`);
 	} else {
@@ -104,7 +104,7 @@ const narrowPlain = (buildWtftLines(ix, narrow, { unit: "cost", mode: "cumulativ
 	.map(l => l.replace(/\x1b\[[0-9;]*m/g, ""));
 check(narrowPlain.some(l => l.includes("$0")), "width 40 keeps the scale line");
 const narrowTok = row(buildWtftLines(ix, narrow, { unit: "tokens", mode: "cumulative" }));
-check(narrowTok.includes("▇") || narrowTok.includes("▃"), "width 40 keeps the recency glyph");
+check(narrowTok.includes("*"), "width 40 keeps the recency glyph, * with emoji off");
 const big = [mockIx(100_000_000, t0), mockIx(100_000_000, t0 + hour)];
 const squeezed = row(buildWtftLines(big, narrow, { unit: "cost", mode: "cumulative" }));
 check(!squeezed.includes("$") && !squeezed.includes("tok"), `width 40 drops every number column when they do not fit: ${JSON.stringify(squeezed)}`);

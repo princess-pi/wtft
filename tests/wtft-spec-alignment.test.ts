@@ -75,7 +75,7 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 		process.exit(1);
 	}
 
-	const firstBarRow = barRows[0]; // Newest/highest value bar row
+	const firstBarRow = barRows[0].replace(/✨/g, "✨✨"); // Newest/highest value bar row
 
 	const firstDotIdx = ticksRow.indexOf(".");
 	const lastDotIdx = ticksRow.lastIndexOf(".");
@@ -86,7 +86,7 @@ function runAlignmentTest(mode: "cumulative" | "bucket") {
 		firstBarRow.lastIndexOf("▁"), firstBarRow.lastIndexOf("▂"),
 		firstBarRow.lastIndexOf("▃"), firstBarRow.lastIndexOf("▄"),
 		firstBarRow.lastIndexOf("▅"), firstBarRow.lastIndexOf("▆"),
-		firstBarRow.lastIndexOf("▇")
+		firstBarRow.lastIndexOf("▇"), firstBarRow.lastIndexOf("✨")
 	);
 
 	const actualBarStart = Math.min(

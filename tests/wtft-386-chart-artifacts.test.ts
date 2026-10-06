@@ -56,8 +56,8 @@ describe("renderReport draws what the CLI report arm draws", () => {
 		const env = (columns: number) => ({ columns, sessionFile: "/x/a.jsonl", interactions: wtftSession(MODEL), now: NOW });
 		const plain = (argv: string[], columns = 160) => renderReport(argv, env(columns)).lines.map(stripAnsi).join("\n");
 		const rows = (argv: string[]) => plain(argv).split("\n").filter((line) => /^ \d\d:00 /.test(line)).join("\n");
-		assert.match(rows(["-c", "--tokens", "--tz", "UTC"]), /▃/);
-		assert.doesNotMatch(rows(["-b", "--tokens", "--tz", "UTC"]), /▃/);
+		assert.match(rows(["-c", "--tokens", "--tz", "UTC"]), /✨/);
+		assert.doesNotMatch(rows(["-b", "--tokens", "--tz", "UTC"]), /✨/);
 		assert.match(plain(["-i", "5t", "-l", "40", "--tz", "UTC"]), /\b10t\b/);
 		assert.match(plain(["--no-emoji"]), /\[\$\] WTF Tokens\?/);
 		assert.doesNotMatch(rows(["--no-cost"]), /\$\d/);
@@ -208,13 +208,15 @@ describe("the library page", () => {
 });
 
 describe("ansiToHtml", () => {
-	it("colours a 256-colour cell, keeps bold, escapes text and drops what it does not know", () => {
+	it("colours a 256-colour or 24-bit cell, keeps bold, escapes text and drops what it does not know", () => {
 		assert.equal(ansiToHtml("\x1b[38;5;196mA\x1b[0m<b>"), '<span style="color:rgb(255,0,0)">A</span>&lt;b&gt;');
 		assert.equal(ansiToHtml("\x1b[1;37mA\x1b[0m"), '<span style="font-weight:700;color:rgb(229,229,229)">A</span>');
 		assert.equal(ansiToHtml("\x1b[5;90mA\x1b[0mB"), '<span style="color:rgb(136,136,136)">A</span>B');
 		assert.equal(stripAnsi("\x1b[1;38;5;208mx\x1b[0m"), "x");
 		assert.equal(ansiToHtml("\x1b[7mA\x1b[27mB"), '<span style="color:#0e0e0e;background:rgb(229,229,229)">A</span>B');
-		assert.equal(ansiToHtml("\x1b[38;2;1;31;7mA"), "A");
+		assert.equal(ansiToHtml("\x1b[38;2;1;31;7mA"), '<span style="color:rgb(1,31,7)">A</span>');
+		assert.equal(ansiToHtml("\x1b[48;2;1;31;7mA"), '<span style="background:rgb(1,31,7)">A</span>');
+		assert.equal(ansiToHtml("\x1b[2;3mA"), "A");
 		assert.equal(ansiToHtml("\x1b[38;5;196;7mA"), '<span style="color:#0e0e0e;background:rgb(255,0,0)">A</span>');
 	});
 });

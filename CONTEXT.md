@@ -137,21 +137,21 @@ as interchangeable in new prose.
 One of the two render modes, set by `-b/--bucket` (the other is `-c/--cumulative`, default):
 shows each bin's own discrete total rather than a running sum. `mode: "bucket" | "cumulative"`
 in `wtft-renderer.ts`/`wtft.ts`, parsed from `-b/-c` in `wtft-cli-shared.ts`. Not a grouping
-concept — see Bin above. Also overloaded once, harmlessly: `buildWtftLines()` in
-`wtft-renderer.ts` has an unrelated local variable named `buckets` (a `Map` used for
-cost-based collision resolution, positioning same-column markers) declared in the COST MODE
-BAR RENDERING section, in the `else` branch of its `if (mode === "cumulative")` — i.e. inside
-*bucket*-mode, cost-unit rendering only; bucket-mode rendering under `--tokens` has no
-`buckets` Map, it uses `BLOCK_BUCKET` instead. `buildWtftLines()` has several
-`if (mode === "cumulative")` checks; this is the one under the cost-unit branch, not the
-first one in the function. It is not the `-b/--bucket` flag and should not be confused with
-it when reading that function.
+concept — see Bin above. Also overloaded once, harmlessly: `renderWtftChart()` in
+`wtft-chart.ts` has an unrelated local variable named `buckets` (a `Map` used for
+cost-based collision resolution, positioning same-column markers) in the `else` branch of its
+cost-unit `if (mode === "cumulative")` — i.e. inside *bucket*-mode, cost-unit rendering only;
+bucket-mode rendering under `--tokens` has no `buckets` Map, it uses `BLOCK_BUCKET` instead.
+It is not the `-b/--bucket` flag and should not be confused with it when reading that
+function.
 _Avoid_: Bin (see above), interval
 
 **Cumulative (mode)**:
-The default render mode (`-c/--cumulative`): each bin's bar shows the running sum of cost up to
-and including that bin, not just that bin's own total. Guarantees monotonically non-decreasing
-bar widths (#106).
+The default render mode (`-c/--cumulative`), unless the config sets the mode: each bin's bar shows the running sum of cost, or of
+tokens under `--tokens`, up to and including that bin, not just that bin's own total. Each
+category draws its earlier bins as `█` and its share new this bin as `✨` (#413), to within a
+cell or two. The cost bar
+guarantees monotonically non-decreasing widths per category (#106).
 _Avoid_: Running mode, total mode
 
 **Session**:

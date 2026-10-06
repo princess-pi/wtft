@@ -57,6 +57,11 @@ export function cellsHtml(text) {
 	const chars = [...text];
 	for (let i = 0; i < chars.length;) {
 		const paint = PAINT.get(chars[i]);
+		if (chars[i] === "✨") {
+			html += `<span style="display:inline-block;width:2ch;height:1lh;vertical-align:top;overflow:hidden;text-align:center;background:inherit">✨</span>`;
+			i++;
+			continue;
+		}
 		if (!paint) {
 			html += escapeHtml(chars[i]);
 			i++;

@@ -75,10 +75,10 @@ describe("where cells are painted", () => {
 		assert.equal(ansiToHtml("\x1b[38;5;196m██\x1b[0m x"), `<span style="color:rgb(255,0,0)">${cellsHtml("██")}</span> x`);
 	});
 
-	it("the spec browser paints every code block but mermaid", () => {
+	it("the spec browser paints every code block", () => {
 		const browser = fs.readFileSync(new URL("../artifacts/assets/browser.js", import.meta.url), "utf8");
 		assert.match(browser, /import \{[^}]*\bcellsHtml\b[^}]*\} from "\.\/cell-glyphs\.mjs"/);
-		assert.match(browser, /querySelectorAll\("pre code:not\(\.language-mermaid\)"\)[\s\S]{0,200}cellsHtml\(/);
+		assert.match(browser, /querySelectorAll\("pre code"\)[\s\S]{0,200}cellsHtml\(/);
 	});
 
 	it("every page that paints cells sets a whole-pixel font size and line height on its pre", () => {

@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="912" height="1223" viewBox="0 0 912 1223" role="img" aria-labelledby="title">
+<title id="title">The parser pipeline, from a .jsonl transcript to tag file lines</title>
+<style>
+  .card { fill: #ffffff; stroke: #d0d7de; }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; fill: #1f2328; }
+  text.label { fill: #57606a; }
+  .node { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+  .node.hot { fill: #f3e2b8; stroke: #b08a3e; }
+  .edge { fill: none; stroke: #57606a; stroke-width: 1.5; }
+  .dashed { stroke-dasharray: 6 4; }
+  .arrow { fill: #57606a; }
+  .label-bg { fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .card { fill: #0d1117; stroke: #30363d; }
+    text { fill: #e6edf3; }
+    text.label { fill: #9198a1; }
+    .node { fill: #161b22; stroke: #8b949e; }
+    .node.hot { fill: #4a3b17; stroke: #d4a94a; }
+    .edge { stroke: #8b949e; }
+    .arrow { fill: #8b949e; }
+    .label-bg { fill: #0d1117; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 Z"/></marker></defs>
+<rect class="card" x="0.5" y="0.5" width="911" height="1222" rx="8"/>
+<path class="edge" d="M474.0,64.0 L474.0,102.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,145.0 L474.0,183.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M405.5,217.5 L197.0,217.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,252.0 L474.0,306.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M423.0,358.8 L235.0,426.2" marker-end="url(#arrow)"/>
+<path class="edge" d="M523.6,359.2 L720.0,433.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,375.0 L474.0,554.0" marker-end="url(#arrow)"/>
+<path class="edge dashed" d="M235.0,498.8 L407.0,554.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,597.0 L474.0,635.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,697.0 L474.0,735.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,778.0 L474.0,816.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,878.0 L474.0,916.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,959.0 L474.0,997.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,1040.0 L474.0,1078.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M474.0,1121.0 L474.0,1159.0" marker-end="url(#arrow)"/>
+<rect class="node" x="392" y="24" width="164" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="47.5">.jsonl transcript</tspan></text>
+<rect class="node" x="336" y="105" width="276" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="128.5">fileLines: read in 1 MiB chunks</tspan></text>
+<path class="node" d="M474,186 L539.5,217.5 L474,249 L408.5,217.5 Z"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="222.5">JSON.parse</tspan></text>
+<rect class="node" x="62" y="199" width="132" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="128.0" y="222.5">skip the line</tspan></text>
+<path class="node" d="M474,309 L579.5,340.5 L474,372 L368.5,340.5 Z"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="345.5">applyControlEntry</tspan></text>
+<path class="node" d="M24,423 A104,7 0 0 1 232,423 L232,506 A104,7 0 0 1 24,506 Z"/>
+<path class="node" d="M24,423 A104,7 0 0 0 232,423"/>
+<text class="text" text-anchor="middle"><tspan x="128.0" y="454.5">ParseStreamState:</tspan><tspan x="128.0" y="473.5">model, thinking level,</tspan><tspan x="128.0" y="492.5">compaction</tspan></text>
+<rect class="node" x="716" y="436.5" width="172" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="802.0" y="460.0">stamp the previous</tspan><tspan x="802.0" y="479.0">turn interrupted</tspan></text>
+<rect class="node" x="368" y="557" width="212" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="580.5">parseEntryToInteraction</tspan></text>
+<rect class="node" x="292" y="638" width="364" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="661.5">buildInteraction: cost, cache miss, files,</tspan><tspan x="474.0" y="680.5">commands, texts, tool categories</tspan></text>
+<rect class="node" x="380" y="738" width="188" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="761.5">raw Interaction list</tspan></text>
+<rect class="node" x="344" y="819" width="260" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="842.5">attributeClaudeSubAgentCosts:</tspan><tspan x="474.0" y="861.5">fold claude -p children</tspan></text>
+<rect class="node" x="368" y="919" width="212" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="942.5">deduplicateInteractions</tspan></text>
+<rect class="node" x="384" y="1000" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="1023.5">classifyInteraction</tspan></text>
+<rect class="node" x="392" y="1081" width="164" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="1104.5">splitOverheadCost</tspan></text>
+<rect class="node" x="404" y="1162" width="140" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="474.0" y="1185.5">tag file lines</tspan></text>
+<rect class="label-bg" x="276.3" y="206.0" width="50.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="301.3" y="222.5">fails</tspan></text>
+<rect class="label-bg" x="461.0" y="267.5" width="26.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="474.0" y="284.0">ok</tspan></text>
+<rect class="label-bg" x="272.0" y="381.0" width="114.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="329.0" y="397.5">control entry</tspan></text>
+<rect class="label-bg" x="580.8" y="384.9" width="82.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="621.8" y="401.4">interrupt</tspan></text>
+<rect class="label-bg" x="425.0" y="453.0" width="98.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="474.0" y="469.5">not control</tspan></text>
+<rect class="label-bg" x="280.0" y="514.9" width="82.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="321.0" y="531.4">passed in</tspan></text>
+</svg>

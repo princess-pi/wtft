@@ -227,7 +227,7 @@
     },
     {
       "flags": "-c, --cumulative, -b, --bucket",
-      "desc": "Render mode; the later flag wins. Cumulative: each bar is the running sum up to and including its bin. Bucket: each bar is its bin's own total, a scatter for cost and stacked for --tokens. Default: the wtft config's mode, else cumulative. The Pi widget saves a -c or -b it is given to the wtft config, which the CLI also reads."
+      "desc": "Render mode; the later flag wins. Cumulative: each bar is the running sum up to and including its bin. Bucket: each bar is its bin's own total, a scatter for cost and stacked for --tokens. Default: the wtft config's mode, else cumulative. The Pi widget saves a -c or -b it is given to the wtft config, which the CLI also reads, except on the calls the description lists as saving nothing (--tokens after any --cost among them)."
     },
     {
       "flags": "-p, --pager",

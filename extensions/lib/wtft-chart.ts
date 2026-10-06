@@ -416,7 +416,7 @@ export function renderWtftChart(input: {
 		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
 		// ⚡ is double-width — it fills the 2-char column gap on its own, numbers stay aligned.
-		const boltGap = surgeActive && gap.length === 2 ? "\x1b[1;38;5;208m\u26A1\x1b[0m" : gap;
+		const boltGap = surgeActive && gap.length === 2 ? `\x1b[1;38;5;208m${disabledEmoji ? "!!" : "\u26A1"}\x1b[0m` : gap;
 
 		if (unit === "tokens" && bin.tokens) {
 			const barMax = Math.max(0, maxBarWidth - 2);

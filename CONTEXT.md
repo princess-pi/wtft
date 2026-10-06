@@ -135,8 +135,10 @@ as interchangeable in new prose.
 
 **Bucket (mode)**:
 One of the two render modes, set by `-b/--bucket` (the other is `-c/--cumulative`, default):
-shows each bin's own discrete total rather than a running sum. `mode: "bucket" | "cumulative"`
-in `wtft-renderer.ts`/`wtft.ts`, parsed from `-b/-c` in `wtft-cli-shared.ts`. Not a grouping
+each bin's bar shows that bin's own total rather than a running sum. The number columns are the
+same in both modes: the total columns accumulate either way, so only the bar differs.
+`mode: "bucket" | "cumulative"`, parsed from `-b/-c` in `wtft-cli-shared.ts` and passed through
+`chartLines` and `buildWtftLines` to `renderWtftChart`. Not a grouping
 concept — see Bin above. Also overloaded once, harmlessly: `renderWtftChart()` in
 `wtft-chart.ts` has an unrelated local variable named `buckets` (a `Map` used for
 cost-based collision resolution, positioning same-column markers) in the `else` branch of its
@@ -397,7 +399,8 @@ _Avoid_: Agent, client, platform
 
 **Widget**:
 The persistent TUI panel wtft renders below the editor inside the Pi harness — auto-shown on
-session start if config exists, toggled via `-S/--show` / `-H/--hide`. Distinct from the CLI
+session start if config exists, cleared by `-H/--hide` until its next refresh (`-S/--show` is accepted and does
+nothing). Distinct from the CLI
 (below): the widget only exists inside Pi.
 _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a separate tool, not part of wtft)
 

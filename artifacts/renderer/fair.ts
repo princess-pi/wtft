@@ -48,9 +48,9 @@ interface Word {
 }
 
 const WORDS: Word[] = [
-	{ id: "title", says: "💸 WTF Tokens? ...0042", becomes: "🍎 Booth 42", seen: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line) },
+	{ id: "title", says: "💸 WTF Tokens? ...0042 (🔢 on a units chart)", becomes: "🍎 Booth 42", seen: (line) => /(💸|🔢|\[\$\]|\[#\]) WTF Tokens\?/.test(line) },
 	{ id: "legend", says: "█Ovrhd █Waste █Plan … all 14 categories, named for wtft", becomes: "█Lattes █Apples … the booth's own items", seen: (line, index) => index === 1 && line.includes("Ovrhd") },
-	{ id: "units", says: "{n} tok", becomes: "{n} pcs", seen: (line) => / tok\b|\d[kM]?t\b/.test(stripAnsi(line).trim().replace(/^\S+/, "")) },
+	{ id: "units", says: "{n} tok ({n}t when compacted)", becomes: "{n} pcs ({n}p when compacted)", seen: (line) => / tok\b|\d[kM]?t\b/.test(stripAnsi(line).trim().replace(/^\S+/, "")) },
 	{ id: "key", says: "█ earlier bins  ✨ this bin", becomes: "█ sold earlier  ✨ sold this bin", seen: (line) => line.includes("earlier bins") },
 	{ id: "footer", says: "↑{n}", becomes: "(no line)", seen: (line) => /^\x1b\[37m {2}[↑↓R]/.test(line) },
 	{ id: "cache-line", says: "CH: {pct} cache hit ({n} read / {n} total ops)", becomes: "(no line)", seen: (line) => /^\x1b\[90m {2}CH: /.test(line) },

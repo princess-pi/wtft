@@ -40,7 +40,7 @@
   <div class="presets" id="presets"></div>
   <div class="grid">
     <fieldset>
-      <legend>Bin</legend>
+      <legend>Interval</legend>
       <select id="interval"></select>
     </fieldset>
     <fieldset>
@@ -81,7 +81,7 @@
       <label><input type="radio" name="view" value="generic"> with the booth's words</label>
     </fieldset>
   </div>
-  <p class="meta">The chart drops a ticked column pair when it leaves the bar under 15 cells, the units pair first: at 40 columns the units pair is gone with its box still ticked. The chart is drawn <code>columns</code> - 2 wide, and never under 40.</p>
+  <p class="meta">The chart drops a ticked column pair when it leaves the bar under 15 cells, the units pair first: at 40 columns the units pair is gone with its box still ticked. The page passes a width of <code>columns</code> - 2, capped at 1023, and the chart floors it at 40. That width lays out the rows, the scale line and the dividers only: the title line, the legend and the lines under the rows are not fitted to it, so at narrow widths they run past it.</p>
 
   <div id="today-block">
     <h2>As the chart draws it today</h2>
@@ -89,7 +89,7 @@
   </div>
   <div id="generic-block">
     <h2>With the booth's own words</h2>
-    <p class="meta">The same call, with the booth's <code>words</code> and no session name. The title's <code>Booth 42</code> is the booth's own, so it carries no <code>...0042</code>. The timeline strip stays, because it stays on wtft's title line.</p>
+    <p class="meta">The same call, with the booth's <code>words</code> and no session name. With no <code>sessionNameSuffix</code> the title <code>🍎 Booth 42</code> carries no <code>...0042</code>; a <code>words.title</code> alone would keep it. The timeline strip stays, because it stays on wtft's title line.</p>
     <div class="frame"><pre id="generic"></pre></div>
   </div>
 
@@ -98,12 +98,12 @@
   <p class="meta">A row that shows 0 had no line to replace in the first picture. Switch the measure to units for the footer, and the mode to bucket to lose the key. Tick souvenirs, with the measure on revenue, for the warning. The power cut shows once the rows reach back to it: 20 hourly rows do and 19 don't, and it fires in other bins too, such as <code>1d</code> with 3 rows. It already fires in the default view.</p>
 
   <h2>Categories the booth rides on</h2>
-  <p class="meta">The chart has 14 categories, and any other value throws. The booth's items borrow a slot each, and with it the slot's colour and its position in the stack. Cost bucket mode draws no stack, only one marker per slot. The table lists Souvenirs whether or not the booth sells them; the booth uses <code>other</code> only when souvenirs are ticked.</p>
+  <p class="meta">The chart has 14 categories, and any other value throws. The booth's items borrow a slot each. In the first picture an item takes its slot's colour and place in the stack; in the second the booth's <code>words.categories</code> sets both, passing each slot's own colour in the chart's order, so the bars match. Cost bucket mode draws no stack: each slot with sales gets one <code>█</code>, placed by its revenue, and where two land on the same cell the larger takes it, or on a tie the one earlier in the stack, and the other draws nothing. The table lists Souvenirs whether or not the booth sells them; the booth uses <code>other</code> only when souvenirs are ticked.</p>
   <table id="cats"></table>
 
   <details>
     <summary>The call</summary>
-    <p class="meta">The page runs this inside <code>withTerminal(columns, now, ...)</code>, which stands in for the terminal width and the clock. Run as shown, the caller's own terminal width is the ceiling.</p>
+    <p class="meta">The page runs both calls inside <code>withTerminal(columns, undefined, ...)</code>, which stands in for the terminal width only; the clock is the browser's. Run as shown, the caller's own terminal width is the ceiling. Two names are placeholders: <code>sales</code> is the booth's interactions, <code>fairBooth({ souvenirs })</code> in <code>artifacts/renderer/fair-session.ts</code>, and <code>defaults</code> is <code>{ interval: "1h", limit: 100, width, mode: "cumulative", timezone: undefined }</code>, the settings every option shown overrides. <code>...the same options</code> is the first call's options without <code>sessionNameSuffix</code>.</p>
     <pre class="call" id="call"></pre>
   </details>
   <p class="meta" id="count"></p>
@@ -117,7 +117,7 @@
   const VIEWS = { both: ["today", "generic"], today: ["today"], generic: ["generic"] };
   const PRESETS = [
     { label: "By the hour", state: { interval: "1h", limit: 24, mode: "cumulative", unit: "cost" } },
-    { label: "Lunch rush, per bin", state: { interval: "1h", limit: 24, mode: "bucket", unit: "cost" } },
+    { label: "Each hour on its own", state: { interval: "1h", limit: 24, mode: "bucket", unit: "cost" } },
     { label: "Dayparts", state: { interval: "4h", limit: 9, mode: "bucket", unit: "cost" } },
     { label: "By day", state: { interval: "1d", limit: 3, mode: "cumulative", unit: "cost" } },
     { label: "Every 25 sales", state: { interval: "25t", limit: 20, mode: "bucket", unit: "cost" } },
@@ -203,7 +203,7 @@
   }
 
   const items = [...FAIR_ITEMS, SOUVENIRS];
-  fillTable($("cats"), ["Booth item", "Chart category it rides on", "Price", "Rush hours bill"], items.map((item) => {
+  fillTable($("cats"), ["Booth item", "Chart category it rides on", "Price", "Lunch and dinner price"], items.map((item) => {
     const tr = document.createElement("tr");
     const slot = document.createElement("td");
     const swatch = document.createElement("span");

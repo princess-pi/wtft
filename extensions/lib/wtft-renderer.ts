@@ -957,9 +957,10 @@ export function buildWtftLines(
 		if (otherPct > 0.20 && totalOtherCost > 6.00) {
 			const pctStr = `${Math.round(otherPct * 100)}%`;
 			const costStr = formatCost(totalOtherCost, opts?.words?.currency);
+			const warn = disabledEmoji ? "!!" : "⚠️";
 			otherWarning = warningWord === undefined
-				? `\x1b[1;33m⚠️  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`
-				: `\x1b[1;33m⚠️  ${warningWord.replaceAll("{pct}", () => pctStr).replaceAll("{cost}", () => costStr)}\x1b[0m`;
+				? `\x1b[1;33m${warn}  "Other" category: ${pctStr} of session cost (${costStr}). Run wtft --other to drill down.\x1b[0m`
+				: `\x1b[1;33m${warn}  ${warningWord.replaceAll("{pct}", () => pctStr).replaceAll("{cost}", () => costStr)}\x1b[0m`;
 		}
 	}
 	const cacheMetrics = computeCacheMetrics(interactions);

@@ -10,7 +10,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   `bun run build`, then `bin/install-wtft` — otherwise `~/bin` keeps running the old build.
   `artifacts/renderer/wtft-chart.mjs` is a tracked bundle too: after an edit to `artifacts/renderer/*.ts`
   or anything it imports (the chart, the flag parser, pricing), run `bun run artifacts` and commit the
-  result. A test fails on a stale one.
+  result. A test fails on a stale one. The same run redraws the `--why` demos marked
+  `"demoFrom": "chart"` in `docs/manifests/wtft-cmd.json`; never hand-edit those rows.
 - **Bundles import only `node:` builtins.** bun builds them; stock node runs them. The relocatable-build
   test fails on any other import.
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the

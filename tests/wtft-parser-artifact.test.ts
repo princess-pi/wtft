@@ -32,12 +32,11 @@ describe("the parser pages are browser pages", () => {
 		assert.equal(fs.existsSync(path.join(artifacts, "parser/playground.html")), true);
 	});
 
-	it("embeds the playground from the same directory, and draws mermaid", () => {
+	it("embeds the playground from the same directory", () => {
 		const spec = read("parser/spec.mdx");
 		assert.match(spec, /<iframe src="playground\.html"/);
 		assert.match(spec, /\[Open the playground on its own\]\(playground\.html\)/);
 		assert.equal(resolveRelative("parser/spec.mdx", "playground.html"), "parser/playground.html");
-		assert.ok((spec.match(/^```mermaid$/gm) ?? []).length >= 4);
 	});
 
 	it("imports from the bundle only names the bundle exports", async () => {

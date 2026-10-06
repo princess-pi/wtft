@@ -33,7 +33,7 @@ the shades `░ ▒ ▓` included, stays text.
   the fair page paint. Their column ruler and the fair page's printed call are set as text and do
   not.
 - The spec browser (`artifacts/assets/browser.js`) replaces the contents of every `pre code`
-  block except mermaid with `cellsHtml` of its text, so the preset blocks in `chart-spec/spec.mdx`
+  block with `cellsHtml` of its text, so the preset blocks in `chart-spec/spec.mdx`
   paint too. Markup inside such a block is flattened to its text. Inline `code` is not painted.
 - Each of those `pre` blocks has a whole-pixel font size and line height (`14px/19px` on the two
   chart pages, `13px/17px` in the spec browser, whose `code` inherits it). A fractional line

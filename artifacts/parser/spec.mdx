@@ -21,24 +21,7 @@ The parser has no process of its own. Its main caller is the log parser daemon, 
 
 `parseSessionFile` is the whole-file entry point (used for subagent transcripts and one-off reads). The daemon runs the same per-line steps incrementally, as the transcript grows, in `extensions/lib/session-tagger.ts`.
 
-```mermaid
-flowchart TD
-  F[".jsonl transcript"] --> L["fileLines: read in 1 MiB chunks"]
-  L --> J{"JSON.parse"}
-  J -- "fails" --> X["skip the line"]
-  J -- "ok" --> C{"applyControlEntry"}
-  C -- "control entry" --> S[("ParseStreamState: model, thinking level, compaction")]
-  C -- "interrupt" --> I["stamp the previous turn interrupted"]
-  C -- "not control" --> P["parseEntryToInteraction"]
-  S -. "passed in" .-> P
-  P --> B["buildInteraction: cost, cache miss, files, commands, texts, tool categories"]
-  B --> R["raw Interaction list"]
-  R --> A["attributeClaudeSubAgentCosts: fold claude -p children"]
-  A --> D["deduplicateInteractions"]
-  D --> K["classifyInteraction"]
-  K --> O["splitOverheadCost"]
-  O --> T["tag file lines"]
-```
+<div class="diagram"><img src="diagrams/pipeline.svg" alt="Flowchart: a .jsonl transcript is read in chunks; each line is JSON-parsed (failures skipped), checked by applyControlEntry (control entries update ParseStreamState, interrupts stamp the previous turn), then parseEntryToInteraction, buildInteraction, attributeClaudeSubAgentCosts, deduplicateInteractions, classifyInteraction, splitOverheadCost, and finally tag file lines." width="912" height="1223"></div>
 
 `parseSessionFile` itself ends at the fold and returns the raw list; the dedupe, the classifier and the split are what the daemon does with it before writing a tag line (`serializeClassifiedWithOverheadSplit` in `wtft-daemon-lib.ts`).
 
@@ -46,16 +29,7 @@ flowchart TD
 
 Claude Code and Pi describe the same things with different field names. The parser keeps that difference in one place. Each harness has a small **parse adapter** (`extensions/lib/harness/<id>/parse.ts`) that knows only *where a field lives*. Everything about *what a number means* (pricing, cache-miss detection, classification) is shared code on the far side of the seam, so a new harness cannot get billing wrong.
 
-```mermaid
-flowchart LR
-  E["one transcript line"] --> M{"each adapter: matchAssistant"}
-  M -- "claude-code: type assistant" --> T["AssistantTurn with normalized usage"]
-  M -- "pi: type message" --> T
-  M -- "no adapter claims it" --> N["not a turn"]
-  T --> RB["adapter.readBlock, once per content block"]
-  RB --> PB["ParsedBlock: text, or tool with files and commands"]
-  PB --> BI["buildInteraction: shared"]
-```
+<div class="diagram"><img src="diagrams/adapters.svg" alt="Flowchart: each transcript line is offered to every adapter's matchAssistant; a claimed line becomes an AssistantTurn, each content block goes through adapter.readBlock into a ParsedBlock, and the shared buildInteraction takes it from there. An unclaimed line is not a turn." width="1547" height="303"></div>
 
 | | Claude Code | Pi |
 |---|---|---|
@@ -72,29 +46,7 @@ The first adapter whose `matchAssistant` claims a line wins. [Adding a harness](
 
 Most of the file's weight sits in five places: building an interaction, reading shell commands, grading file paths, classifying, and folding `claude -p` children. Those five are highlighted, and arrows are calls. The three entry points are `parseEntryToInteraction` (build a turn), `classifyInteraction` (name its category) and `attributeClaudeSubAgentCosts` (fold children).
 
-```mermaid
-flowchart LR
-  PE["parseEntryToInteraction"] --> BI["buildInteraction"]
-  BI --> CC["calculateClaudeCost"]
-  BI --> MT["mapToolToCategory"]
-  BI --> EF["extractFilesFromBashCommand"]
-  EF --> ER["extractRealCommands"]
-  EF --> CF["collectFilesFromShellCommand"]
-  CF --> SW["splitCommandWords"]
-  CI["classifyInteraction"] --> CP["classifyByFilePaths"]
-  CI --> ER
-  CI --> RX["command families: GIT_COMMAND, TEST_RUNNER, ..."]
-  AT["attributeClaudeSubAgentCosts"] --> CS["commandSpawnsAgent"]
-  CS --> ER
-  AT --> DT["discoverClaudeSubAgentFilesForTurn"]
-  DT --> SC["claudeSpawnCwds"]
-  DT --> SD["scanClaudeProjectDir"]
-  AT --> PS["parseSessionFile"]
-  AT --> DD["deduplicateInteractions"]
-  PS -. "a child folds its own children" .-> AT
-  classDef hot fill:#f3e2b8,stroke:#b08a3e,color:#222
-  class BI,CI,CP,AT,ER hot
-```
+<div class="diagram"><img src="diagrams/call-graph.svg" alt="Call graph of the parser: buildInteraction, classifyInteraction, classifyByFilePaths, extractRealCommands and attributeClaudeSubAgentCosts are highlighted; parseSessionFile calls back into attributeClaudeSubAgentCosts for nested children." width="1540" height="693"></div>
 
 `extractRealCommands` (in `wtft-command-shapes.ts`) is the one place a Bash string becomes "the commands that actually ran". Three different callers lean on it: file extraction, the classifier, and spawn detection.
 
@@ -120,21 +72,7 @@ It is also **regex-dense**: 14 named patterns at the top level (`GIT_COMMAND`, `
 
 `classifyInteraction` walks a ladder. The first rung that has an answer wins.
 
-```mermaid
-flowchart TD
-  A{"_cat from a tag file?"} -- yes --> A1["that category"]
-  A -- no --> B{"interrupted?"}
-  B -- yes --> B1["interrupted"]
-  B -- no --> C{"file paths grade?"}
-  C -- yes --> C1["tests / code / research / spec / plan"]
-  C -- no --> D{"tool categories?"}
-  D -- yes --> D1["agents > web > git > plan > grep"]
-  D -- no --> E{"real shell commands?"}
-  E -- yes --> E1["agents > spec > git > tests > code > grep, else other"]
-  E -- no --> F{"text and no unknown tool?"}
-  F -- yes --> F1["prompt"]
-  F -- no --> G["other"]
-```
+<div class="diagram"><img src="diagrams/classify.svg" alt="Decision ladder: tag-file category, then interrupted, then file paths, then tool categories, then real shell commands, then text with no unknown tool (prompt), else other." width="662" height="846"></div>
 
 **File paths** come from `Read`/`Edit`/`Write` tools and from shell commands that read or write files (`cat`, `sed -i`, `> out.txt`, `open('x','w')` in an inline Python script). Each path gets a class: `docs/research/` is `plan`; `docs/`, `README.md` and any `.md` are `spec`; `tests/` is `tests`; `research/` is `research`; `src/`, `extensions/`, `bin/` and code extensions are `code`. Scratch paths (`/tmp`, `/dev`, `/etc`, …) are ignored. Then **writes beat reads**, and among equals the latest workflow stage wins: tests > code > research > spec > plan. So reading `README.md` and editing `tests/x.test.ts` in one reply is `tests`.
 

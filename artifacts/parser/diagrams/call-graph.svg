@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1540" height="693" viewBox="0 0 1540 693" role="img" aria-labelledby="title">
+<title id="title">Which parser functions call which; the shaded ones carry most of the parser's weight</title>
+<style>
+  .card { fill: #ffffff; stroke: #d0d7de; }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; fill: #1f2328; }
+  text.label { fill: #57606a; }
+  .node { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+  .node.hot { fill: #f3e2b8; stroke: #b08a3e; }
+  .edge { fill: none; stroke: #57606a; stroke-width: 1.5; }
+  .dashed { stroke-dasharray: 6 4; }
+  .arrow { fill: #57606a; }
+  .label-bg { fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .card { fill: #0d1117; stroke: #30363d; }
+    text { fill: #e6edf3; }
+    text.label { fill: #9198a1; }
+    .node { fill: #161b22; stroke: #8b949e; }
+    .node.hot { fill: #4a3b17; stroke: #d4a94a; }
+    .edge { stroke: #8b949e; }
+    .arrow { fill: #8b949e; }
+    .label-bg { fill: #0d1117; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 Z"/></marker></defs>
+<rect class="card" x="0.5" y="0.5" width="1539" height="692" rx="8"/>
+<path class="edge" d="M259.0,42.5 L415.0,42.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M577.0,42.5 L745.0,42.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M577.0,56.5 L753.0,86.8" marker-end="url(#arrow)"/>
+<path class="edge" d="M558.3,64.0 L775.7,139.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M922.4,182.0 L1071.6,220.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M963.0,160.5 L1027.0,160.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M1285.0,160.5 L1349.0,160.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M243.0,257.4 L403.0,284.6" marker-end="url(#arrow)"/>
+<path class="edge" d="M243.0,241.5 L1063.0,241.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M208.3,263.0 L411.9,338.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M234.1,504.5 L411.9,459.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M568.4,416.0 L1083.6,263.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M279.0,537.0 L343.0,542.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M649.0,555.5 L761.0,555.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M620.6,577.0 L741.0,597.8" marker-end="url(#arrow)"/>
+<path class="edge" d="M234.1,547.5 L415.0,593.8" marker-end="url(#arrow)"/>
+<path class="edge" d="M279.0,515.0 L387.0,505.8" marker-end="url(#arrow)"/>
+<path class="edge dashed" d="M496.0,636.0 L496.0,657.0 L150.0,657.0 L150.0,547.5" marker-end="url(#arrow)"/>
+<rect class="node" x="44" y="24" width="212" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="150.0" y="47.5">parseEntryToInteraction</tspan></text>
+<rect class="node hot" x="418" y="24" width="156" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="47.5">buildInteraction</tspan></text>
+<rect class="node" x="748" y="24" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="838.0" y="47.5">calculateClaudeCost</tspan></text>
+<rect class="node" x="756" y="83" width="164" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="838.0" y="106.5">mapToolToCategory</tspan></text>
+<rect class="node" x="716" y="142" width="244" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="838.0" y="165.5">extractFilesFromBashCommand</tspan></text>
+<rect class="node" x="1030" y="142" width="252" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="1156.0" y="165.5">collectFilesFromShellCommand</tspan></text>
+<rect class="node" x="1352" y="142" width="164" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="1434.0" y="165.5">splitCommandWords</tspan></text>
+<rect class="node hot" x="60" y="223" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="150.0" y="246.5">classifyInteraction</tspan></text>
+<rect class="node hot" x="1066" y="223" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="1156.0" y="246.5">extractRealCommands</tspan></text>
+<rect class="node hot" x="406" y="282" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="305.5">classifyByFilePaths</tspan></text>
+<rect class="node" x="366" y="341" width="260" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="364.5">command families:</tspan><tspan x="496.0" y="383.5">GIT_COMMAND, TEST_RUNNER, ...</tspan></text>
+<rect class="node hot" x="24" y="507.5" width="252" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="150.0" y="531.0">attributeClaudeSubAgentCosts</tspan></text>
+<rect class="node" x="410" y="419" width="172" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="442.5">commandSpawnsAgent</tspan></text>
+<rect class="node" x="390" y="478" width="212" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="501.5">deduplicateInteractions</tspan></text>
+<rect class="node" x="346" y="537" width="300" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="560.5">discoverClaudeSubAgentFilesForTurn</tspan></text>
+<rect class="node" x="418" y="596" width="156" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="496.0" y="619.5">parseSessionFile</tspan></text>
+<rect class="node" x="764" y="537" width="148" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="838.0" y="560.5">claudeSpawnCwds</tspan></text>
+<rect class="node" x="744" y="596" width="188" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="838.0" y="619.5">scanClaudeProjectDir</tspan></text>
+<rect class="label-bg" x="198.0" y="645.5" width="250.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="323.0" y="662.0">a child folds its own children</tspan></text>
+</svg>

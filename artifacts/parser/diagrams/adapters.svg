@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1547" height="303" viewBox="0 0 1547 303" role="img" aria-labelledby="title">
+<title id="title">How a transcript line becomes a turn through the harness adapters</title>
+<style>
+  .card { fill: #ffffff; stroke: #d0d7de; }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; fill: #1f2328; }
+  text.label { fill: #57606a; }
+  .node { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+  .node.hot { fill: #f3e2b8; stroke: #b08a3e; }
+  .edge { fill: none; stroke: #57606a; stroke-width: 1.5; }
+  .dashed { stroke-dasharray: 6 4; }
+  .arrow { fill: #57606a; }
+  .label-bg { fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .card { fill: #0d1117; stroke: #30363d; }
+    text { fill: #e6edf3; }
+    text.label { fill: #9198a1; }
+    .node { fill: #161b22; stroke: #8b949e; }
+    .node.hot { fill: #4a3b17; stroke: #d4a94a; }
+    .edge { stroke: #8b949e; }
+    .arrow { fill: #8b949e; }
+    .label-bg { fill: #0d1117; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 Z"/></marker></defs>
+<rect class="card" x="0.5" y="0.5" width="1546" height="302" rx="8"/>
+<path class="edge" d="M207.0,161.0 L251.0,161.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M366.5,117.0 L366.5,52.0 L586.0,52.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M366.5,205.0 L366.5,260.5 L618.0,260.5" marker-end="url(#arrow)"/>
+<path class="edge" d="M764.0,52.0 L808.0,52.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M1026.0,52.0 L1070.0,52.0" marker-end="url(#arrow)"/>
+<path class="edge" d="M1312.0,52.0 L1356.0,52.0" marker-end="url(#arrow)"/>
+<rect class="node" x="24" y="142.5" width="180" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="114.0" y="166.0">one transcript line</tspan></text>
+<path class="node" d="M366.5,120 L479,161 L366.5,202 L254,161 Z"/>
+<text class="text" text-anchor="middle"><tspan x="366.5" y="156.5">each adapter:</tspan><tspan x="366.5" y="175.5">matchAssistant</tspan></text>
+<rect class="node" x="589" y="24" width="172" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="675.0" y="47.5">AssistantTurn with</tspan><tspan x="675.0" y="66.5">normalized usage</tspan></text>
+<rect class="node" x="621" y="242" width="108" height="37" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="675.0" y="265.5">not a turn</tspan></text>
+<rect class="node" x="811" y="24" width="212" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="917.0" y="47.5">adapter.readBlock, once</tspan><tspan x="917.0" y="66.5">per content block</tspan></text>
+<rect class="node" x="1073" y="24" width="236" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="1191.0" y="47.5">ParsedBlock: text, or tool</tspan><tspan x="1191.0" y="66.5">with files and commands</tspan></text>
+<rect class="node" x="1359" y="24" width="164" height="56" rx="6"/>
+<text class="text" text-anchor="middle"><tspan x="1441.0" y="47.5">buildInteraction:</tspan><tspan x="1441.0" y="66.5">shared</tspan></text>
+<rect class="label-bg" x="253.5" y="63.5" width="226.0" height="42" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="366.5" y="80.0">claude-code: type assistant</tspan><tspan x="366.5" y="99.0">pi: type message</tspan></text>
+<rect class="label-bg" x="281.5" y="221.3" width="170.0" height="23" rx="3"/>
+<text class="label" text-anchor="middle"><tspan x="366.5" y="237.8">no adapter claims it</tspan></text>
+</svg>

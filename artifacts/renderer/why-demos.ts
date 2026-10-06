@@ -11,7 +11,7 @@ export const WHY_DEMO_PIN = {
 	sessionFile: SPEC_PIN.sessionFile,
 };
 
-/** A `why[]` entry's `demo` rows for its first command, as `wtft` prints them under WHY_DEMO_PIN. */
+/** A `why[]` entry's `demo` rows for its first command, as the `wtft` report prints them under WHY_DEMO_PIN; `--watch` and `-p` draw other frames. */
 export function whyDemo(command: string): string[] {
 	const argv = command.split(/\s+/).filter((word) => word.length > 0);
 	return renderReport(argv, {

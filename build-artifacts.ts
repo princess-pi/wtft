@@ -61,7 +61,9 @@ export async function buildRendererBundle(): Promise<string> {
 export function withRenderedDemos(manifestText: string): string {
 	const manifest = JSON.parse(manifestText);
 	for (const entry of manifest.why ?? []) {
-		if (entry.demoFrom === "chart") entry.demo = whyDemo(entry.commands[0] ?? "");
+		if (entry.demoFrom !== "chart") continue;
+		if (typeof entry.commands?.[0] !== "string") throw new Error(`wtft-cmd.json: a demoFrom chart entry has no command: ${entry.scenario}`);
+		entry.demo = whyDemo(entry.commands[0]);
 	}
 	return `${JSON.stringify(manifest, null, 2)}\n`;
 }

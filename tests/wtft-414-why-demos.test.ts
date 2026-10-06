@@ -20,8 +20,14 @@ const rendered = why.filter((entry) => entry.demoFrom === "chart");
 const commands = rendered.map((entry) => entry.commands[0]);
 const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
 
-for (const command of ["", "-i 4h -l 12", "--harness claude-code", "-p", "--watch"]) {
+for (const command of ["", "-i 4h -l 12", "--harness claude-code"]) {
 	check(commands.includes(command), `fixture precondition: the '${command}' demo is marked demoFrom chart`);
+}
+
+const framed = why.filter((e) => e.commands[0] === "-p" || e.commands[0] === "--watch");
+check(framed.length === 2, "fixture precondition: the -p and --watch entries exist");
+for (const entry of framed) {
+	check(entry.demoFrom === undefined && entry.demo === undefined, `'${entry.commands[0]}': no demo, since the report cannot draw its frame`);
 }
 
 for (const entry of rendered) {

@@ -316,6 +316,7 @@ let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 export default function wtftExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
+		_widgetHidden = false;
 		// Spawn daemon for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {

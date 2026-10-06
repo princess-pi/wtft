@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * The Pi widget's `/wtft`: `--hide` stays hidden until the next `/wtft` (#424), a plain `/wtft` saves only
- * the settings it was given (#425), and `--help`, `--why` and `--version` work from any cwd (#426).
+ * The Pi widget's `/wtft`: `--hide` stays hidden until the next `/wtft` that draws it or a new Pi session, a
+ * plain `/wtft` saves only the settings it was given, and `--help`, `--why` and `--version` work from any cwd.
  */
 
 import * as fs from "node:fs";
@@ -44,12 +44,17 @@ const shown = () => Array.isArray(widget[widget.length - 1]);
 const run = (args: string) => commands.wtft!.handler(args, ctx);
 const fire = async (name: string) => { for (const fn of events[name] ?? []) await fn({}, ctx); };
 
+const ticks: (() => void)[] = [];
+const realSetInterval = globalThis.setInterval;
+globalThis.setInterval = ((fn: () => void) => { ticks.push(fn); return 0; }) as unknown as typeof setInterval;
+const tick = () => { for (const fn of ticks) fn(); };
+
 const wtftExtension = (await import("../extensions/wtft.ts")).default;
 wtftExtension(pi);
 check(typeof commands.wtft?.handler === "function" && (events.agent_settled?.length ?? 0) > 0 && (events.session_tree?.length ?? 0) > 0,
 	"fixture precondition: /wtft, agent_settled and session_tree are registered");
 
-console.log("\n#425 a plain /wtft saves only what it was given");
+console.log("\na plain /wtft saves only what it was given");
 await run("");
 const afterPlain = readConfigFile();
 check(afterPlain !== null, "a plain /wtft still creates the config, which is what auto-shows the widget next session");
@@ -62,13 +67,18 @@ const afterFlags = readConfigFile();
 check(afterFlags?.limit === 5 && afterFlags?.timezone === "UTC", `flags given are saved, and a later plain /wtft keeps them (${JSON.stringify(afterFlags)})`);
 check(!("interval" in (afterFlags ?? {})) && !("mode" in (afterFlags ?? {})), "settings not given stay unwritten");
 
-console.log("\n#424 --hide stays hidden until the next /wtft");
+console.log("\n--hide stays hidden until the next /wtft that draws it");
+await fire("session_start");
+check(ticks.length === 1, "fixture precondition: session_start installs the refresh timer");
 await run("--hide");
 check(widget[widget.length - 1] === undefined, "--hide clears the widget");
 const hiddenAt = widget.length;
 await fire("agent_settled");
 await fire("session_tree");
-check(widget.slice(hiddenAt).every((lines) => lines === undefined), "a settled turn and a tree move do not redraw a hidden widget");
+tick();
+check(widget.slice(hiddenAt).every((lines) => lines === undefined), "a settled turn, a tree move and a timer tick do not redraw a hidden widget");
+await run("--no-emoji");
+check(widget.slice(hiddenAt).every((lines) => lines === undefined), "an emoji flag does not draw a hidden widget either");
 await run("");
 check(shown(), "the next /wtft shows it again");
 await fire("agent_settled");
@@ -76,8 +86,14 @@ check(shown(), "and a settled turn keeps drawing it");
 await run("--hide");
 await run("--show");
 check(shown(), "/wtft --show shows a hidden widget");
+await run("--hide");
+await fire("session_start");
+check(shown(), "a new Pi session shows a widget the last session hid");
+tick();
+check(shown(), "and its timer keeps drawing it");
+globalThis.setInterval = realSetInterval;
 
-console.log("\n#426 --help, --why and --version from any cwd");
+console.log("\n--help, --why and --version from any cwd");
 const elsewhere = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-426-cwd-")));
 const prevCwd = process.cwd();
 process.chdir(elsewhere);

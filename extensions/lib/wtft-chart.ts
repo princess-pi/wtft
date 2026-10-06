@@ -59,9 +59,10 @@ const XTERM_BASIC: number[][] = [
 	[0, 0, 0], [205, 49, 49], [13, 188, 121], [229, 229, 16], [36, 114, 200], [188, 63, 188], [17, 168, 205], [229, 229, 229],
 	[136, 136, 136], [241, 76, 76], [35, 209, 139], [245, 245, 67], [59, 142, 234], [214, 112, 214], [41, 184, 219], [255, 255, 255],
 ];
-// WCAG relative luminance of every ✨ cell's background, which sets ✨'s contrast against it.
-// About 0.08 is as dark as it goes with the hue still readable, 0.09 is a good starting point,
-// and from about 0.12 ✨ starts to lose contrast.
+// WCAG relative luminance of every ✨ cell's background, which sets ✨'s contrast against it. Set to
+// personal preference. Dimmer values, around 0.08 to 0.12, give ✨ the most contrast, but at those
+// dimmer values the core color is lost. Initially set to 0.2 as a balance between identifying the
+// color category and the sparkle's contrast.
 const SPARKLE_BG_LUMINANCE = 0.20;
 
 /** The xterm 256-colour palette entry `n` as sRGB channels; outside 0-255, palette entry 7. */

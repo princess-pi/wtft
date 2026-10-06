@@ -1,14 +1,9 @@
+import { xtermChannels } from "../../extensions/lib/wtft-chart.ts";
 import { cellsHtml } from "../assets/cell-glyphs.mjs";
 
 const SGR = /\x1b\[([0-9;]*)m/g;
 const PAGE_BG = "#0e0e0e";
 
-const BASIC = [
-	"rgb(0,0,0)", "rgb(205,49,49)", "rgb(13,188,121)", "rgb(229,229,16)",
-	"rgb(36,114,200)", "rgb(188,63,188)", "rgb(17,168,205)", "rgb(229,229,229)",
-	"rgb(136,136,136)", "rgb(241,76,76)", "rgb(35,209,139)", "rgb(245,245,67)",
-	"rgb(59,142,234)", "rgb(214,112,214)", "rgb(41,184,219)", "rgb(255,255,255)",
-];
 
 export function stripAnsi(text: string): string {
 	return text.replace(SGR, "");
@@ -16,15 +11,7 @@ export function stripAnsi(text: string): string {
 
 /** The xterm 256-colour palette entry `n` as a CSS colour. */
 export function xtermRgb(n: number): string {
-	if (n < 16) return BASIC[n] ?? BASIC[7];
-	if (n > 255) return BASIC[7];
-	if (n >= 232) {
-		const gray = 8 + (n - 232) * 10;
-		return `rgb(${gray},${gray},${gray})`;
-	}
-	const index = n - 16;
-	const step = [0, 95, 135, 175, 215, 255];
-	return `rgb(${step[Math.floor(index / 36)]},${step[Math.floor(index / 6) % 6]},${step[index % 6]})`;
+	return `rgb(${xtermChannels(n).join(",")})`;
 }
 
 interface Style { bold: boolean; inverse: boolean; fg: string | null; bg: string | null }
@@ -64,7 +51,7 @@ export function ansiToHtml(text: string): string {
 		if (!chunk) return;
 		const body = cellsHtml(chunk);
 		const fg = style.inverse ? (style.bg ?? PAGE_BG) : style.fg;
-		const bg = style.inverse ? (style.fg ?? BASIC[7]) : style.bg;
+		const bg = style.inverse ? (style.fg ?? xtermRgb(7)) : style.bg;
 		const css = [
 			style.bold ? "font-weight:700" : "",
 			fg ? `color:${fg}` : "",

@@ -26,7 +26,7 @@ function chart(mode: "cumulative" | "bucket", unit: "tokens" | "cost", interacti
 	}
 }
 
-const keyLine = (lines: string[]) => lines.find((l) => /^ {2}(▃|\$ =)/.test(l));
+const keyLine = (lines: string[]) => lines.find((l) => /^ {2}(█|\$ =)/.test(l));
 
 const withoutDollar = () => wtftSession("claude-sonnet-5-5").map((i) => ({ ...i, serverToolCost: 0 }));
 
@@ -36,17 +36,19 @@ const withDollar = () => {
 };
 
 describe("the glyph key", () => {
-	it("in a cumulative token chart names earlier bins and this bin, with no cache words", () => {
-		const key = keyLine(chart("cumulative", "tokens"));
-		assert.ok(key);
-		assert.match(key, /▃ earlier bins {2}▇ this bin/);
-		assert.doesNotMatch(key, /cached|uncached|carryover/i);
+	it("in a cumulative chart, cost or tokens, names earlier bins and this bin, with no cache words", () => {
+		for (const unit of ["tokens", "cost"] as const) {
+			const key = keyLine(chart("cumulative", unit));
+			assert.ok(key, unit);
+			assert.match(key, /█ earlier bins {2}✨ this bin/, unit);
+			assert.doesNotMatch(key, /cached|uncached|carryover/i, unit);
+		}
 	});
 
-	it("does not print the ▃/▇ key in a bucket token chart or a cost chart", () => {
-		for (const [mode, unit] of [["bucket", "tokens"], ["cumulative", "cost"], ["bucket", "cost"]] as const) {
-			const lines = chart(mode, unit);
-			assert.ok(!lines.some((l) => /^ {2}▃/.test(l)), `${mode} ${unit}`);
+	it("does not print the █/✨ key in a bucket chart", () => {
+		for (const unit of ["tokens", "cost"] as const) {
+			const lines = chart("bucket", unit);
+			assert.ok(!lines.some((l) => /^ {2}█/.test(l)), unit);
 		}
 	});
 

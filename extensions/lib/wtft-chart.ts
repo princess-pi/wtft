@@ -55,12 +55,18 @@ const PLACEHOLDER_PREFIX = "\x1b[90m-";
 export const MAX_PADDED_ROWS = 1000;
 
 const XTERM_LEVELS = [0, 95, 135, 175, 215, 255];
+const XTERM_BASIC: number[][] = [
+	[0, 0, 0], [205, 49, 49], [13, 188, 121], [229, 229, 16], [36, 114, 200], [188, 63, 188], [17, 168, 205], [229, 229, 229],
+	[136, 136, 136], [241, 76, 76], [35, 209, 139], [245, 245, 67], [59, 142, 234], [214, 112, 214], [41, 184, 219], [255, 255, 255],
+];
 // WCAG relative luminance of every ✨ cell's background, which sets ✨'s contrast against it.
 // About 0.08 is as dark as it goes with the hue still readable, 0.09 is a good starting point,
 // and from about 0.12 ✨ starts to lose contrast.
 const SPARKLE_BG_LUMINANCE = 0.20;
 
-function xtermRgb(n: number): number[] {
+/** The xterm 256-colour palette entry `n` as sRGB channels; outside 0-255, palette entry 7. */
+export function xtermChannels(n: number): number[] {
+	if (n < 16 || n > 255) return XTERM_BASIC[n] ?? XTERM_BASIC[7];
 	if (n >= 232) return Array(3).fill(8 + (n - 232) * 10);
 	const i = n - 16;
 	return [XTERM_LEVELS[Math.floor(i / 36)], XTERM_LEVELS[Math.floor(i / 6) % 6], XTERM_LEVELS[i % 6]];
@@ -68,7 +74,7 @@ function xtermRgb(n: number): number[] {
 
 /** xterm 256-colour index in, the same hue as 24-bit sRGB out, scaled to SPARKLE_BG_LUMINANCE. */
 export function sparkleBackground(fg: number): number[] {
-	const linear = xtermRgb(fg).map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+	const linear = xtermChannels(fg).map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 	const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
 	if (luminance === 0) return [0, 0, 0];
 	return linear.map((c) => {

@@ -143,9 +143,11 @@ describe("each word replaces one thing", () => {
 		assert.ok(!lines.some((l) => l.includes("Cache Miss")));
 	});
 
-	it("key words name the glyphs in a running-total token chart", () => {
-		const lines = plain(chart({ key: { earlier: "sold earlier", thisBin: "sold now" } }, { unit: "tokens" }));
-		assert.ok(lines.some((l) => l.trim() === "▃ sold earlier  ▇ sold now"), lines.join("\n"));
+	it("key words name the glyphs in a running-total chart, cost or tokens", () => {
+		for (const unit of ["tokens", "cost"] as const) {
+			const lines = plain(chart({ key: { earlier: "sold earlier", thisBin: "sold now" } }, { unit }));
+			assert.ok(lines.some((l) => l.trim() === "█ sold earlier  ✨ sold now"), `${unit}\n${lines.join("\n")}`);
+		}
 	});
 
 	it("the footer and cache-line switches drop their lines", () => {
@@ -198,8 +200,8 @@ describe("a caller's own words leave none of wtft's", () => {
 				if (unit === "tokens") {
 					assert.ok(lines.some((l) => /^\d\d:00 .* pcs\s/.test(l)), `${at} unit`);
 					assert.ok(lines.some((l) => l.trim() === "€ = no units" || l.trim().endsWith("€ = no units")), `${at} cost-only note`);
-					if (mode === "cumulative") assert.ok(lines.some((l) => l.includes("▃ sold earlier  ▇ sold now")), `${at} key`);
 				}
+				if (mode === "cumulative") assert.ok(lines.some((l) => l.includes("█ sold earlier  ✨ sold now")), `${at} key`);
 			}
 		}
 	});

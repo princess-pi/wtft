@@ -1,6 +1,6 @@
-# Spec 392: the chart's block and box glyphs are painted as cells
+# Spec 392: the chart's block and box glyphs are painted as cells, and `✨` is sized
 
-Module: `artifacts/assets/cell-glyphs.mjs`. Test: `tests/wtft-392-cell-glyphs.test.ts`.
+Module: `artifacts/assets/cell-glyphs.mjs`. Test: `tests/wtft-392-cell-glyphs.test.ts`, and `tests/wtft-413-sparkle.test.ts` for `✨`.
 
 A terminal draws `█`, the lower eighths and the box-drawing lines itself, filling the whole cell,
 so neighbouring cells meet. A browser draws them from the font, inside a line box taller than the
@@ -23,6 +23,14 @@ The paint is CSS background layers in the current text colour:
   `max(2px, .16em)`. The other box-drawing characters (heavy corners and junctions, doubles,
   dashes, rounded corners) stay text: the chart draws none of them.
 
+`✨` is the one exception: it is not painted, and stays visible text. Each `✨` gets a span of its
+own, `2ch` wide, one line tall, top-aligned, clipped and centred, with `background:inherit`. So it
+fills the two cells a terminal gives it, the cells after it stay in their columns, and it takes the
+background of the coloured run it sits in: on a bar on the chart picker and fair pages, the shade
+the chart spec's Encoding law gives it; in the key line, and in the spec browser's uncoloured
+blocks, none. Other wide emoji, the title's and a surge row's `⚡`, stay unsized
+text.
+
 Only `█`, the lower eighths, `▀`, `▔`, `─` and `━` form runs: repeats of one of them share a
 span. Every other paintable character gets a span of its own, repeated or not. Any other character,
 the shades `░ ▒ ▓` included, stays text.
@@ -41,14 +49,15 @@ the shades `░ ▒ ▓` included, stays text.
 
 ## 3. Verification
 
-- `tests/wtft-392-cell-glyphs.test.ts`: the painted set is exactly the characters listed in §1,
+- `tests/wtft-413-sparkle.test.ts`: the `✨` span.
+- `tests/wtft-392-cell-glyphs.test.ts`: the painted set within U+2500–U+259F is exactly the block and box characters listed in §1,
   with their fills and arms; runs; escaping; the characters left as text; `ansiToHtml` painting
   inside a coloured span; `browser.js` calling `cellsHtml` on code blocks; and the whole-pixel font
   rules on the three pages.
 - By pixel: a headless-Chrome screenshot of the chart picker, the fair page and
   `chart-spec/spec.mdx` at 1800×1400, cropped to the bars, counting 1–3 pixel runs of another
   colour between two pixels of the same bar colour along a pixel row (hairlines) and 1–8 pixel runs
-  down a pixel column (row bands). All three read 0 and 0 after this change.
+  down a pixel column (row bands). All three read 0 and 0 after this change, measured before #413 sized `✨`.
   `research/392-cell-gaps/` holds `shot.mjs` (screenshot), `counts.py` (count) and `RESULTS.md`
   (the commands and the before and after counts, also on
   https://github.com/princess-pi/wtft/issues/392#issuecomment-5913515463).

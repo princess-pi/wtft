@@ -115,7 +115,7 @@ describe("each word replaces one thing", () => {
 			const decimalColumns = [...lines[2].matchAll(/\d(\.)\d/g)].map((m) => getVisualLength(lines[2].slice(0, m.index + 1)));
 			assert.ok(decimalColumns.length >= 3 && decimalColumns.every((col) => ticks.includes(col)), `${currency}: ${decimalColumns} vs ${ticks}`);
 			const rows = lines.filter((l) => /^\d\d:00 /.test(l));
-			const barStarts = rows.map((row) => getVisualLength(row.slice(0, row.search(/[█▃▇]/))));
+			const barStarts = rows.map((row) => getVisualLength(row.slice(0, row.search(/[█✨]/))));
 			assert.ok(barStarts.every((col) => col === ticks[0]), `${currency}: bars start at ${[...new Set(barStarts)]}, first tick ${ticks[0]}`);
 		}
 	});

@@ -1,6 +1,6 @@
 # Spec 398: the chart takes its own words and category list
 
-Module: `extensions/lib/wtft-chart.ts`. Seam: `buildWtftLines` with `words`, tested in `tests/wtft-398-chart-words.test.ts`.
+Module: `extensions/lib/wtft-chart.ts`. Seam: `buildWtftLines` (`extensions/lib/wtft-renderer.ts`) with `words`, tested in `tests/wtft-398-chart-words.test.ts`.
 
 `renderWtftChart`, and `buildWtftLines` and `chartLines` above it, take a `words` option. Every field left out is wtft's own text, so wtft passes nothing and its output does not change.
 
@@ -9,12 +9,12 @@ Module: `extensions/lib/wtft-chart.ts`. Seam: `buildWtftLines` with `words`, tes
 | Field | Replaces |
 |---|---|
 | `title` | the title's icon and `WTF Tokens?`; the session suffix still follows |
-| `categories` | the 14 legend names and colours; a list of `{ slot, label, fg, char? }`; `char` is the legend swatch only, and the bars draw `█`, `▃` and `▇` |
+| `categories` | the 14 legend names and colours; a list of `{ slot, label, fg, char? }`; `char` is the legend swatch only; the bars draw `█`, `✨` (`*` under `--no-emoji`) on a shade of `fg` at one fixed luminance, and a token bar's `$` |
 | `tokenUnit` | `tok`, and `t` at the tightest compaction: `{ name, short }` |
-| `currency` | `$` in amounts, scale labels, the cost-only marker and its key; an empty currency leaves the marker and its key at `$`, so the marker still draws |
+| `currency` | `$` in amounts, scale labels, the cost-only marker and its key, and the Other warning's `{cost}`; compaction step 4 drops it from the incremental-cost column; an empty currency leaves the marker and its key at `$`, so the marker still draws |
 | `cacheMissLabel` | `Cache Miss` |
 | `key` | `earlier bins`, `this bin` and the cost-only note: `{ earlier, thisBin, costOnly? }` |
-| `tokenFooter` | `false` drops the `↑ ↓ CH%` line |
+| `tokenFooter` | `false` drops the `↑ ↓ R CH%` line |
 | `cacheLine` | `false` drops the `CH:` line |
 | `otherWarning` | a template with `{pct}` and `{cost}`, or `false` for none |
 

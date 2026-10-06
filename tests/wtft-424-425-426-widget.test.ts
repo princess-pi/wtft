@@ -46,7 +46,7 @@ const fire = async (name: string) => { for (const fn of events[name] ?? []) awai
 
 const ticks: (() => void)[] = [];
 const realSetInterval = globalThis.setInterval;
-globalThis.setInterval = ((fn: () => void) => { ticks.push(fn); return 0; }) as unknown as typeof setInterval;
+globalThis.setInterval = ((fn: () => void) => ticks.push(fn)) as unknown as typeof setInterval;
 const tick = () => { for (const fn of ticks) fn(); };
 
 const wtftExtension = (await import("../extensions/wtft.ts")).default;
@@ -89,6 +89,7 @@ check(shown(), "/wtft --show shows a hidden widget");
 await run("--hide");
 await fire("session_start");
 check(shown(), "a new Pi session shows a widget the last session hid");
+check(ticks.length === 1, "fixture precondition: the second session reuses the one refresh timer");
 tick();
 check(shown(), "and its timer keeps drawing it");
 globalThis.setInterval = realSetInterval;

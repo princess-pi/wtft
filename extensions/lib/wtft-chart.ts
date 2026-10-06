@@ -249,7 +249,7 @@ export function renderWtftChart(input: {
 		? (disabledEmoji ? "[#] WTF Tokens?" : "🔢 WTF Tokens?")
 		: (disabledEmoji ? "[$] WTF Tokens?" : "💸 WTF Tokens?"));
 	
-	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/.jsonl$/, "").slice(-4)}\x1b[0m` : "";
+	const sessionSuffix = opts?.sessionNameSuffix ? ` \x1b[90m...${opts.sessionNameSuffix.replace(/\.jsonl$/, "").slice(-4)}\x1b[0m` : "";
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
 	const now = Date.now();

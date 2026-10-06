@@ -29,7 +29,7 @@ Six items ride on six of the chart's categories: lattes, apples, funnel cake, pi
 ## What worked without a change
 
 - A stack per bin, coloured by category: a running total in cumulative mode, and in bucket mode with units the bin's own amount. Bucket mode with revenue draws no stack. Each category gets one `█`, placed by its own cost, and the larger cost wins a shared cell.
-- `▃` carryover against `▇` new for units sold, in cumulative mode only. Bucket mode draws `█`.
+- `█` for earlier bins against `✨` for this bin, for revenue and for units sold, in cumulative mode only. Bucket mode draws no `✨`.
 - Four number columns. The label area compacts, in five steps, once it passes a quarter of the width, which shortens the number columns and the gap, never the bin label, so long labels compact the rest. Under 15 bar cells the chart drops the units pair, then the revenue pair, whatever the caller asked for.
 - Bins of minutes, hours, days, weeks, or a count of sales. `-i 25t` is every 25 sales. A week bin ignores its size, so `2w` bins like `1w`. Multi-day bins restart at each month boundary.
 - A date line where the day changes, in any timezone. An invalid zone falls back to the host's local time without a message. A scale line with ticks, dropped when the bar is under 15 cells or a units chart's scale is 0. A revenue scale of 0 becomes $1.
@@ -48,7 +48,7 @@ Each row is a place the chart is about wtft. **Fix shape** is the `words` field 
 | F4 | Takes a closed set of 14 categories, and any other `_cat` value throws a `TypeError`. A caller borrows a slot, and its colour and its place in the stack. The `web` slot also takes any `serverToolCost` | `Category`, `CATEGORY_STYLE` | `words.categories`, which renames and recolours a slot; the set stays 14 | none |
 | F5 | Says `$` on every amount, four decimals under a cent, and no thousands separator: `$14526.00`. From compaction step 2 the columns show whole dollars, `$14526`. From step 4 the per-bin column drops the `$` | `formatCost`, `wholeCost`, `buildTickLine` | `words.currency` | none |
 | F6 | Says `tok` after the units total, and `t` at compaction step 5, which the label share sets, not the width alone. | `columnTexts` | `words.tokenUnit` | units |
-| F7 | Puts `▃ earlier bins  ▇ this bin` under a running-total units chart, and `$ = cost-only (web tools)` after it when a `$` is drawn, above the token footer and the CH line. A bucket chart draws neither `▃` nor `▇`, so it gets no `▃`/`▇` key | `renderWtftChart` | `words.key` | key |
+| F7 | Puts `█ earlier bins  ✨ this bin` under a running-total chart, revenue or units, and `$ = cost-only (web tools)` after it when a units chart draws a `$`, above the token footer and the CH line. A bucket chart draws no `✨`, so it gets no `█`/`✨` key | `renderWtftChart` | `words.key` | key |
 | F8 | Puts `↑ input  ↓ output  CH%` under a units chart's key, or under the rows when the chart has no key, above the CH line. `↑` is input plus cache read plus cache write. `↓`, an `R` for reasoning and `CH%` each drop out when their count is zero, and the whole line when none is left. The booth draws just `↑2.2k` | `tokenFooterSummary` | `words.tokenFooter`, a switch | footer |
 | F9 | Ends every chart with `CH: 0% cache hit (…)`, even when nothing is cached. No line when cache read, cache write and input total 0 | `buildWtftLines`, `renderWtftChart`, `computeCacheMetrics` | `words.cacheLine`, a switch | cache-line |
 | F10 | Names the divider `Cache Miss` | `renderWtftChart` | `words.cacheMissLabel` | miss |

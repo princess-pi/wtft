@@ -128,6 +128,22 @@ describe("sparkleBackground", () => {
 	});
 });
 
+describe("sparkleBackground on black", () => {
+	const luminance = (rgb: number[]) => {
+		const [r, g, b] = rgb.map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+		return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+	};
+
+	it("brightens black to a grey at the luminance every other colour gets", () => {
+		const target = luminance(sparkleBackground(245));
+		for (const black of [0, 16]) {
+			const shade = sparkleBackground(black);
+			assert.ok(shade[0] === shade[1] && shade[1] === shade[2], `${black}: ${shade}`);
+			assert.ok(Math.abs(luminance(shade) - target) < 0.003, `${black}: ${shade}`);
+		}
+	});
+});
+
 describe("cellsHtml", () => {
 	it("paints ✨ as one cell exactly 2ch wide, filled with its run's background", () => {
 		const html = cellsHtml("a✨b");

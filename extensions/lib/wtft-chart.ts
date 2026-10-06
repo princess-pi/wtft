@@ -77,9 +77,9 @@ export function xtermChannels(n: number): number[] {
 export function sparkleBackground(fg: number): number[] {
 	const linear = xtermChannels(fg).map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 	const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-	if (luminance === 0) return [0, 0, 0];
-	return linear.map((c) => {
-		const v = Math.min(1, c * SPARKLE_BG_LUMINANCE / luminance);
+	const [base, from] = luminance === 0 ? [[1, 1, 1], 1] : [linear, luminance];
+	return base.map((c) => {
+		const v = Math.min(1, c * SPARKLE_BG_LUMINANCE / from);
 		return Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
 	});
 }

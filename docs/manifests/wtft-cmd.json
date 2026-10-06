@@ -9,7 +9,7 @@
         ""
       ],
       "demoFrom": "chart",
-      "result": "A stacked bar chart widget appears showing your cost during each activity (Spec, Code, Plan, Agents, ...) in 1-hour bins. You see exactly which hours cost the most.",
+      "result": "A bar chart of your cost by activity (Spec, Code, Plan, Agents, ...) in 1-hour bins, so you see which hours cost the most. The demo is the CLI's report; the Pi widget draws its chart without the session path line or the padding rows.",
       "demo": [
         " \u001b[90m/home/dupp/.claude/projects/-home-dupp-git-projects-wtft/f53ecbb3-93ab-4c1e-9d21-7be0d0a0ee07.jsonl\u001b[0m",
         " 💸 WTF Tokens? \u001b[90m...ee07\u001b[0m  🌕\u001b[32m────────────☀️───\u001b[0m\u001b[1;32m🕒\u001b[0m\u001b[32m────────\u001b[0m🌕",

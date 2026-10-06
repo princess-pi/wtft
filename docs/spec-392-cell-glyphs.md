@@ -57,7 +57,7 @@ the shades `░ ▒ ▓` included, stays text.
 - By pixel: a headless-Chrome screenshot of the chart picker, the fair page and
   `chart-spec/spec.mdx` at 1800×1400, cropped to the bars, counting 1–3 pixel runs of another
   colour between two pixels of the same bar colour along a pixel row (hairlines) and 1–8 pixel runs
-  down a pixel column (row bands). All three read 0 and 0 after this change, measured before `✨` was sized.
+  down a pixel column (row bands). All three read 0 and 0 with the block and box painting, on bars that drew no `✨`; bars with `✨` cells have not been measured.
   `research/392-cell-gaps/` holds `shot.mjs` (screenshot), `counts.py` (count) and `RESULTS.md`
   (the commands and the before and after counts, also on
   https://github.com/princess-pi/wtft/issues/392#issuecomment-5913515463).

@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
-// build-artifacts.ts — bundles the chart for the browser pages under artifacts/
+// build-artifacts.ts — bundles the chart for the browser pages under artifacts/, and draws the --why chart demos
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { whyDemo } from "./artifacts/renderer/why-demos.ts";
 
 const ROOT = import.meta.dir;
 export const RENDERER_ENTRY = path.join(ROOT, "artifacts", "renderer", "entry.ts");
 export const RENDERER_BUNDLE = path.join(ROOT, "artifacts", "renderer", "wtft-chart.mjs");
+export const CMD_MANIFEST = path.join(ROOT, "docs", "manifests", "wtft-cmd.json");
 const SOURCES_LINE = /^\/\/ wtft-chart sources: ([0-9a-f]{64})\n/;
 
 // bun's browser target has no `pathToFileURL`, which the harness registry imports and
@@ -55,9 +57,22 @@ export async function buildRendererBundle(): Promise<string> {
 	return `// wtft-chart sources: ${sources}\n${text}`;
 }
 
+/** The command manifest's text with each `why[]` entry marked `"demoFrom": "chart"` given the rows `whyDemo` draws for its first command. */
+export function withRenderedDemos(manifestText: string): string {
+	const manifest = JSON.parse(manifestText);
+	for (const entry of manifest.why ?? []) {
+		if (entry.demoFrom !== "chart") continue;
+		if (typeof entry.commands?.[0] !== "string") throw new Error(`wtft-cmd.json: a demoFrom chart entry has no command: ${entry.scenario}`);
+		entry.demo = whyDemo(entry.commands[0]);
+	}
+	return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
 if (import.meta.main) {
 	const text = await buildRendererBundle();
 	fs.mkdirSync(path.dirname(RENDERER_BUNDLE), { recursive: true });
 	fs.writeFileSync(RENDERER_BUNDLE, text);
 	console.log(`✅ artifacts/renderer/wtft-chart.mjs (${(Buffer.byteLength(text) / 1024).toFixed(0)} KB)`);
+	fs.writeFileSync(CMD_MANIFEST, withRenderedDemos(fs.readFileSync(CMD_MANIFEST, "utf8")));
+	console.log("✅ docs/manifests/wtft-cmd.json --why chart demos");
 }

@@ -32,7 +32,7 @@
 <body>
 <main>
   <h1>Chart picker</h1>
-  <p class="meta">The chart lines below come from wtft's own <code>buildWtftLines</code>, bundled for the browser and fed a fake session; the column ruler above them and the line count below are this page's. The command line is read by wtft's own <code>parseWtftCliArgs</code>. Changing a flag's control rewrites the command line from the controls, so a typed flag with no control is dropped. The title's timeline strip follows your clock. Terminal width is not a flag: the CLI takes it from the terminal.</p>
+  <p class="meta">Under the column ruler, the first line is the session file path, which <code>wtft</code> prints above every report; the chart lines after it come from wtft's own <code>chartLines</code> and <code>buildWtftLines</code>, bundled for the browser and fed a fake session. The ruler is this page's, and the line count below counts the path line too. The command line is read by wtft's own <code>parseWtftCliArgs</code>. Changing a flag's control rewrites the command line from the controls, so a typed flag with no control is dropped. The title's timeline strip follows your clock. The width control stands in for the terminal: <code>-w</code>/<code>--width</code> parses, but it sizes only the Pi widget, so the CLI and this page ignore it and take the width from the terminal.</p>
   <div class="presets" id="presets"></div>
   <div class="cmd"><code>$</code><input type="text" id="cmd" spellcheck="false" autocomplete="off" aria-label="wtft command line"></div>
   <div class="grid">

@@ -147,7 +147,7 @@ wtft
 # Widen the interval and show more bins
 wtft --interval 3h --limit 20
 
-# Cost by model instead of by activity
+# Token bar, still by category, with a per-model token and cost table under it (same as --tokens)
 wtft --by-model
 
 # Render a specific session once, or stay attached and re-render as it grows

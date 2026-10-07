@@ -15,8 +15,8 @@ Tests: `tests/wtft-274-restart.test.ts` (P1–P3), `tests/wtft-46-install-wtft.t
   `Not found: PID n — holds no lease or root pid file here` and makes the command exit 1.
 - **P3. `--pid` without `--restart`, or a value that is not a whole number above 0,** is a usage
   error: exit 2.
-- **`install-wtft` passes one `--pid` per process it counted on an older build.** A daemon it did
-  not count keeps its pid and its lease, whatever `TMPDIR` the install runs under.
+- **`install-wtft` passes one `--pid` per process it counted on an older build,** so its restart
+  stops no daemon it did not count.
 - **A `wtft` call that includes `--restart` waits for `wtft-daemon` with no time limit.** The
   restart is bounded by its own steps: up to about 4 s per holder that ignores SIGTERM, plus one
   `WTFT_RESPAWN_SETTLE_MS` wait. A call without `--restart` keeps the 10 s limit.

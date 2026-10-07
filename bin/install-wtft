@@ -6,8 +6,9 @@
 #                                    move any config file still at the old
 #                                    princess-pi-tools path into
 #                                    ~/.config/wtft/ (once — no fallback read),
-#                                    and restart each log parser daemon it counts
-#                                    on an older build, and no other
+#                                    and run wtft-daemon --restart for the log
+#                                    parser daemons it counts on an older build
+#                                    and only those
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode

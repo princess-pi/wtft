@@ -1,4 +1,4 @@
-# Spec 451 — Token Budget re-parses a tag file only when it changed size or inode
+# Spec 451 — Token Budget reuses a tag file's parse while its size and inode are unchanged
 
 Issue: https://github.com/princess-pi/wtft/issues/451.
 Status: **Spec Approved** (Duppy, 2026-10-07: "fix it now", on the issue's Expected and Closer).
@@ -33,10 +33,10 @@ export function createTagReadCache(io?: TagReadIo): TagReadCache;
 
 - **Unchanged means same inode and same size.** `interactions` stats the path. When the inode and
   size match the last read, it returns the interactions it parsed then. Otherwise it reads and
-  parses again. A heartbeat rewrites its own line in place at the same width, so it changes
-  neither; an append changes the size; a replacement by rename changes the inode.
-- **The size comes from the bytes read**, and the inode from the open file, so a write landing
-  between the stat and the read makes the next stat differ and the next call read again.
+  parses again. A heartbeat the daemon rewrites in place changes neither; an append changes the
+  size; a replacement by rename changes the inode.
+- **The stored size is the number of bytes parsed**, and the inode is the open file's, so a write
+  the parse did not include makes the next stat differ.
 - **A path it cannot stat or read** yields `[]` and leaves no entry, as `readClassifiedTagFile` did.
 - **`retain`** drops the entries of tag files no longer active, so the cache holds only the
   active set.
@@ -46,15 +46,14 @@ export function createTagReadCache(io?: TagReadIo): TagReadCache;
 ## 3. Reader (`extensions/token-budget.ts`)
 
 One cache per process, at module level. `aggregateActiveTpm` and `getHostingSessionTpm` read through it.
-`getOrUpdateStats` calls `retain` with the active tag files on every tick. The TPM windows, the
+`getOrUpdateStats` calls `retain` with the active tag files. The TPM windows, the
 stats cache file and the tick are unchanged: the cache keeps parsed interactions, never sums, so
 each tick still filters them against its own `now`.
 
 ## 4. What does not change
 
-- A tag file that grows is parsed in full again. That happens only while tokens are being spent.
-- A daemon rewrite that leaves the inode and the size both unchanged and changes a turn line is
-  not seen until the next append. The daemon's only same-size write is the heartbeat.
+- A tag file that grows is parsed in full again.
+- Writes between two reads that leave the inode and the size both unchanged are not seen.
 
 ## 5. Verification
 
@@ -64,6 +63,10 @@ each tick still filters them against its own `now`.
   after an appended turn, the cache returns what a fresh `readClassifiedTagFile` returns.
 - The issue's Closer, measured by hand: an idle Pi with `pi/token-budget.js` and one active tag file
   of at least 2 MB uses under 1% of one core over 20 s, and its TPM matches a fresh full read.
+  Measured 2026-10-07 with a 3.55 MB tag file kept active by `touch -c`, % of one core over 20 s:
+  main 6.10 and 6.85; this branch 0.30, 1.10, 1.05, 0.15 and 0.70; this branch with a one-line tag
+  file 0.15, 0.15 and 0.25. An instrumented branch build read the tag file once per run, and the
+  widget showed the same TPM on both builds.
 
 ## 6. Roads not taken
 

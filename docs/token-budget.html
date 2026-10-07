@@ -83,11 +83,11 @@
     <p>Heartbeat lines (a top-level <code>_hb</code> key) are skipped, and a record is counted only when it carries a model (<code>m</code>) and a timestamp (<code>t</code>). Input tokens are the sum of <code>in</code> + <code>cr</code> — cache reads bill against the same quota window, so they count toward the budget. Cache-write tokens (<code>cw</code>) are recorded but deliberately excluded: they are an output-side billing line, not input-rate consumption.</p>
 
     <p>A tag file can hold <strong>several lines for one billed message</strong> — a harness re-emits an assistant message with growing usage as it streams, and the growing-usage lines can land in different daemon polls (<code>docs/wtft-incremental-render-spec.md</code>, "What the tag file may contain"). Token Budget parses the file with <code>classifiedInteractionsFromContent</code>, which applies the same collapse every tag-file consumer applies (the report and the widget through <code>readTagFileWithVerdict</code>, the picker through <code>classifiedInteractionsFromContent</code> too — see <code>docs/wtft-incremental-render-spec.md</code>): it collapses lines sharing one <code>message.id</code> to the single highest-cost copy (<code>dedupeClassifiedById</code>) before anything is summed (princess-pi/wtft#17). Summing raw lines instead over-reported TPM for exactly the busy, streaming turns the widget exists to warn about.</p>
-    <p>It parses a tag file again only when the file's size or inode changed since the last parse; otherwise it reuses that parse. A daemon's heartbeat rewrites its line in place without changing the size, so an idle session's tag file is not parsed on every tick (<a href="spec-451-tag-read-cache.md">spec-451</a>).</p>
+    <p>While a tag file's size and inode are unchanged since its last parse, Token Budget reuses that parse, so an idle session's tag file, kept active by in-place heartbeats, is not parsed on every tick (<a href="spec-451-tag-read-cache.md">spec-451</a>).</p>
 
     <h4>4. Aggregation Rules</h4>
     <p>Only records from the last two minutes are considered, and only those within the last one minute accrue TPM (the sliding window). Each collapsed interaction maps its model name to a quota shortcode and adds its input tokens:</p>
-    <pre><code>const interactions = tagCache.interactions(filePath); // collapses by message.id first
+    <pre><code>const interactions = tagReadCache.interactions(filePath); // collapses by message.id first
 for (const interaction of interactions) {
   if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
   const age = Date.now() - interaction.timestamp;

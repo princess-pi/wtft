@@ -41,7 +41,7 @@ const BAR_WIDTH = 5;
 const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
 const STATS_CACHE_FILE = "/tmp/pi-rate-limit-stats.json";
 
-const tagCache = createTagReadCache();
+const tagReadCache = createTagReadCache();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -153,7 +153,7 @@ export function aggregateActiveTpm(activeFiles: FileInfo[], hostingSessionId: st
     try {
       // Collapse lines that share a message.id (growing-usage re-emissions)
       // BEFORE summing tokens.
-      const interactions = tagCache.interactions(filePath);
+      const interactions = tagReadCache.interactions(filePath);
 
       for (const interaction of interactions) {
         // A line with no model has nothing to attribute. Number.isFinite, not
@@ -221,7 +221,7 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
   const now = Date.now();
   try {
     // Same canonical collapse as aggregateActiveTpm above.
-    const interactions = tagCache.interactions(hostingFile.path);
+    const interactions = tagReadCache.interactions(hostingFile.path);
     for (const interaction of interactions) {
       if (!interaction.model || !Number.isFinite(interaction.timestamp)) continue;
       const age = now - interaction.timestamp;
@@ -238,7 +238,7 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
 
 function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | null, tickMs: number): Record<string, ModelStats> {
   const now = Date.now();
-  tagCache.retain(activeFiles.map(f => f.path));
+  tagReadCache.retain(activeFiles.map(f => f.path));
   let cached: CacheSchema | null = null;
 
   if (fs.existsSync(STATS_CACHE_FILE)) {

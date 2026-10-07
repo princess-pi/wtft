@@ -214,7 +214,8 @@ every child transcript's, versioned so a daemon upgrade can detect a stale one; 
 start deletes the older versions, a harness adoption leaves them. The CLI's report path and the widget read
 it with `readTagFileWithVerdict()`, which returns the provisional verdict from the same read;
 `readClassifiedTagFile()` returns the interactions alone, and `--watch` seeds from
-`seedClassifiedTagFile()`.
+`seedClassifiedTagFile()`. Token Budget reads it through `createTagReadCache()`, which reuses a
+parse while the file's size and inode are unchanged.
 
 It is **JSONL, and line-safe by construction** (#130): every write the daemon completes leaves
 the file a whole number of complete lines, so **no mid-file line is ever malformed**. A reader

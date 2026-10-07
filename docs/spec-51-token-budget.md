@@ -71,7 +71,8 @@ appears nowhere in this repo). The table records the code, not the misquote.
   classified records the CLI and the session selector consume; the tag wire
   format is documented in `docs/wtft-tag-format.md`. It finds them through the
   daemon roster (`docs/spec-442-daemon-roster.md`), never by walking the session
-  trees. It counts input plus cache-read tokens only.
+  trees. It counts input plus cache-read tokens only, and reuses a tag file's
+  parse while its size and inode are unchanged (`docs/spec-451-tag-read-cache.md`).
 
 ## Renamed, except where the name is an external contract
 

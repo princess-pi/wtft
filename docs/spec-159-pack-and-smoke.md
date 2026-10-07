@@ -41,10 +41,11 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 
 ## Shape of the guard
 
-- **Pre-flight** — refuses to run if a tracked file `prepare` can rewrite
-  (`extensions/lib/harness/builtins.generated.ts`, and `bun.lock` when it runs
-  `bun install`) has uncommitted changes, or is not tracked. The gitignored files it
-  writes are not guarded.
+- **Pre-flight** — refuses to run if `extensions/lib/harness/builtins.generated.ts`,
+  the tracked file `prepare`'s build can rewrite, has uncommitted changes or is not
+  tracked. The gitignored files it writes are not guarded. `prepare` runs
+  `bun install` only when `node_modules` lacks its dependencies, and the git-URL CI
+  job deletes `bun.lock` on purpose, so `bun.lock` is not guarded.
 - **Pack** — `npm pack`, with bun on PATH for `prepare`; then assert those tracked
   files are unchanged.
 - **Allowlist** — `files` lists exactly the four bundles above, the tarball holds exactly those entries plus

@@ -70,7 +70,7 @@ function killLingeringDaemons() {
 	} catch {}
 }
 
-const REBUILD_TOUCHED = ["extensions/lib/harness/builtins.generated.ts", "bun.lock"];
+const REBUILD_TOUCHED = ["extensions/lib/harness/builtins.generated.ts"];
 
 function gitStatusLines(paths: string[]): string[] {
 	const out = execFileSync("git", ["status", "--porcelain", "--", ...paths], {

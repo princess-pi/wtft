@@ -69,7 +69,7 @@ export interface RosterEntry {
   tags: { path: string; mtimeMs: number | null }[];  // null: stat failed
 }
 export function decideActive(entries: RosterEntry[], now: number): { active: FileInfo[]; prune: string[] };
-export function activeTagFiles(now: number): FileInfo[];        // read, decide, prune, return
+export function activeTagFiles(now: number): { files: FileInfo[]; errors: string[] };  // read, decide, prune, return
 export function pruneRoster(now: number): void;                 // daemon start
 ```
 
@@ -83,9 +83,8 @@ export function pruneRoster(now: number): void;                 // daemon start
 - It parses each `<pid>.json`, classifies its pid, and stats each listed tag. Entries of `tags`
   that are not strings are ignored. The reader trusts the writer's absolute paths.
 - A `<pid>.json.tmp` left by a write that died mid-way, and a `<pid>.json` it cannot read as a
-  roster whose pid holds no lease, are entries with no tags, so §2c decides them like any roster
-  with no active tag. A `<pid>.json` it cannot read whose pid holds a lease is a roster error:
-  that daemon's spend would go uncounted.
+  roster, are entries with no tags, so §2c decides them like any roster with no active tag; the
+  latter is also a roster error when its pid is a daemon (§2e).
 - It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
@@ -112,10 +111,20 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 
 ### 2e. Roster errors
 
-A roster error is thrown, never folded into zero spend: TPM read as 0 turns the cooldown off.
-Its message is one line a person or an agent can start debugging from: what failed, the path, the
-error code or reason, and the consequence. Token Budget shows it through its existing error paths:
-the widget's error line, the footer's error mark, and an error notice on each provider request.
+`activeTagFiles` returns the tags it could read **and** a list of roster errors; one error never
+hides another daemon's spend, and pruning still runs. A roster error is:
+
+- a roster directory that exists but cannot be listed (a missing one is not: no daemon has
+  published yet);
+- a `<pid>.json` that cannot be read as a roster while its pid is classed `daemon` or `harness`;
+- a tag a `daemon` or `harness` roster lists that cannot be stat'd for a reason other than its
+  being gone.
+
+A pid classed `unverified` raises none: off Linux every pid is, and a reused pid would raise an
+error that never clears. Each error is one line a person or an agent can start debugging from:
+what failed, the path, the pid, the code or reason, and whose spend goes uncounted. Token Budget
+shows the first one (and how many more) as a line in its widget and a mark in its footer, and as
+an error notice on each provider request; the meters still show the spend it could read.
 
 ## 3. What does not change
 
@@ -156,7 +165,7 @@ the widget's error line, the footer's error mark, and an error notice on each pr
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |
 | V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the #442 repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
 | V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's, recorded on #442 |
-| V8 | A roster directory that exists but cannot be listed, and a live daemon's unreadable roster, are roster errors naming the path and the code or reason; a missing directory is not; Token Budget's widget shows the message | `tests/wtft-453-roster-error.test.ts` |
+| V8 | Each roster error of §2e is reported naming its path and code or reason, beside the spend still read from other rosters, and stopped daemons' rosters are still pruned; a missing directory and an `unverified` pid raise none; Token Budget's widget, footer and provider-request notice show it | `tests/wtft-453-roster-error.test.ts` |
 
 ## 6. Glossary
 

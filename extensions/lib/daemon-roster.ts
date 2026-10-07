@@ -59,26 +59,21 @@ export function decideActive(entries: RosterEntry[], now: number): { active: Fil
 	return { active, prune };
 }
 
-function mtimeOrNull(file: string): number | null {
-	try {
-		return fs.statSync(file).mtimeMs;
-	} catch {
-		return null;
-	}
+function rosterError(what: string, uncounted: string): string {
+	return `daemon roster: cannot ${what}, so ${uncounted} is not counted. Check that path and $XDG_STATE_HOME (wtft docs/spec-442-daemon-roster.md §2e)`;
 }
 
-function rosterError(what: string): Error {
-	return new Error(`daemon roster: ${what}, so TPM reads 0 and no cooldown fires. Check that path and $XDG_STATE_HOME (wtft docs/spec-442-daemon-roster.md §2e)`);
+function why(err: unknown): string {
+	return (err as NodeJS.ErrnoException).code ?? (err as Error).message;
 }
 
-function readRosters(dir: string): RosterEntry[] {
+function readRosters(dir: string, errors: string[]): RosterEntry[] {
 	let names: string[];
 	try {
 		names = fs.readdirSync(dir);
 	} catch (err) {
-		const code = (err as NodeJS.ErrnoException).code;
-		if (code === "ENOENT") return [];
-		throw rosterError(`cannot list ${dir} (${code ?? (err as Error).message})`);
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") errors.push(rosterError(`list ${dir} (${why(err)})`, "any spend"));
+		return [];
 	}
 	const entries: RosterEntry[] = [];
 	for (const name of names) {
@@ -86,20 +81,27 @@ function readRosters(dir: string): RosterEntry[] {
 		if (!m) continue;
 		const file = path.join(dir, name);
 		const pid = Number(m[1]);
+		const holder = classifyPid(pid);
+		const daemon = holder === "daemon" || holder === "harness";
 		let tags: string[] = [];
-		let unreadable: string | null = null;
 		if (!m[2]) {
 			try {
 				const doc = JSON.parse(fs.readFileSync(file, "utf8"));
 				if (doc?.v !== 1 || doc.pid !== pid || !Array.isArray(doc.tags)) throw new Error("not a v1 roster for this pid");
 				tags = doc.tags.filter((t: unknown): t is string => typeof t === "string");
 			} catch (err) {
-				unreadable = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+				if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+				if (daemon) errors.push(rosterError(`read ${file} of daemon pid ${pid} (${why(err)})`, "that daemon's spend"));
 			}
 		}
-		const holder = classifyPid(pid);
-		if (unreadable !== null && holdsLease(holder)) throw rosterError(`cannot read ${file} of live pid ${pid} (${unreadable})`);
-		entries.push({ file, holder, tags: tags.map(t => ({ path: t, mtimeMs: mtimeOrNull(t) })) });
+		entries.push({ file, holder, tags: tags.map(t => {
+			try {
+				return { path: t, mtimeMs: fs.statSync(t).mtimeMs };
+			} catch (err) {
+				if (daemon && (err as NodeJS.ErrnoException).code !== "ENOENT") errors.push(rosterError(`stat ${t} listed by daemon pid ${pid} (${why(err)})`, "that session's spend"));
+				return { path: t, mtimeMs: null };
+			}
+		}) });
 	}
 	return entries;
 }
@@ -110,11 +112,12 @@ function unlinkAll(files: string[]): void {
 	}
 }
 
-/** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster. Prunes as it reads. */
-export function activeTagFiles(now: number): FileInfo[] {
-	const { active, prune } = decideActive(readRosters(rosterDir()), now);
+/** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster, and the roster errors met reading them. Prunes as it reads. */
+export function activeTagFiles(now: number): { files: FileInfo[]; errors: string[] } {
+	const errors: string[] = [];
+	const { active, prune } = decideActive(readRosters(rosterDir(), errors), now);
 	unlinkAll(prune);
-	return active;
+	return { files: active, errors };
 }
 
 export function pruneRoster(now: number): void {

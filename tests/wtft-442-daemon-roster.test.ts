@@ -142,7 +142,7 @@ describe("the roster on disk", () => {
 		const stray = path.join(rosterDir(), "notes.txt");
 		fs.writeFileSync(stray, "kept");
 
-		const found = activeTagFiles(Date.now());
+		const found = activeTagFiles(Date.now()).files;
 		assert.deepStrictEqual(found.map(f => f.path).sort(), [live, path.join(tmp, "tags", "last-minute.jsonl")].sort());
 		assert.ok(fs.existsSync(own), "a live daemon's roster stays");
 		assert.ok(fs.existsSync(justStopped), "a stopped daemon's roster stays while its last turns are in the window");
@@ -178,7 +178,7 @@ describe("a roster that cannot be deleted", () => {
 				skip("this process can unlink inside a read-only directory (root), so a refused delete cannot be staged");
 				return;
 			}
-			assert.deepStrictEqual(activeTagFiles(Date.now()).map(f => f.path), [live]);
+			assert.deepStrictEqual(activeTagFiles(Date.now()).files.map(f => f.path), [live]);
 		} finally {
 			fs.chmodSync(dir, 0o700);
 			restore();

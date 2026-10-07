@@ -1595,8 +1595,9 @@ Environment:
       showRestart = true;
     } else if (arg === "--pid") {
       const value = valueOf(arg, ++i);
-      if (!/^[1-9]\d*$/.test(value)) usage(`--pid needs a whole number above 0: ${value}`);
-      restartPids.add(Number(value));
+      const pid = /^\d{1,10}$/.test(value) ? Number(value) : 0;
+      if (!(pid > 0)) usage(`--pid needs a whole number above 0: ${value}`);
+      restartPids.add(pid);
     } else if (arg === "--stop") {
       if (stopSession !== null) usage("--stop takes one session");
       stopSession = valueOf(arg, ++i);

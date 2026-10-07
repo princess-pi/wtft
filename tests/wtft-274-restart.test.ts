@@ -227,12 +227,12 @@ try {
 		fs.rmSync(other.lease, { force: true });
 	}
 
-	console.log("--- P2: a --pid holding no lease or root pid file here is reported, and exits 1 ---");
+	console.log("--- P2: a --pid holding no lease or root pid file here is reported, and exits 1; a leading zero reads as decimal ---");
 	{
 		const bystander = spawn("sleep", ["600"], { stdio: "ignore" });
 		children.push(bystander);
 		check(alive(bystander.pid!), "fixture precondition: the pid is live");
-		const r = spawnSync("node", [DAEMON, "--restart", "--pid", String(bystander.pid)], { encoding: "utf8", env, timeout: 30_000 });
+		const r = spawnSync("node", [DAEMON, "--restart", "--pid", `0${bystander.pid}`], { encoding: "utf8", env, timeout: 30_000 });
 		check(new RegExp(`Not found: PID ${bystander.pid} — holds no lease or root pid file here`).test(r.stdout), `the line says it was not found:\n${r.stdout}`);
 		check(alive(bystander.pid!), "it is left running");
 		check(r.status === 1, `exit 1 (got ${r.status})`);
@@ -240,7 +240,7 @@ try {
 
 	console.log("--- P3: --pid needs --restart and a whole number above 0 ---");
 	{
-		for (const args of [["--pid", "1"], ["--list", "--pid", "1"], ["--restart", "--pid", "0"], ["--restart", "--pid", "12x"], ["--restart", "--pid"]]) {
+		for (const args of [["--pid", "1"], ["--list", "--pid", "1"], ["--restart", "--pid", "0"], ["--restart", "--pid", "00"], ["--restart", "--pid", "+5"], ["--restart", "--pid", "12x"], ["--restart", "--pid"]]) {
 			const r = spawnSync("node", [DAEMON, ...args], { encoding: "utf8", env, timeout: 30_000 });
 			check(r.status === 2 && /--pid needs/.test(r.stderr), `${args.join(" ")} is a --pid usage error, exit 2 (got ${r.status}: ${r.stderr.split("\n")[0]})`);
 		}

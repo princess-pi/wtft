@@ -165,16 +165,16 @@ So the zero above is a property of this host's traffic, not of the wire format: 
 
 **Why not a version bump.** A `WTFT_TAGGER_VERSION` bump is the remedy princess-pi-tools#270 lists first, and it is the wrong tool here. It orphans every existing tag file and forces a from-zero re-parse of every session's parent transcript as well as its subagents, and it leaves both the old and new tag files on disk; the in-place repair reaches the identical number incrementally, reusing everything already classified. A bump earns its cost when old tags are *unreadable or mispriced* — the 2.6.0/2.6.1/2.7.0/2.7.1 entries above are all of that kind, where no amount of appending can correct what is already written. That staleness is the other kind: the old lines are correct as far as they go, and the missing ones can simply be added.
 
-**Residual, filed as #443**: the FIRST read after a stale tag still reports the pre-repair number. The CLI's report arm (`extensions/lib/cli/report.ts`) resolves the tag path, spawns the daemon, and reads the tag immediately, so the read races the repair and loses; `awaitDaemonUp` is entered only when the tag yields no interactions (at once when the session file is absent, else after a short tag wait), and a populated-but-stale tag yields some. Pre-existing on `main`, unchanged by princess-pi-tools#270, and a genuine trap for one-shot audits (#176) — hence its own issue rather than a note here.
+**Residual, filed as duppypro/princess-pi-tools#443**: the FIRST read after a stale tag still reports the pre-repair number. The CLI's report arm (`extensions/lib/cli/report.ts`) resolves the tag path, spawns the daemon, and reads the tag immediately, so the read races the repair and loses; `awaitDaemonUp` is entered only when the tag yields no interactions (at once when the session file is absent, else after a short tag wait), and a populated-but-stale tag yields some. Pre-existing on `main`, unchanged by princess-pi-tools#270, and a genuine trap for one-shot audits (#176) — hence its own issue rather than a note here.
 
-## Provisional Reads: Saying So When run 1 Is Not run 2 (#443)
+## Provisional Reads: Saying So When run 1 Is Not run 2 (duppypro/princess-pi-tools#443)
 
 The table above documents the repair. What it does not, on its own, tell the person
 reading it is that **run 1 and run 2 are indistinguishable at the point of reading**.
 `$79.74` printed exactly like `$84.59` — same table, same formatting, no warning —
 so a one-shot audit took the 5.7% undercount and had no signal that it had.
 
-That is #443, and it is a reader-side problem, not a writer-side one. The repair
+That is duppypro/princess-pi-tools#443, and it is a reader-side problem, not a writer-side one. The repair
 above is correct and already happens; the gap is that the report arm (`extensions/lib/cli/report.ts`) spawns the
 daemon and reads the tag on the next statement, so the read races the daemon it
 started and loses. `awaitDaemonUp` sits on that path but is entered only when
@@ -200,7 +200,7 @@ The one-shot version kept `sweptAtMs` in the daemon **process** while the marker
 persists in the **file** — and `flushPending()` runs *before* `scanForSubAgents()` in
 the same poll. So a new parent turn, including one that spawns a new subagent, is
 appended after a marker left by an earlier sweep or an earlier daemon. A reader that
-accepts "a marker exists" then reports SETTLED for data no sweep has covered: #443's own
+accepts "a marker exists" then reports SETTLED for data no sweep has covered: duppypro/princess-pi-tools#443's own
 undercount, through a narrower window. Relocating a bug is not fixing it.
 
 So the contract is: **the marker must be the last significant record in the tag.** The
@@ -239,7 +239,7 @@ clears `pendingItems`; the daemon's append is fatal on failure (above), so the d
 stops, with the lease marked for a rebuild when that write succeeds, rather than continuing
 without the batch. An
 earlier draft cleared the items and then appended with a non-fatal failure path, which
-lost a whole billed batch permanently whenever the append threw. That loss predates #443,
+lost a whole billed batch permanently whenever the append threw. That loss predates duppypro/princess-pi-tools#443,
 but the marker made it worse rather than merely inheriting it: a sweep could stamp over
 the gap, turning a silent undercount into an affirmative *settled*. Now the classified lines
 and the `_meta.offset` line go to disk in one append, `tagGrewSinceMarker` is set when
@@ -397,7 +397,7 @@ through a narrower window, is still the bug. Reading the tag a second time at th
 straddle everything in between — building the output lines, printing the chart, and under
 `--tokens` scanning uncounted billables across the session and every subagent transcript
 — which is wall-clock comparable to a daemon poll (~667ms). A sweep landing in that window
-would report SETTLED for totals rendered from the pre-sweep read: #443's own failure mode,
+would report SETTLED for totals rendered from the pre-sweep read: duppypro/princess-pi-tools#443's own failure mode,
 wearing a false exit 0.
 
 The report arm (`extensions/lib/cli/report.ts`) prints the total **in full**, then a warning line, then exits **9**.
@@ -447,7 +447,7 @@ readability, not waiting. The daemon re-discovers on every poll, and the `--toke
 scan reads transcript files directly, so a CLI re-run picks the file up once it is
 readable.
 
-**Why an exit code and not a field — and what happened next.** When #443 landed, `wtft`
+**Why an exit code and not a field — and what happened next.** When duppypro/princess-pi-tools#443 landed, `wtft`
 had no `--json`, no `--porcelain`, and no documented exit-code table; every number it
 produced was prose. An exit code was the only surface that cost an agent zero tokens and
 zero inference. It carries one bit and deliberately did not preempt a structured mode,
@@ -567,7 +567,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |
 | Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
-| One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
+| One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (duppypro/princess-pi-tools#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
 | `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table; the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |

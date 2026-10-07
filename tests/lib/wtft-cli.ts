@@ -5,7 +5,7 @@
 
 import { execSync, type ExecSyncOptions } from "node:child_process";
 
-/** The run succeeded but the total may still grow (#443). */
+/** The run succeeded but the total may still grow (duppypro/princess-pi-tools#443). */
 export const WTFT_EXIT_PROVISIONAL = 9;
 
 /**

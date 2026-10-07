@@ -8,7 +8,7 @@ machine-readable mode at all.*
 `wtft` produced every number as ANSI-decorated prose aimed at a terminal, with
 `3.6k`-style abbreviation that **destroys** the exact value rather than merely
 obscuring it. A consumer could not recover `3600` from the rendered table at
-all. #443 needed to report "this total may still grow" and, with no structured
+all. duppypro/princess-pi-tools#443 needed to report "this total may still grow" and, with no structured
 surface to put a field in, had to spend an exit code (9) on one bit.
 
 `~/git-projects/CLAUDE.md` § *Agent-First Output* requires a machine-readable
@@ -271,7 +271,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), a read error other than a missing path in a harness's session tree while `--json` or `--tokens` lists unrecorded spawns (#212), or an unhandled exception. The reason is on stderr. | nothing |
 | **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
-| **9** | Provisional (#443): a report was produced in full, but a number in it may still change; `provisional.reason` names which of the four reasons applies. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
+| **9** | Provisional (duppypro/princess-pi-tools#443): a report was produced in full, but a number in it may still change; `provisional.reason` names which of the four reasons applies. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session (#89, C2). Zero is included, which replaces the OLD exit 1 "no session found" for this no-`-s`/no-TTY case. Every candidate is named on stderr. | nothing |
 | **130** | The interactive session picker was cancelled with `q` or Ctrl-C — the SIGINT convention (128+2), not a wtft-specific code. As of `@4` (#89), an interactive terminal still gets the picker under `--json` (drawn to stderr — see "Session selection" above), so `--json` DOES still return this when a human cancels it; it is exit 10 above, not 130, that `--json` cannot combine with a prompt. | n/a |
 
@@ -310,7 +310,7 @@ present — never performs it. Such a session exits 0 there and 9 under the two
 modes that do scan. That is deliberate, not an oversight: scanning on the default
 path would put a full read of the session and every subagent transcript on the
 commonest invocation of all, to detect a rare condition the run is not otherwise
-looking for — the exact cost #443 chose read-then-render to avoid. The code
+looking for — the exact cost duppypro/princess-pi-tools#443 chose read-then-render to avoid. The code
 reports what the run actually checked. The *empty* paths are unaffected, and §9
 of the suite pins that they agree.
 
@@ -405,7 +405,7 @@ sections:
 8b. **§8b** a session file that was never written is *late, not broken* (#308):
    one object, a `pending-session` notice, `provisional: false`, exit 0, and a
    zeroed blind spot meaning "nothing to scan" rather than a guess.
-8c. **§8c** the `#443` stderr line reaches every arm — the empty `--json` ones
+8c. **§8c** the `duppypro/princess-pi-tools#443` stderr line reaches every arm — the empty `--json` ones
    included, which used to exit 9 with nothing a human could read — and appears
    **exactly once**, never twice on a full report.
 9. **§9** the rendered path and `--json` return the **same** code on the same

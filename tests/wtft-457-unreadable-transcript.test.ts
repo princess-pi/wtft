@@ -247,7 +247,7 @@ try {
 			}
 			assert("no content from the unreadable transcript reaches the tag file", !sawTurnWhileUnreadable);
 
-			// #443: the sweep marker must be WITHHELD too — pollHadFailure is set on
+			// duppypro/princess-pi-tools#443: the sweep marker must be WITHHELD too — pollHadFailure is set on
 			// every poll while the read fails, so the tag must not claim swept.
 			assert("swept marker is withheld while the transcript is unreadable", !rawTagHasSwept(tagPath));
 

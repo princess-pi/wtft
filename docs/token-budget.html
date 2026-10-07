@@ -109,7 +109,7 @@ for (const interaction of interactions) {
     <h3>Tmux Status Bar Integration</h3>
     <p>Token Budget integrates seamlessly with your terminal environment by utilizing a light, fast lockfile standard:</p>
     <ul>
-        <li><strong>Mechanism:</strong> When a coffee break cooldown is initiated, the extension writes an ephemeral JSON file to <code>/tmp/pi-rate-limit-coffee.json</code> containing the cooldown's <code>startTime</code> and <code>endTime</code>.</li>
+        <li><strong>Mechanism:</strong> When a coffee break cooldown is initiated, the extension writes an ephemeral JSON file to <code>$XDG_STATE_HOME/wtft/token-budget-cooldown.json</code> (<code>~/.local/state/wtft/</code> when the variable is unset) containing the cooldown's <code>startTime</code> and <code>endTime</code>.</li>
         <li><strong>How It Updates:</strong> Under the Pi TUI Widget, the countdown live-refreshes every 1 second directly on-screen. Under the tmux status bar, an external script (<code>budget_meter.js</code>) reads the JSON file synchronously on a fixed client status interval (typically 5 seconds), rendering decrementing coffee cups (<code>☕☕☕  </code>) and remaining seconds.</li>
         <li><strong>How to Enable/Disable:</strong>
             <ul>
@@ -122,7 +122,7 @@ for (const interaction of interactions) {
     <h3>Architectural Scope & Quota Isolation Boundaries</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong>1. Single Host / Local User Limit:</strong></p>
-        <p>Because the Token Budget aggregates rolling TPM by reading the <code>wtft-tags/</code> tag files that local log parser daemons list in the daemon roster under the same <code>$XDG_STATE_HOME</code> (the global stats cache at a fixed <code>/tmp</code> path is the exception, <a href="https://github.com/princess-pi/wtft/issues/433">#433</a>), rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
+        <p>Because the Token Budget aggregates rolling TPM by reading the <code>wtft-tags/</code> tag files that local log parser daemons list in the daemon roster under the same <code>$XDG_STATE_HOME</code>, rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
         
         <p><strong>2. Best Practices & Isolation Workarounds:</strong></p>
         <ul>

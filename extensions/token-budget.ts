@@ -238,7 +238,7 @@ function stateFile(name: string): string {
   return path.join(wtftStateDir(), name);
 }
 
-export function writeCooldownLockfile(now: number): void {
+export function writeCooldownFile(now: number): void {
   const file = stateFile("token-budget-cooldown.json");
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -247,7 +247,7 @@ export function writeCooldownLockfile(now: number): void {
   }
 }
 
-export function removeCooldownLockfile(): void {
+export function removeCooldownFile(): void {
   try {
     fs.unlinkSync(stateFile("token-budget-cooldown.json"));
   } catch (e) {
@@ -573,7 +573,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
           "warning"
         );
 
-        writeCooldownLockfile(now);
+        writeCooldownFile(now);
 
         // Sleep blocks the turn synchronously in the harness while live-refreshing the widget
         const endTime = Date.now() + COOLDOWN_DURATION_MS;
@@ -587,7 +587,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         cooldownRemainingSecs = null;
         updateTokenBudgetWidget(ctx);
 
-        removeCooldownLockfile();
+        removeCooldownFile();
 
         ctx.ui.notify("☕ [Token Budget] Cooldown complete. Resuming turn execution.", "success");
         updateTokenBudgetWidget(ctx);

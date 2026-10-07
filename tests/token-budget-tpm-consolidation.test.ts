@@ -177,7 +177,6 @@ for (const tc of TEST_LINES) {
 // ---
 console.log("\n2. Cache schema contract (unchanged from #68 baseline)");
 
-// The token-budget writes to /tmp/pi-rate-limit-stats.json with this schema:
 interface CacheSchema {
 	timestamp: number;
 	stats: Record<string, { tpm: number; lastActiveAge: number }>;

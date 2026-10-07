@@ -77,18 +77,15 @@ appears nowhere in this repo). The table records the code, not the misquote.
 ## State files
 
 Two files, both in the wtft state directory, `$XDG_STATE_HOME/wtft/`
-(`~/.local/state/wtft/` when that variable is unset), created on first write:
+(`~/.local/state/wtft/` by default), created on first write:
 
 | File | Holds | Written | Read |
 |---|---|---|---|
-| `token-budget-stats.json` | the stats cache: `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }` | when a Token Budget recomputes TPM | by every Token Budget of the same user, while younger than one tick (at least 1 s) |
-| `token-budget-cooldown.json` | the cooldown lockfile: `{ startTime, endTime }` | at the start of a cooldown, removed at its end | by external status bars (tmux) |
+| `token-budget-stats.json` | the stats cache: `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }` | when a Token Budget recomputes every session's TPM | by Token Budgets using the same state directory, while it is fresh |
+| `token-budget-cooldown.json` | the cooldown file: `{ startTime, endTime }` | at the start of a cooldown, removed at its end | by tmux status-bar scripts outside wtft |
 
-Nothing reads a file at a shared path. Until princess-pi/wtft#433 both lived at
-fixed names in `/tmp` (`pi-rate-limit-stats.json`, `pi-rate-limit-coffee.json`),
-where any process could plant a fresh stats cache and skip the cooldown, or a
-symlink to redirect the writes. A file still at an old `/tmp` name changes
-nothing. A status bar that read the old names reads these paths instead.
+Both are per user, under that user's own state directory. A file at the former `/tmp`
+names (`pi-rate-limit-stats.json`, `pi-rate-limit-coffee.json`) changes nothing.
 
 ## Not this tool
 

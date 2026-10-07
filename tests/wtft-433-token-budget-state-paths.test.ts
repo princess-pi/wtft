@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { getOrUpdateStats, removeCooldownLockfile, writeCooldownLockfile } from "../extensions/token-budget.ts";
+import { getOrUpdateStats, removeCooldownFile, writeCooldownFile } from "../extensions/token-budget.ts";
 import { trackSandbox } from "./lib/sandbox.ts";
 
 let tmp = "";
@@ -48,15 +48,15 @@ describe("the stats cache", () => {
 	});
 });
 
-describe("the cooldown lockfile", () => {
+describe("the cooldown file", () => {
 	it("is written in the wtft state directory for the cooldown's span, and removed at its end", () => {
 		const file = path.join(tmp, "state", "wtft", "token-budget-cooldown.json");
 		assert.strictEqual(fs.existsSync(path.join(tmp, "state")), false);
 
-		writeCooldownLockfile(1_750_000_000_000);
+		writeCooldownFile(1_750_000_000_000);
 		assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, "utf8")), { startTime: 1_750_000_000_000, endTime: 1_750_000_040_000 });
 
-		removeCooldownLockfile();
+		removeCooldownFile();
 		assert.strictEqual(fs.existsSync(file), false);
 	});
 });

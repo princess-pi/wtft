@@ -55,9 +55,7 @@ reads, and every nested fold parse.
   pieces and joined once, when its newline arrives, rather than re-joined and re-scanned on every
   chunk. A 4 MB line read in 1 KB chunks parses in about 18 ms (it took 4.4 s before the fix).
 - **PART M — one parse of a large fixture grows peak RSS by less than a set multiple of the file's
-  size.** The fixture size and that multiple are constants in the suite, chosen together so the
-  chunked read's measured growth sits well under the ceiling and the whole-string read's well over
-  it; a smaller fixture narrows that gap. Off Linux the part is skipped. A child process imports
+  size.** Both are constants in the suite. Off Linux the part is skipped. A child process imports
   the parser, parses a two-line file, collects garbage, then resets the kernel's peak-RSS mark
   (`/proc/self/clear_refs`, so Linux only) and measures the parse's peak against the resident size
   at the reset. A precondition check fails if the reset did not take. The suite used to read

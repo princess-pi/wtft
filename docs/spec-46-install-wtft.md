@@ -186,8 +186,7 @@ now falls through the same evaluation as every other exit.
   started within 2 s after the build counts as older. "Run" means the bundle is argv[0], or the first
   non-option argument under `node` or `bun` (so `node --inspect <bundle>` counts): an editor with the
   file open is not counted. A relative path is resolved against
-  the process's own cwd. The walk over `/proc` spawns commands only for a process running a wtft-daemon bundle, never
-  for every host process. `bun run build` and install mode leave
+  the process's own cwd. `bun run build` and install mode leave
   an unchanged bundle unwritten, so its mtime dates the last build that changed it. The start of the
   last successful build is `tmp/last-build`'s mtime; a suite's freshness check needs it later than
   every source it tests. When `older` is
@@ -371,7 +370,7 @@ probe.
 | # | Seam | Verified by |
 |---|---|---|
 | **V1** | `--check --json` on an empty dir | exit `1`, `status: "drift"`, all **four** artifacts `missing`, and the directory still empty afterwards |
-| **V2** | install into an empty dir | exit `0`, two copies byte-identical to `bin/*.mjs` at mode `0755`, two symlinks with the right **relative** targets; `--check` then exits `0`, making fewer calls to the text utilities the walk once forked (`basename`, `dirname`, `sed`, `awk` and the like, shimmed and counted) than half the host's processes with a command line (V2i) |
+| **V2** | install into an empty dir | exit `0`, two copies byte-identical to `bin/*.mjs` at mode `0755`, two symlinks with the right **relative** targets; `--check` then exits `0` (V2i bounds its cost) |
 | **V3** | the installed command runs **when you type its name** | `<dir>/wtft --version` through its own shebang, on **every** `node` on the host, exits 0 and prints the version; `<dir>/wtft-daemon.mjs` sits beside it |
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |

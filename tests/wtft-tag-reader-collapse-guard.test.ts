@@ -24,8 +24,6 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
  *  the reason it is exempt. An entry here is a claim someone can check, which is the
  *  whole difference between this and the prose rule it replaces. */
 const ALLOWED: Record<string, string> = {
-	// extensions/token-budget.ts routed through readClassifiedTagFile in #17
-	// (filed as #454) — no longer needs an allowlist entry.
 	// Tag WRITER: reads its own markers and the tail it resumes from, through
 	// tag-log; never sums a cost from a tag.
 	"bin/wtft-daemon.ts": "tag WRITER; reads its own markers through tag-log, sums nothing",

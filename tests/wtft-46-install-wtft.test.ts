@@ -786,7 +786,7 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		const fromDir = !fs.existsSync("/proc/self/stat") ? [] : fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
 			try { return fs.readFileSync(`/proc/${p}/cmdline`, "utf8").includes(dir + "/"); } catch { return false; }
 		});
-		check(fromDir.length === 0, "V9g: no process runs from --dir, so the install's --restart reached no daemon outside this suite",
+		check(fromDir.length === 0, "V9g: no process runs from --dir, so the install's --restart respawned nothing from it",
 			`pids ${fromDir.join(",")}`);
 	}
 

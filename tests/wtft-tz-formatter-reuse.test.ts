@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /**
- * A report with a timezone builds one date formatter per timezone, not one per interaction.
+ * A report with a timezone builds one date formatter per timezone, not one per interaction; an unknown
+ * zone is tried once.
  */
 
 import { getZonedParts } from "../extensions/lib/wtft-renderer.ts";
@@ -31,7 +32,8 @@ try {
 check(parts[0]!.hour === 1 && parts[0]!.day === 8, `fixture precondition: 08:30Z is 01:30 MST in Denver on Mar 8 (${JSON.stringify(parts[0])})`);
 check(parts[60]!.hour === 3, `the DST jump still lands: an hour later is 03:30 MDT (${JSON.stringify(parts[60])})`);
 check(parts[500]!.hour === 8, "a second timezone gets its own formatter");
-check(built <= 4, `500 Denver calls, one London and two unknown zones build at most 4 formatters (built ${built})`);
+check(parts[502]!.minute === 30, "an unknown zone falls back to local time");
+check(built === 3, `500 Denver calls, one London and one unknown zone called twice try to build 3 formatters (built ${built})`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

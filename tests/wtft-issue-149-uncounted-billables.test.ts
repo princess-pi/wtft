@@ -315,8 +315,8 @@ describe("#149 harness — surveys the newest real logged sessions", () => {
 		// A survey that drops sessions on the floor reports a clean sweep of a
 		// corpus it never looked at.
 		assert.strictEqual(audited + skippedSubagent + unreadable + unauditable, ids.length,
-			"every logged session must be accounted for in exactly one bucket");
-		assert.strictEqual(surveyed.length, ids.length, "one survey record per logged session");
+			"every surveyed session must be accounted for in exactly one bucket");
+		assert.strictEqual(surveyed.length, ids.length, "one survey record per surveyed session");
 
 		for (const r of surveyed) {
 			console.log("  #149-survey  " + Object.entries(r).map(([k, v]) => `${k}=${v}`).join("  "));
@@ -324,7 +324,7 @@ describe("#149 harness — surveys the newest real logged sessions", () => {
 		console.log(`  #149-survey-totals  sessions=${ids.length}  logged=${logged.length}  audited=${audited}  skipped_subagent=${skippedSubagent}  unreadable=${unreadable}  unauditable=${unauditable}  dip_bearing=${surveyed.filter(r => r.status === "DIPS").length}`);
 
 		if (audited === 0) {
-			console.log("##SKIP## V1 — every logged session was skipped or unauditable: the residual instrument ran on nothing");
+			console.log("##SKIP## V1 — every surveyed session was skipped or unauditable: the residual instrument ran on nothing");
 		}
 	});
 });

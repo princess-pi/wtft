@@ -276,9 +276,6 @@ function isGone(err: unknown): boolean {
  * moves when a transcript is created in it, so an older directory cannot
  * hold a transcript that began after `sinceMs`. Symlinks count: `statSync`
  * follows them.
- *
- * Any read error other than a path that went away is THROWN, so the report
- * fails loudly: an empty listing must only ever mean "looked, found none".
  */
 function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	const candidates: SpawnCandidate[] = [];
@@ -310,9 +307,8 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 				if (!stat.isFile() || stat.mtimeMs < sinceMs) continue;
 				const head = readCandidateHead(file);
 				if (head) candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
-			} catch (err) {
-				if (isGone(err)) continue;
-				throw err;
+			} catch {
+				continue;
 			}
 		}
 	}

@@ -308,9 +308,9 @@ console.log("\nPART N — a moved session's newest copy wins");
 }
 
 // ---
-// PART L — a read error anywhere in the scan is loud; only a missing path is quiet
+// PART L
 // ---
-console.log("\nPART L — loud read errors, quiet absences");
+console.log("\nPART L — an unreadable directory is loud; an absence and an unreadable transcript are quiet");
 {
 	const root = path.join(dir, "l-projects");
 	const saved = process.env.WTFT_CLAUDE_PROJECTS_DIR;
@@ -364,14 +364,13 @@ console.log("\nPART L — loud read errors, quiet absences");
 		// symlink — and readdir order decides which the scan meets first.
 		const viaLink = path.join(linked, "a6000002-0000-4000-8000-0000000000a2.jsonl");
 		fs.chmodSync(ok, 0);
-		err = null;
-		try { claudeDiscovery.listSpawnCandidates!(0); } catch (e) { err = e; }
-		const named = String((err as Error)?.message);
-		check(err instanceof Error && (err as NodeJS.ErrnoException).code === "EACCES" && (named.includes(ok) || named.includes(viaLink)),
-			`L4 an unreadable transcript throws, naming it or the symlink to it (got ${String(err)})`);
+		let unreadableIds: string[] | null = null;
+		try { unreadableIds = claudeDiscovery.listSpawnCandidates!(0).map(c => c.sessionId); } catch (e) { err = e; }
+		check(unreadableIds !== null && unreadableIds.length === 0,
+			`L4 an unreadable transcript, and the symlink to it, are skipped like non-matches: no throw, not listed (got ${unreadableIds === null ? String(err) : unreadableIds.join(", ")})`);
 		const fileRun = cliJson();
-		check(fileRun.status === 1 && fileRun.stdout === "" && (fileRun.stderr.includes(ok) || fileRun.stderr.includes(viaLink)),
-			`L5b --json exits 1 naming the unreadable transcript, and prints no document (got exit ${fileRun.status}, stdout ${fileRun.stdout.length} bytes)`);
+		check(fileRun.status === 0 && !listsOk(fileRun) && !fileRun.stderr.includes(ok) && !fileRun.stderr.includes(viaLink),
+			`L5b --json exits 0, does not list the unreadable transcript, and names it nowhere (got exit ${fileRun.status}, stderr ${fileRun.stderr.trim().slice(0, 200)})`);
 		fs.chmodSync(ok, 0o644);
 	}
 	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved;

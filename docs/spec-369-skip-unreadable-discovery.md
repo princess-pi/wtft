@@ -5,6 +5,7 @@ Status: **Spec Approved** (Duppy, 2026-09-28: option C, "keep it minimal and tru
 2026-10-07: "go E").
 
 Module: `extensions/lib/wtft-parser.ts` · Seam: `discoverClaudeSubAgentSessionFiles`, tested in `tests/wtft-369-skip-unreadable-discovery.test.ts`
+Also: `extensions/lib/harness/claude-code/discovery.ts` — the unrecorded-spawn scan reads the same project directories, and threw on the same file.
 
 ## 1. Problem
 
@@ -13,7 +14,8 @@ learn its first timestamp. One file there it cannot read — any session, in the
 made the whole discovery `unreadable`. `attributeClaudeSubAgentCosts` then threw, so the parent's
 fold failed, and the spawn walk marked the whole edge `unreadable`. The Pi sibling scan in
 `discoverSubagentSessionFiles` had the same shape: one sibling `.jsonl` it could not read made its
-result `unreadable`.
+result `unreadable`. The unrecorded-spawn scan (#128) reads the head of every recent transcript
+under the projects root, and threw on one it could not read, so the report exited 1.
 
 The one discovery-read warning in this host's daemon log came from a test fixture that vanished
 mid-run, not from a real session.
@@ -23,14 +25,15 @@ mid-run, not from a real session.
 Discovery folds only files it can read that match its pattern.
 
 - **A file discovery cannot read is a non-match.** In `claude -p` discovery, the Pi sibling scan,
-  and the walk of a session's own `subagents/` directory, a file whose head read (or, in the walk,
-  whose stat) fails is skipped the same as a file that does not match: no warning, no
-  `unreadable`, no throw.
+  and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
+  does not match: no warning, no `unreadable`, no throw.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.
 - **Unchanged:**
   - A directory discovery searches that is absent reads as "none here".
   - A directory it finds but cannot list still warns and throws.
+  - The walk of a session's own `subagents/` directory still reports an entry it cannot stat:
+    every file it lists is this session's own cost, not another session's transcript.
   - The session transcript's own read failure is still reported as `unreadable` /
     `sessionUnreadable`.
   - A discovered file that then fails to parse is still reported by the parse.
@@ -43,13 +46,13 @@ file):
 - **Claude, the seam:** a project directory holds one readable in-window child and one mode-000
   unrelated transcript. `discoverClaudeSubAgentSessionFiles` returns exactly the child and writes
   nothing to stderr.
-- **Claude, the report (the issue's Closer):** `wtft -s <parent> --json` folds the child, exits 0,
-  and its stderr does not name the unreadable file.
+- **Claude, the report (the issue's Closer):** the tagger sweeps the parent, and
+  `wtft -s <parent> --json` folds the child, exits 0, and its stderr does not name the unreadable
+  file.
 - **Pi siblings:** a session directory holds one readable child sibling and one mode-000 sibling.
   `discoverSubagentSessionFiles` returns the child with `unreadable: null`, and writes nothing to
   stderr.
-- **Own `subagents/` walk:** `subagents/` holds one readable `agent-*.jsonl` and a mode-444
-  subdirectory with another. `discoverSubagentSessionFiles` returns the readable one with
-  `unreadable: null`, and writes nothing to stderr.
-- **Precondition, each case:** opening the mode-000 file fails; stat-ing the file in the mode-444
-  directory fails.
+- **Unrecorded-spawn scan:** `tests/wtft-128-unrecorded-spawns.test.ts` L4/L5b — a mode-000
+  transcript, and a symlink to it, are not listed and do not throw; `--json` exits 0 and names
+  neither.
+- **Precondition, each case:** opening the mode-000 file fails.

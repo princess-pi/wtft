@@ -1026,7 +1026,6 @@ export function discoverSubagentSessionFiles(
 
 	if (mainSessionId) {
 		try {
-			// Skip directories named *.jsonl (EISDIR would latch unreadable forever).
 			for (const entry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
 				const f = entry.name;
 				if (!f.endsWith(".jsonl")) continue;
@@ -1049,14 +1048,8 @@ export function discoverSubagentSessionFiles(
 						seen.add(realFile);
 						files.push(fullPath);
 					}
-				} catch (err) {
-					if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
-					warnUnreadableTranscript(fullPath, "at discovery", err);
-					if (!firstUnreadable) {
-						firstUnreadable = new Error(
-							`subagent transcript could not be read at discovery (${fullPath}): ${err instanceof Error ? err.message : String(err)}`,
-						);
-					}
+				} catch {
+					continue;
 				}
 			}
 		} catch (err) {
@@ -1337,17 +1330,14 @@ export function discoverClaudeSubAgentSessionFiles(
 	cwd: string,
 	parentTimestamp: number,
 	windowMs: number = CLAUDE_SUBAGENT_WINDOW_MS,
-): { files: string[]; unreadable: Error | null } {
+): string[] {
 	const files: string[] = [];
-	let unreadable: Error | null = null;
 	for (const slug of cwdSlugVariants(cwd)) {
-		const found = scanClaudeProjectDir(
+		files.push(...scanClaudeProjectDir(
 			path.join(projectsDir(), slug), parentTimestamp - windowMs, parentTimestamp + windowMs,
-		);
-		files.push(...found.files);
-		unreadable ??= found.unreadable;
+		));
 	}
-	return { files, unreadable };
+	return files;
 }
 
 /**
@@ -1372,15 +1362,14 @@ export function discoverClaudeSubAgentFilesForTurn(
 		// One unreadable directory must not discard what the others found: the
 		// caller retries on `unreadable`, and a permanently unreadable directory
 		// would otherwise keep a readable sibling's child out of the tag forever.
-		let found: { files: string[]; unreadable: Error | null };
+		let found: string[];
 		try {
 			found = discoverClaudeSubAgentSessionFiles(cwd, parentTimestamp, windowMs);
 		} catch (err) {
 			unreadable ??= err instanceof Error ? err : new Error(String(err));
 			continue;
 		}
-		for (const file of found.files) if (!files.includes(file)) files.push(file);
-		unreadable ??= found.unreadable;
+		for (const file of found) if (!files.includes(file)) files.push(file);
 	}
 	return { files, unreadable, searched: cwds.length };
 }
@@ -1389,18 +1378,17 @@ function scanClaudeProjectDir(
 	projectDir: string,
 	tsWindowStart: number,
 	tsWindowEnd: number,
-): { files: string[]; unreadable: Error | null } {
+): string[] {
 	try {
 		const projectStat = fs.statSync(projectDir);
-		if (!projectStat.isDirectory()) return { files: [], unreadable: null };
+		if (!projectStat.isDirectory()) return [];
 	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ENOENT") return { files: [], unreadable: null };
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
 		warnUnreadableSubagentDir(projectDir, err);
 		throw new Error(`claude subagent projects directory could not be read (${projectDir}): ${err instanceof Error ? err.message : String(err)}`);
 	}
 
 	const files: string[] = [];
-	let firstUnreadable: Error | null = null;
 
 	try {
 		for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
@@ -1425,14 +1413,8 @@ function scanClaudeProjectDir(
 				if (tsMs >= tsWindowStart && tsMs <= tsWindowEnd) {
 					files.push(fullPath);
 				}
-			} catch (err) {
-				if ((err as NodeJS.ErrnoException).code === "EISDIR") continue;
-				warnUnreadableTranscript(fullPath, "at discovery", err);
-				if (!firstUnreadable) {
-					firstUnreadable = new Error(
-						`subagent transcript could not be read at discovery (${fullPath}): ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
+			} catch {
+				continue;
 			}
 		}
 	} catch (err) {
@@ -1440,11 +1422,7 @@ function scanClaudeProjectDir(
 		throw new Error(`claude subagent projects directory could not be read (${projectDir}): ${err instanceof Error ? err.message : String(err)}`);
 	}
 
-	if (firstUnreadable) {
-		return { files, unreadable: firstUnreadable };
-	}
-
-	return { files, unreadable: null };
+	return files;
 }
 
 function interactionHasClaudeCommand(interaction: Interaction): boolean {

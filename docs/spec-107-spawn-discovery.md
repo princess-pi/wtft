@@ -112,8 +112,8 @@ is gone, and #128 (P6) lists its child in `spawned.unrecorded[]` when one appear
   the "nothing to search" case a caller must not mistake for "looked and found nothing". A
   directory-level throw is caught per directory and becomes that `unreadable`, so one unreadable
   directory reports itself without discarding what the turn's other directories found.
-- **`discoverClaudeSubAgentSessionFiles(cwd, ts, windowMs?)` keeps its signature.** It is the
-  per-directory scan, and three test suites and `bin/wtft.mjs` re-export it.
+- **`discoverClaudeSubAgentSessionFiles(cwd, ts, windowMs?)`** is the per-directory scan. It
+  returns the files it found and skips one it cannot read (#369).
 - **`attributeClaudeSubAgentCosts(interactions, ownCwd?, ancestors?)`** takes the fallback cwd and
   the transcripts the parse is already inside, and uses the per-turn discovery. `parseSessionFile`
   passes `resolveLastCwd(filePath)`, so a nested child's own grandchildren resolve against the

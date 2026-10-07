@@ -115,13 +115,12 @@ the ones whose mtime is at or after `sinceMs` (creating a transcript updates its
 so a directory last written before `sinceMs` holds no transcript created after it; one created
 earlier and still being written is skipped only when its directory is that old), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs` (a symlinked directory or transcript counts, followed to its target), and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
-`entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. **A read error is loud;
-only a path that is gone is quiet** (#212). ENOENT — no projects root on a host without Claude
-Code, or a directory or transcript deleted mid-scan, or a dangling symlink — is skipped: nothing
-is there to list. Any other error, at the root, a project directory or a transcript, is thrown,
-and the report fails with exit 1 and the OS error naming the path. So `[]` never hides an
-access error. Measured 2026-09-22, a full scan of this host's tree (2,290 directories, 6,753
-transcripts) met no unreadable entry, so in normal use the rule costs nothing. The head read is the first 20 lines within the first
+`entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. **A transcript it cannot read is skipped, like one
+that does not match** (#369). **A directory read error is loud; only a path that is gone is quiet**
+(#212). ENOENT — no projects root on a host without Claude Code, a directory or transcript deleted
+mid-scan, or a dangling symlink — is skipped: nothing is there to list. Any other error at the root
+or a project directory is thrown, and the report fails with exit 1 and the OS error naming the
+path. The head read is the first 20 lines within the first
 64 KiB; a transcript with no timestamp or no `cwd` there cannot be classified and is not a
 candidate.
 
@@ -196,9 +195,8 @@ interface UnrecordedSpawn {
 
 #107's spec left one arm for this change: a `pendingClaudeCommands` turn that searched and found
 nothing was re-discovered every poll for the daemon's life. It is now bounded like the found and
-nothing-to-search arms, by the 15-second discovery window plus the 2-second settle margin. The two
-failure arms — discovery threw, or a candidate was unreadable — still retry until the read
-succeeds. The bound drops a child from the tag only when its transcript reaches disk more than
+nothing-to-search arms, by the 15-second discovery window plus the 2-second settle margin. The failure
+arm — discovery threw — still retries until the read succeeds. The bound drops a child from the tag only when its transcript reaches disk more than
 the 2-second settle margin after its own first timestamp — measured, Claude Code creates the
 file within 200 ms of it. A child that begins after the discovery window could never have matched
 anyway. A child whose

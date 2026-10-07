@@ -286,30 +286,10 @@ no longer swallows an unreadable nested transcript into a silent zero — the th
 propagates to the same handler, so the SUBAGENT transcript's rows are not written that
 poll and the sweep is withheld while any part of the read it depends on is unreadable.
 (The MAIN parent's rows are unaffected: `flushPending()` runs before `scanForSubAgents()`
-in the same poll, and the subagent reader never parses the parent session.) There is no silent
-discovery boundary left (round 5): `discoverClaudeSubAgentSessionFiles` reads the
-first ten lines of each candidate for its head scan, warns once per unreadable file per process,
-and REPORTS the failure in its result instead of throwing — an unreadable candidate at
-discovery still withholds the marker and is retried next poll, never dropped from the
-attribution silently, but the readable in-window matches sharing that project dir are
-returned alongside the report instead of being discarded with it. `~/.claude/projects/<slug>/`
-is shared across many sessions, so an unreadable candidate is usually a DIFFERENT
-session's transcript; the old throw stalled every pending claude -p command sharing the
-cwd — their costs permanently missing while the unreadable file stayed, every poll
-re-reading everything. The daemon registers the readable matches (their costs land) and
-still withholds the swept marker for the command whose window held the unreadable
-candidate, because that candidate's timestamp window was never checkable — it might BE
-that command's transcript. The attribution pass (`attributeClaudeSubAgentCosts`) keeps
-the throw: there, the parent turn is this transcript's own command, so its cost must
-land or the report is silently incomplete. The Pi-pattern sibling files follow the same
-warn-and-report rule (round 6): a per-file read failure warns once per file per process
-and REPORTS in the result, with the readable siblings returned alongside it — the same
-partial-progress shape, applied to this half of discovery after the round-5 throw
-proved to starve the whole subtree over one unreadable file. A sibling whose header
-cannot even PARSE (empty file, partial crash header, a non-transcript `.jsonl`) is
-skipped silently, same rule as the claude half's per-line JSON swallow: it can never
-declare `parentSession`, so it can never contribute cost — warning there would hold the
-marker forever over nothing. The dir-level skips went the same way — an unreadable
+in the same poll, and the subagent reader never parses the parent session.) Discovery skips a candidate it cannot read (#369): a `claude -p` candidate in
+`~/.claude/projects/<slug>/` or a Pi sibling whose head read fails is skipped the same as one that
+does not match, with no warning and no report, so the marker is not withheld over it. A sibling
+whose header cannot parse is skipped the same way. The dir-level failures stay loud — an unreadable
 subagents directory (`walkSubagentDir`, top-level OR nested: the recursion sits outside
 the per-entry stat catch since round 5), an unreadable `~/.claude/projects/<slug>/`
 (its existence gate was `existsSync` until round 6, which read a stat error — EACCES on

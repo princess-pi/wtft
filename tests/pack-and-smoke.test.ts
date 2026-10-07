@@ -193,7 +193,7 @@ try {
 	fs.symlinkSync(nodePath, path.join(stockBin, "node"));
 	fs.symlinkSync(npmPath, path.join(stockBin, "npm"));
 	const stockPath = `${stockBin}:/usr/bin:/bin`;
-	const stockEnv = { PATH: stockPath, HOME: process.env.HOME ?? "", TMPDIR: os.tmpdir() };
+	const stockEnv = { PATH: stockPath, HOME: process.env.HOME ?? "", TMPDIR: os.tmpdir(), XDG_STATE_HOME: mkTemp("wtft-state-") };
 
 	check("bun is genuinely unreachable on the stock install PATH", () => {
 		const r = spawnSync("bash", ["-c", "command -v bun"], { env: stockEnv, encoding: "utf8" });

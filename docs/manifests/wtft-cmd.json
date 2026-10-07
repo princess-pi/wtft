@@ -1,7 +1,7 @@
 {
   "name": "/wtft",
   "tagline": "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
-  "description": "Displays a horizontal TUI bar chart of your session's cost, one row per bin, split by category (Spec, Code, Plan, Agents, ...). Each turn's cost goes to its category and includes the context re-send overhead, and Prompt means pure conversational replies. Cumulative mode (the default) stacks each category's running sum, its earlier bins as █ and this bin's share as ✨. Bucket mode (-b) is a scatter: each category's own cost in the bin is one cell at its place on the scale, and the larger cost takes a shared cell. Under --tokens the bar counts tokens and is stacked in both modes. Each row also prints four numbers: incremental cost, running total cost, incremental tokens and running total tokens. --cost and --tokens choose the bar, not those numbers. When the label area (time label and numbers) is wider than a quarter of the width, it compacts in five steps, each keeping the ones before: one-space gaps, whole numbers ($487, 590k), no + sign, no currency sign on the incremental cost, t in place of tok. If the bar is then under 15 cells, the token numbers drop, then the cost numbers. In the Pi widget a /wtft call saves its interval, limit, mode and timezone, each the flag given or else the current value, to the wtft config, which the CLI also reads for its defaults; a call carrying -F, -o, -p, -H, an emoji flag, or --tokens after any --cost saves none of them.",
+  "description": "Displays a horizontal TUI bar chart of your session's cost, one row per bin, split by category (Spec, Code, Plan, Agents, ...). Each turn's cost goes to its category and includes the context re-send overhead, and Prompt means pure conversational replies. Cumulative mode (the default) stacks each category's running sum, its earlier bins as █ and this bin's share as ✨. Bucket mode (-b) is a scatter: each category's own cost in the bin is one cell at its place on the scale, and the larger cost takes a shared cell. Under --tokens the bar counts tokens and is stacked in both modes. Each row also prints four numbers: incremental cost, running total cost, incremental tokens and running total tokens. --cost and --tokens choose the bar, not those numbers. When the label area (time label and numbers) is wider than a quarter of the width, it compacts in five steps, each keeping the ones before: one-space gaps, whole numbers ($487, 590k), no + sign, no currency sign on the incremental cost, t in place of tok. If the bar is then under 15 cells, the token numbers drop, then the cost numbers. In the Pi widget a /wtft call saves the interval, limit, mode and timezone flags it is given to the wtft config, which the CLI also reads for its defaults, and creates that config if there is none; a call carrying -F, -o, -p, -H, an emoji flag, or --tokens after any --cost saves none of them.",
   "why": [
     {
       "scenario": "You just finished a coding session and want to see where your token costs went — was it all spec-writing or code refactoring?",
@@ -227,7 +227,7 @@
     },
     {
       "flags": "-c, --cumulative, -b, --bucket",
-      "desc": "Render mode; the later flag wins. Cumulative: each bar is the running sum up to and including its bin. Bucket: each bar is its bin's own total, a scatter for cost and stacked for --tokens. Default: the wtft config's mode, else cumulative. The Pi widget saves the mode to the wtft config, which the CLI also reads."
+      "desc": "Render mode; the later flag wins. Cumulative: each bar is the running sum up to and including its bin. Bucket: each bar is its bin's own total, a scatter for cost and stacked for --tokens. Default: the wtft config's mode, else cumulative. The Pi widget saves a -c or -b it is given to the wtft config, which the CLI also reads, except on the calls the description lists as saving nothing (--tokens after any --cost among them)."
     },
     {
       "flags": "-p, --pager",
@@ -239,7 +239,7 @@
     },
     {
       "flags": "-S, --show, -H, --hide",
-      "desc": "Show or hide the WTFT widget below the editor. Pi extension only; both are accepted and inert in the CLI. -H hides it until the widget's next refresh (a settled turn, or the 1-minute timer), which shows it again while a wtft config exists. -S does nothing of its own: any /wtft call without -H shows the widget, and --hide --show and --show --hide both hide it."
+      "desc": "Show or hide the WTFT widget below the editor. Pi extension only; both are accepted and inert in the CLI. -H hides it until a /wtft call that draws it (plain, with chart settings, -S, --tokens or --cost) or a new Pi session; an emoji flag, -F, -o, -p, --help, --why and --version leave it hidden. -S does nothing of its own beyond being such a call, and --hide --show and --show --hide both hide it. -H is ignored in a call that also carries -F, an emoji flag, --version, --help, --why, -o, --tokens or --cost: that flag runs instead, and --tokens or --cost draws the widget."
     },
     {
       "flags": "--emoji, --no-emoji",
@@ -353,7 +353,7 @@
     },
     {
       "cmd": "/wtft --hide",
-      "desc": "Hide the cost audit widget until its next refresh."
+      "desc": "Hide the cost audit widget until the next /wtft that draws it, or a new Pi session."
     },
     {
       "cmd": "/wtft --tokens",

@@ -399,8 +399,8 @@ _Avoid_: Agent, client, platform
 
 **Widget**:
 The persistent TUI panel wtft renders below the editor inside the Pi harness — auto-shown on
-session start if config exists, cleared by `-H/--hide` until its next refresh (`-S/--show` is accepted and does
-nothing). Distinct from the CLI
+session start if config exists, hidden by `-H/--hide` until a `/wtft` that draws it or a new Pi session (`-S/--show` is
+accepted and does nothing of its own). Distinct from the CLI
 (below): the widget only exists inside Pi.
 _Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a separate tool, not part of wtft)
 

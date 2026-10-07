@@ -22,6 +22,7 @@ import {
 	describeForceRebuildFailure,
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
+import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" };
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { chartLines, chartUnit } from "./lib/chart-call.js";
@@ -144,7 +145,7 @@ function getSettings(_ctx: any) {
 
 	const width = Math.min(getTerminalWidth(true, disabledEmoji), 240);
 
-	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR);
+	const visible = hasConfig(WTFT_CONFIG_TOOL, WTFT_CONFIG_DIR) && !_widgetHidden;
 
 	return { interval, limit, width, visible, mode, timezone, disabledEmoji, tokens };
 }
@@ -179,6 +180,7 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 
 let widgetHideCostColumns = false;
 let widgetHideTokenColumns = false;
+let _widgetHidden = false;
 
 function readInteractions(ctx: any): Interaction[] {
 	_subagentUnreadable = false;
@@ -263,6 +265,7 @@ function updateWtftWidget(
 		showTokenColumns?: boolean;
 	}
 ) {
+	if (opts?.visible === true) _widgetHidden = false;
 	const current = getSettings(ctx);
 	const visible = opts?.visible !== undefined ? opts.visible : current.visible;
 
@@ -313,6 +316,7 @@ let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 export default function wtftExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
+		_widgetHidden = false;
 		// Spawn daemon for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
@@ -413,8 +417,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (showVersion) {
 				try {
-					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					ctx.ui.notify(renderWtftVersion(manifestPath, import.meta.url), "info");
+					ctx.ui.notify(renderWtftVersion(wtftManifest, import.meta.url), "info");
 				} catch (err) {
 					ctx.ui.notify(`\u26A0\uFE0F Failed to load WTFT command manifest: ${err}`, "error");
 				}
@@ -423,8 +426,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (showHelp) {
 				try {
-					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					ctx.ui.notify(renderWtftHelp(manifestPath, "/wtft"), "info");
+					ctx.ui.notify(renderWtftHelp(wtftManifest, "/wtft"), "info");
 				} catch (err) {
 					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");
 				}
@@ -433,8 +435,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (showWhy) {
 				try {
-					const manifestPath = path.join(process.cwd(), "docs", "manifests", "wtft-cmd.json");
-					const whyText = await renderWtftWhy(manifestPath, "/wtft");
+					const whyText = await renderWtftWhy(wtftManifest, "/wtft");
 					ctx.ui.notify(whyText, "info");
 				} catch (err) {
 					ctx.ui.notify(`⚠️ Failed to load WTFT command manifest: ${err}`, "error");
@@ -475,6 +476,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		}
 
 			if (hideWidget) {
+				_widgetHidden = true;
 				ctx.ui.setWidget("wtft", undefined);
 				ctx.ui.notify("Token cost audit widget hidden.", "info");
 				return;
@@ -512,10 +514,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 			}
 
 			writeConfig(WTFT_CONFIG_TOOL, {
-				interval: nextInterval,
-				limit: nextLimit,
-				mode: nextMode,
-				timezone: nextTimezone,
+				...(hasInterval ? { interval: nextInterval } : {}),
+				...(hasLimit ? { limit: nextLimit } : {}),
+				...(hasMode ? { mode: nextMode } : {}),
+				...(hasTimezone ? { timezone: nextTimezone } : {}),
 			}, undefined, WTFT_CONFIG_DIR);
 
 			updateWtftWidget(ctx, pi, {

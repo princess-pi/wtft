@@ -167,7 +167,7 @@ console.log("1. Idle clamped by classified freshness (health)");
 // ---
 console.log("\n2. Takeover protocol (real daemon process)");
 {
-	const { sessionPath } = makeSessionFixture("takeover");
+	const { sessionPath, tagsDir } = makeSessionFixture("takeover");
 	const pidPath = getDaemonPidPath(sessionPath);
 	const spawnedPid = spawnDaemon(sessionPath);
 
@@ -178,6 +178,13 @@ console.log("\n2. Takeover protocol (real daemon process)");
 	await pollUntil(() => readClaim() > 0, 15_000, 250);
 	const claimed = readClaim();
 	assert("daemon claimed PID file", claimed > 0 && isAlive(claimed));
+
+	// The daemon's startup reaper runs after its claim and rightly unlinks a lease
+	// naming a pid that is no live daemon, as 424242 is. Steal only after startup,
+	// which ends with the first tag write; earlier, the reaper removes the stolen lease.
+	const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
+	const started = await pollUntil(() => fs.statSync(tagPath).size > 0, 15_000);
+	assert("daemon finished startup still holding the lease", started && readClaim() === claimed && isAlive(claimed));
 
 	// Steal the lease: overwrite with a foreign PID.
 	fs.writeFileSync(pidPath, "424242");

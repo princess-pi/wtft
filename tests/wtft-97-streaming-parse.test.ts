@@ -83,13 +83,15 @@ console.log("\nPART R — chunkBytes must be a positive safe integer");
 // ---
 // PART M — peak memory does not scale with the file
 // ---
-console.log("\nPART M — a ~40 MB transcript parses without holding it several times over");
+console.log("\nPART M — a large transcript parses without holding it whole");
 {
+	const FIXTURE_MB = 80;
+	const CEILING_FRACTION_OF_FILE = 1;
 	const big = path.join(dir, "big.jsonl");
 	const fd = fs.openSync(big, "w");
 	const pad = "x".repeat(4000);
 	let bytes = 0;
-	for (let i = 0; bytes < 40 * 1024 * 1024; i++) {
+	for (let i = 0; bytes < FIXTURE_MB * 1024 * 1024; i++) {
 		// Most bytes are in lines that are not turns, as in a real transcript
 		// full of tool results; one turn in fifty keeps the interaction list small.
 		const line = (i % 50 === 0 ? turn(i, "t") : JSON.stringify({ type: "user", message: { content: pad } })) + "\n";
@@ -97,17 +99,29 @@ console.log("\nPART M — a ~40 MB transcript parses without holding it several 
 		bytes += line.length;
 	}
 	fs.closeSync(fd);
+	const small = path.join(dir, "warm-up.jsonl");
+	fs.writeFileSync(small, turn(0, "warm") + "\n" + JSON.stringify({ type: "user", message: { content: pad } }) + "\n");
+	// The peak is reset after the import because getrusage's maxRSS keeps the
+	// import's own peak, which varies by host and can exceed the parse's.
 	const script = `
+		const fs = require("node:fs");
+		const statusKb = (field) => parseInt(fs.readFileSync("/proc/self/status", "utf8").split("\\n").find((l) => l.startsWith(field + ":")).slice(field.length + 1));
 		const { parseSessionFile } = await import(${JSON.stringify(path.resolve(import.meta.dirname, "..", "extensions", "lib", "wtft-parser.ts"))});
-		const before = process.resourceUsage().maxRSS;
+		parseSessionFile(${JSON.stringify(small)});
+		Bun.gc(true);
+		fs.writeFileSync("/proc/self/clear_refs", "5");
+		const baseKb = statusKb("VmRSS");
+		const resetPeakKb = statusKb("VmHWM");
 		const n = parseSessionFile(${JSON.stringify(big)}).length;
-		console.log(JSON.stringify({ n, beforeKb: before, afterKb: process.resourceUsage().maxRSS }));
+		console.log(JSON.stringify({ n, baseKb, resetPeakKb, peakKb: statusKb("VmHWM") }));
 	`;
 	const r = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", env: { ...process.env } });
 	const out = JSON.parse((r.stdout || "{}").trim().split("\n").pop() || "{}");
-	const grewMb = (out.afterKb - out.beforeKb) / 1024;
+	const fileMb = bytes / 1024 / 1024;
+	const grewMb = (out.peakKb - out.baseKb) / 1024;
 	check(out.n > 0, `M1 fixture precondition: the parse found turns (got ${out.n}; stderr ${(r.stderr || "").slice(0, 200)})`);
-	check(grewMb < 20, `M2 peak RSS grows by under half the file's size (the old whole-string read grew about 49 MB; this grew ${grewMb.toFixed(1)} MB for a 40 MB file)`);
+	check(out.resetPeakKb - out.baseKb < 1024, `M3 fixture precondition: the peak was reset to the resident size before the parse (peak ${out.resetPeakKb} kB, resident ${out.baseKb} kB)`);
+	check(grewMb < fileMb * CEILING_FRACTION_OF_FILE, `M2 peak RSS grows by less than ${CEILING_FRACTION_OF_FILE}× the file's size (grew ${grewMb.toFixed(1)} MB for a ${fileMb.toFixed(0)} MB file)`);
 }
 
 // ---

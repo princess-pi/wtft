@@ -132,15 +132,16 @@ console.log("\nPART E — wtft --tokens and --json on a session with a built-in 
 
 	const cli = (args: string[]) => spawnSync("node", [path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs"), "-s", session, ...args],
 		{ encoding: "utf8", env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: projects, XDG_STATE_HOME: path.join(dir, "state") } });
-	// The daemon writes the tag asynchronously; a fresh run reads what it has.
+	// A subagent total appears before its last turn is written; only a swept tag holds every turn.
 	let doc: any = null;
-	for (let k = 0; k < 20; k++) {
+	for (let k = 0; k < 40; k++) {
 		const r = cli(["--json"]);
 		try { doc = JSON.parse(r.stdout); } catch { doc = null; }
-		if (doc?.subagents?.[0]?.total) break;
+		if (doc?.subagents?.[0]?.total && doc.provisional?.provisional === false) break;
 		spawnSync("sleep", ["0.5"]);
 	}
 	const row = doc?.subagents?.find((r: any) => r.transcript.endsWith("agent-e2e0001.jsonl"));
+	check(doc?.provisional?.provisional === false, `E0 fixture precondition: the tag is swept, so every subagent turn is in it (got ${JSON.stringify(doc?.provisional)})`);
 	check(doc?.schema === "wtft/session@8", `E1 the document is wtft/session@8 (got ${doc?.schema})`);
 	check(row?.meta?.description === "Measure the daemon" && Math.abs((row?.total?.costUsd ?? -1) - expected) < 1e-6,
 		`E2 subagents[].total is what the subagent's own turns cost (got ${row?.total?.costUsd}, expected ${expected})`);

@@ -617,7 +617,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         updateTokenBudgetWidget(ctx);
       }
     } catch (err: any) {
-      ctx.ui.notify(`⚠️ [Token Budget Error] Failed to compute rate limit: ${err.message}`, "error");
+      ctx.ui.notify(`⚠️ [Token Budget Error] Failed to check TPM against the budget: ${err.message}`, "error");
     }
   });
 
@@ -631,14 +631,14 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
 
       if (trimmed === "--help" || trimmed === "-h") {
         let helpText = `\x1b[1m\x1b[36m/budget\x1b[0m - Configure Token Budget Display Options\n\n`;
-        helpText += `Control the visibility of the Token Budget floating widget box and the status bar footer.\n\n`;
+        helpText += `Show or hide the Token Budget widget below the editor and its status line in Pi's footer.\n\n`;
 
         helpText += `\x1b[1mUsage:\x1b[0m\n`;
-        helpText += `  /budget                                    Toggle the floating widget panel on/off\n`;
-        helpText += `  /budget --widget [on|off]                  Explicitly enable or disable the floating widget panel\n`;
-        helpText += `  /budget --footer [on|off]                  Explicitly enable or disable the bottom footer line 3\n`;
-        helpText += `  /budget --no-widget                        Disable the floating widget panel (same as --widget off)\n`;
-        helpText += `  /budget --no-footer                        Disable the footer line (same as --footer off)\n`;
+        helpText += `  /budget                                    Toggle the Token Budget widget on/off\n`;
+        helpText += `  /budget --widget [on|off]                  Explicitly enable or disable the widget\n`;
+        helpText += `  /budget --footer [on|off]                  Explicitly enable or disable the footer status line\n`;
+        helpText += `  /budget --no-widget                        Disable the widget (same as --widget off)\n`;
+        helpText += `  /budget --no-footer                        Disable the footer status line (same as --footer off)\n`;
         helpText += `  /budget --emoji                            Enable emoji icons in widgets/footer\n`;
         helpText += `  /budget --no-emoji                         Disable emoji icons in widgets/footer\n`;
         helpText += `  /budget --why                              Explain why you'd run this tool, with user scenarios\n\n`;
@@ -656,14 +656,14 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
 
       if (trimmed === "--why") {
         let whyText = `\x1b[1m\x1b[36m/budget\x1b[0m - Configure Token Budget Display Options\n\n`;
-        whyText += `Control the visibility of the Token Budget floating widget box and the status bar footer.\n\n`;
+        whyText += `Show or hide the Token Budget widget below the editor and its status line in Pi's footer.\n\n`;
         whyText += `\x1b[1mWhy run /budget?\x1b[0m\n\n`;
         whyText += `  You're approaching your API rate limit and need to see your current usage at a glance.\n`;
         whyText += `    \x1b[33m$ /budget\x1b[0m\n`;
-        whyText += `    \x1b[32m→ A floating widget panel appears showing the current model's TPM usage as a colored bar, updated every second.\x1b[0m\n\n`;
-        whyText += `  You want the rate info in the status bar but not as a floating widget box.\n`;
+        whyText += `    \x1b[32m→ The Token Budget widget below the editor turns on, or off if it was on (it starts on), showing the current model's TPM usage as a colored bar, refreshed every second by default.\x1b[0m\n\n`;
+        whyText += `  You want the TPM meter in Pi's footer rather than below the editor.\n`;
         whyText += `    \x1b[33m$ /budget --widget off --footer on\x1b[0m\n`;
-        whyText += `    \x1b[32m→ The widget box is hidden but the Token Budget status line remains visible in the footer.\x1b[0m\n\n`;
+        whyText += `    \x1b[32m→ The widget is hidden and the Token Budget status line shows in Pi's footer.\x1b[0m\n\n`;
         whyText += `  Your terminal doesn't render emoji well and you need ASCII-only widgets.\n`;
         whyText += `    \x1b[33m$ /budget --no-emoji\x1b[0m\n`;
         whyText += `    \x1b[32m→ All widget icons switch to single-width ASCII characters.\x1b[0m\n\n`;
@@ -746,8 +746,8 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
       updateTokenBudgetWidget(ctx);
 
       const statusMsgs: string[] = [];
-      statusMsgs.push(`Widget Box: ${newWidget ? "ENABLED" : "DISABLED"}`);
-      statusMsgs.push(`Footer Line 3 Status: ${newFooter ? "ENABLED" : "DISABLED"}`);
+      statusMsgs.push(`Widget: ${newWidget ? "ENABLED" : "DISABLED"}`);
+      statusMsgs.push(`Footer status line: ${newFooter ? "ENABLED" : "DISABLED"}`);
       ctx.ui.notify(`Token Budget display settings updated: ${statusMsgs.join(" | ")}`, "info");
     }
   });

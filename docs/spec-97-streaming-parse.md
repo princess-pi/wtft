@@ -54,11 +54,25 @@ reads, and every nested fold parse.
 - **PART L — one very long line costs linear time.** The unfinished line is kept as a list of
   pieces and joined once, when its newline arrives, rather than re-joined and re-scanned on every
   chunk. A 4 MB line read in 1 KB chunks parses in about 18 ms (it took 4.4 s before the fix).
-- **PART M — one parse of a ~40 MB fixture grows peak RSS by less than 20 MB.** Measured
-  2026-09-22 under bun: about 4 MB with this change. The same fixture grew about 49 MB with the old
-  whole-string read (measured once, before the change, with the same script; the suite now runs
-  only the new code). PART M runs under bun, so its figure is JavaScriptCore's heap, not V8's; the
-  daemon under node is measured only by the script below.
+- **PART M — one parse of a large fixture grows peak RSS by less than a fraction of the file's
+  size.** The fixture size and that fraction are constants in the suite. A child process imports
+  the parser, parses a two-line file, collects garbage, then resets the kernel's peak-RSS mark
+  (`/proc/self/clear_refs`, so Linux only) and measures the parse's peak against the resident size
+  at the reset. A precondition check fails if the reset did not take. The suite used to read
+  `getrusage`'s `maxRSS` after the import instead, which keeps the import's own peak: that peak
+  varied by host (about 43 MB to 97 MB) and sat near the chunked parse's, so the check read 0.0 MB
+  under `bun test` on the VPS and 20.2 MB on CI. Measured 2026-10-06 under bun on the VPS,
+  25 runs per cell under six busy loops, growth in MB:
+
+  | Fixture | chunked read | old whole-string read |
+  |---|---|---|
+  | 40 MB | 42.9 – 45.2 | 82.0 – 84.8 |
+  | 80 MB | 49.5 – 51.9 | 145.5 – 148.6 |
+
+  The chunked read's growth is garbage JavaScriptCore has not yet collected, and it levels off as
+  the file grows; the whole-string read's grows with the file. PART M runs under bun, so its
+  figure is JavaScriptCore's heap, not V8's; the daemon under node is measured only by the script
+  below.
 
 ## The Closer — measured 2026-09-22, and not met
 

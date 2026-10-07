@@ -383,7 +383,8 @@ Config: `~/.config/wtft/token-budget.json` (princess-pi/wtft#156).
 Distinct from **Thinking budget** (above) — that flag is a token ceiling the caller supplies
 for utilization display; Token Budget is a live request-rate guard the extension enforces.
 See `docs/spec-51-token-budget.md`.
-_Avoid_: rate limiter, TPS, rate-limit tool, TPM-as-a-name (TPM stays, as the metric)
+_Avoid_: rate limiter, TPS, rate-limit tool, TPM-as-a-name (TPM stays, as the metric). A
+provider's own rate limit keeps that name: it is the provider's, not this tool's.
 
 
 **Harness**:
@@ -398,11 +399,22 @@ where the daemon is the subject.
 _Avoid_: Agent, client, platform
 
 **Widget**:
-The persistent TUI panel wtft renders below the editor inside the Pi harness — auto-shown on
-session start if config exists, hidden by `-H/--hide` until a `/wtft` that draws it or a new Pi session (`-S/--show` is
-accepted and does nothing of its own). Distinct from the CLI
-(below): the widget only exists inside Pi.
-_Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a separate tool, not part of wtft)
+A block of lines a Pi extension keeps on screen below Pi's editor. This repo has two, and a
+sentence that could mean either names it: the **wtft widget**, the cost chart — auto-shown on
+session start if config exists, hidden by `-H/--hide` until a `/wtft` that draws it or a new Pi
+session (`-S/--show` is accepted and does nothing of its own); and the **Token Budget widget**,
+the TPM meter, turned on and off by `/budget`. A bare "the widget" in wtft's own docs means the
+wtft widget. Distinct from the CLI (below) and from the **Footer** (below): a widget only exists
+inside Pi.
+_Avoid_: Panel, sidebar (reserved for the `serve` tool's widget — `serve` is a separate tool, not part of wtft), floating (a widget sits fixed below the editor)
+
+**Footer**:
+Pi's own status area at the bottom of the screen: a working-directory line, a stats line, and a
+third line carrying every extension's status text. Pi owns it; wtft's only entry there is the
+**footer status line**, Token Budget's TPM meter on that third line (`/budget --footer`), off
+by default. `/wtft` puts nothing in the footer.
+_Avoid_: status bar, "footer line 3" as a name (it is where the footer status line sits), and a
+bare "footer" for the chart's own lines under the bars, which are part of the wtft widget
 
 **CLI**:
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside

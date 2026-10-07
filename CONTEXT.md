@@ -82,7 +82,7 @@ session that process serves (`extensions/lib/daemon-roster.ts`). It is rewritten
 changes or the file has gone; an empty list removes it, so a harness serving nothing has none.
 Token Budget reads the roster directory to find tag files written in the last 2 minutes, instead
 of walking the session trees. A stopped daemon's roster stays while one of its tags is still in that window; then Token Budget's next read, or the next
-start of any daemon that gets past its own lease or root claim, deletes it. Not the **Lease** (per session: who serves
+start of any daemon that gets past its own lease or root claim, deletes it. A roster Token Budget cannot read while its daemon runs, or a roster directory it cannot list, is a **roster error**, shown instead of zero spend. Not the **Lease** (per session: who serves
 it) and not the harness hand-off `.served` (per harness root: what the next harness adopts).
 _Avoid_: active index, served list
 

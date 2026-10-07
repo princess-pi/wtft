@@ -67,12 +67,18 @@ function mtimeOrNull(file: string): number | null {
 	}
 }
 
+function rosterError(what: string): Error {
+	return new Error(`daemon roster: ${what}, so TPM reads 0 and no cooldown fires. Check that path and $XDG_STATE_HOME (wtft docs/spec-442-daemon-roster.md §2e)`);
+}
+
 function readRosters(dir: string): RosterEntry[] {
 	let names: string[];
 	try {
 		names = fs.readdirSync(dir);
-	} catch {
-		return [];
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") return [];
+		throw rosterError(`cannot list ${dir} (${code ?? (err as Error).message})`);
 	}
 	const entries: RosterEntry[] = [];
 	for (const name of names) {
@@ -81,16 +87,19 @@ function readRosters(dir: string): RosterEntry[] {
 		const file = path.join(dir, name);
 		const pid = Number(m[1]);
 		let tags: string[] = [];
+		let unreadable: string | null = null;
 		if (!m[2]) {
 			try {
 				const doc = JSON.parse(fs.readFileSync(file, "utf8"));
-				if (doc?.v !== 1 || doc.pid !== pid || !Array.isArray(doc.tags)) throw new Error("not a roster");
+				if (doc?.v !== 1 || doc.pid !== pid || !Array.isArray(doc.tags)) throw new Error("not a v1 roster for this pid");
 				tags = doc.tags.filter((t: unknown): t is string => typeof t === "string");
-			} catch {
-				tags = [];
+			} catch (err) {
+				unreadable = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
 			}
 		}
-		entries.push({ file, holder: classifyPid(pid), tags: tags.map(t => ({ path: t, mtimeMs: mtimeOrNull(t) })) });
+		const holder = classifyPid(pid);
+		if (unreadable !== null && holdsLease(holder)) throw rosterError(`cannot read ${file} of live pid ${pid} (${unreadable})`);
+		entries.push({ file, holder, tags: tags.map(t => ({ path: t, mtimeMs: mtimeOrNull(t) })) });
 	}
 	return entries;
 }

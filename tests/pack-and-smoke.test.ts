@@ -35,11 +35,10 @@ function check(label: string, fn: () => void) {
 }
 
 const KNOWN_LIMIT =
-	`${DIM}Known limit: this suite proves the REGISTRY/TARBALL install channel only\n` +
-	`(npm pack, with bun on PATH for prepare -> npm install -> plain node, bun\n` +
-	`excluded from PATH for install and run). It does NOT\n` +
-	`exercise the git-URL channel, which runs \`prepare\` and needs bun on PATH -\n` +
-	`an accepted constraint. Green here != every install channel green.${RESET}`;
+	`${DIM}Known limit: this suite installs the npm pack tarball (bun on PATH for\n` +
+	`prepare during the pack only) with plain node/npm and runs the two CLIs. It does\n` +
+	`NOT exercise the git-URL channel, which runs \`prepare\` and needs bun on PATH,\n` +
+	`nor load the Pi bundles. Green here != every install channel green.${RESET}`;
 
 console.log(KNOWN_LIMIT);
 console.log();
@@ -77,7 +76,7 @@ function killLingeringDaemons() {
 // pre-existing state and refuse to touch it, rather than clobbering WIP.
 // ---
 
-const REBUILD_TOUCHED = ["bin/", "extensions/lib/harness/builtins.generated.ts"];
+const REBUILD_TOUCHED = ["extensions/lib/harness/builtins.generated.ts", "bun.lock"];
 
 function gitStatusLines(paths: string[]): string[] {
 	const out = execFileSync("git", ["status", "--porcelain", "--", ...paths], {
@@ -91,7 +90,7 @@ const preExistingDirt = gitStatusLines(REBUILD_TOUCHED);
 
 if (preExistingDirt.length > 0) {
 	console.log(`${RED}FAIL${RESET} pre-flight: ${REBUILD_TOUCHED.join(", ")} already has uncommitted changes`);
-	console.log(`       This suite's npm pack step can rewrite those paths and would clobber them.`);
+	console.log(`       npm pack runs prepare, which can rewrite them, and this suite restores them with git checkout.`);
 	for (const l of preExistingDirt) console.log(`       ${l}`);
 	failed++;
 	console.log(`\nResults: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
@@ -122,10 +121,8 @@ try {
 		assert.strictEqual(tgzFiles.length, 1, `expected 1 tarball, found ${tgzFiles.length}`);
 	});
 
-	// Restore whatever `prepare` touched — the pre-flight proved this was clean.
-	execFileSync("git", ["checkout", "--", ...REBUILD_TOUCHED], { cwd: REPO_ROOT });
-	check(`tracked files prepare rewrites (${REBUILD_TOUCHED.join(", ")}) are clean after npm pack`, () => {
-		assert.deepStrictEqual(gitStatusLines(REBUILD_TOUCHED), [], "still dirty");
+	check(`npm pack leaves the tracked files prepare can rewrite (${REBUILD_TOUCHED.join(", ")}) unchanged`, () => {
+		assert.deepStrictEqual(gitStatusLines(REBUILD_TOUCHED), [], "prepare changed a tracked file");
 	});
 
 	if (!tgzPath) {
@@ -162,10 +159,11 @@ try {
 	}) ?? "";
 	const npmPath = path.join(path.dirname(nodePath), "npm");
 
-	check("resolved node is a real node binary, not bun", () => {
+	check("resolved node is real node, not bun, with npm beside it", () => {
 		const v = execFileSync(nodePath, ["--version"], { encoding: "utf8" });
 		assert.ok(/^v\d+\.\d+\.\d+/.test(v.trim()), `unexpected node --version: ${v}`);
 		assert.strictEqual(path.basename(fs.realpathSync(nodePath)), "node");
+		assert.ok(fs.existsSync(npmPath), `no npm beside node: ${npmPath}`);
 	});
 
 	fs.symlinkSync(nodePath, path.join(stockBin, "node"));
@@ -270,11 +268,12 @@ try {
 	fs.writeFileSync(path.join(consumerParent, ".wtft", "config.json"), JSON.stringify({ mode: "bucket" }));
 	const walked = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"), true);
 	const planted = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"));
-	check("fixture precondition: with config walk-up on, a .wtft/config.json above the consumer turns the chart to bucket mode", () => {
+	check("fixture precondition: with config walk-up on, the planted config drops the cumulative key from a render that still exits 0 with $4.50", () => {
 		assert.ok(renderResult.stdout.includes("earlier bins"), `cumulative key missing from the plain render:\n${renderResult.stdout}`);
-		assert.ok(!walked.stdout.includes("earlier bins"), `the planted config did not reach a walking-up run:\n${walked.stdout}`);
+		assert.strictEqual(walked.status, 0, `exit ${walked.status}: ${walked.stderr}`);
+		assert.ok(walked.stdout.includes("$4.50") && !walked.stdout.includes("earlier bins"), `the planted config did not reach a walking-up run:\n${walked.stdout}`);
 	});
-	check("the installed wtft ignores a .wtft/config.json above its cwd (still cumulative, still $4.50)", () => {
+	check("with walk-up off, a .wtft/config.json above the installed wtft's cwd leaves its render cumulative with $4.50", () => {
 		assert.ok(planted.stdout.includes("earlier bins") && planted.stdout.includes("$4.50"), `planted config reached the run:\n${planted.stdout}`);
 	});
 } catch (err) {

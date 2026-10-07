@@ -254,8 +254,6 @@ function writeAtomically(file: string, text: string, mode: number) {
     if (fs.readFileSync(file, "utf8") === text && (fs.statSync(file).mode & 0o777) === mode) return;
   } catch { /* not built yet */ }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  // Beside the repo's other scratch files, not in bin/ or pi/, where
-  // pack-and-smoke refuses any untracked file. Same filesystem, so rename holds.
   const tmpDir = path.join(import.meta.dir, "tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
   const tmp = path.join(tmpDir, `${path.basename(file)}.${process.pid}.tmp`);

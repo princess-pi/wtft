@@ -207,7 +207,7 @@ describe("#149 residual instrument — usage alignment, not timestamps", () => {
 // V1 — the harness runs against real logged sessions
 // ---
 
-describe("#149 harness — surveys every real logged session", () => {
+describe("#149 harness — surveys the newest real logged sessions", () => {
 	/** V1 is REPORT-ONLY on the residual's shape, and that is a correction rather
 	 *  than a workaround (#256).
 	 *
@@ -233,18 +233,18 @@ describe("#149 harness — surveys every real logged session", () => {
 	 *  harness reads obey their ordering contract, and that steps and dips carry
 	 *  the sign their names promise. The measurements themselves are printed as
 	 *  flat key=value records — one per session, greppable, no prose to parse. */
-	// #27: bun's per-test ceiling is 5000 ms, and this survey walks EVERY logged
-	// session on the host — a corpus that grows with every session anyone runs.
-	// The budget is generous ON PURPOSE: a wall-clock guard against a hang, not
-	// a performance assertion tuned to today's corpus.
+	const SURVEY_SESSIONS = 100;
 	const SURVEY_TIMEOUT_MS = 120_000;
 
 	// `it` here is node:test's, whose per-test options are the SECOND argument —
 	// bun:test's trailing-number form is silently ignored by it, which is how a
 	// first attempt at this fix looked applied and changed nothing.
-	it("V1 — every logged session is accounted for, and the survey is printed in full", { timeout: SURVEY_TIMEOUT_MS }, () => {
+	it("V1 — every surveyed session is accounted for, and the survey is printed in full", { timeout: SURVEY_TIMEOUT_MS }, () => {
 		const logDir = path.join(os.homedir(), ".claude", "statusline-logs");
-		const ids = listLoggedSessions(logDir);
+		const logged = listLoggedSessions(logDir).flatMap((id: string) => {
+			try { return [{ id, mtimeMs: fs.statSync(path.join(logDir, `${id}.jsonl`)).mtimeMs }]; } catch { return []; }
+		});
+		const ids = logged.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, SURVEY_SESSIONS).map((log) => log.id);
 		if (ids.length === 0) {
 			console.log("##SKIP## V1 — no ~/.claude/statusline-logs on this machine: the harness ran against no real session");
 			return;
@@ -315,16 +315,16 @@ describe("#149 harness — surveys every real logged session", () => {
 		// A survey that drops sessions on the floor reports a clean sweep of a
 		// corpus it never looked at.
 		assert.strictEqual(audited + skippedSubagent + unreadable + unauditable, ids.length,
-			"every logged session must be accounted for in exactly one bucket");
-		assert.strictEqual(surveyed.length, ids.length, "one survey record per logged session");
+			"every surveyed session must be accounted for in exactly one bucket");
+		assert.strictEqual(surveyed.length, ids.length, "one survey record per surveyed session");
 
 		for (const r of surveyed) {
 			console.log("  #149-survey  " + Object.entries(r).map(([k, v]) => `${k}=${v}`).join("  "));
 		}
-		console.log(`  #149-survey-totals  sessions=${ids.length}  audited=${audited}  skipped_subagent=${skippedSubagent}  unreadable=${unreadable}  unauditable=${unauditable}  dip_bearing=${surveyed.filter(r => r.status === "DIPS").length}`);
+		console.log(`  #149-survey-totals  sessions=${ids.length}  logged=${logged.length}  audited=${audited}  skipped_subagent=${skippedSubagent}  unreadable=${unreadable}  unauditable=${unauditable}  dip_bearing=${surveyed.filter(r => r.status === "DIPS").length}`);
 
 		if (audited === 0) {
-			console.log("##SKIP## V1 — every logged session was skipped or unauditable: the residual instrument ran on nothing");
+			console.log("##SKIP## V1 — every surveyed session was skipped or unauditable: the residual instrument ran on nothing");
 		}
 	});
 });

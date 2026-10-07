@@ -11,14 +11,15 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   no `--session` comes back as `wtft-daemon --harness <name>`, and the line reads
   `Restarted: PID n → fresh harness daemon (<name>)`. A harness found only through its root pid
   file is stopped, not respawned: the next `wtft` or widget spawn starts it.
-- **D. A respawn counts only if, 1 s later, it is still running or a live daemon holds what it
+- **D. A respawn counts only if, `WTFT_RESPAWN_SETTLE_MS` later (default 1 s), it is still running or a live daemon holds what it
   was started for** (the session's lease, or a root pid file for its `--harness`); a child that
   handed off and exited 0 counts. Otherwise (a tag-file `--session`, a crash at start) it is a failed respawn: its claim on the lease is
   removed and the line reads `Stopped: PID n — the respawn for <session> failed`.
 - **A respawn runs in the stopped holder's cwd** (read from `/proc/<pid>/cwd`), with its root
   environment, so a relative `--session` or root directory names what it named before.
-- **One wait for all.** Every respawn is started first, then one 1 s wait, then each is judged.
-  A child slower than 1 s to fail is counted as running.
+- **One wait for all.** Every respawn is started first, then one wait of `WTFT_RESPAWN_SETTLE_MS`,
+  then each is judged. A child slower than that to fail is counted as running: on a loaded host
+  node's own start can take longer than 1 s, so the suite sets a wait sized as a hang guard.
 - **A harness a respawn handed off to is left running,** with the line `Left running: PID n —
   harness …; a respawn handed its session to it`. Every other harness found only through its
   root pid file is stopped.

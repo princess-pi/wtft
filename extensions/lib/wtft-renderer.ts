@@ -136,19 +136,32 @@ export function parseInterval(val: string): IntervalConfig {
 	return { size: 1, unit: "h", type: "time" };
 }
 
+const ZONED_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
+
+/** null for a zone Intl does not know. */
+function zonedFormatter(tz: string): Intl.DateTimeFormat | null {
+	if (ZONED_FORMATTERS.has(tz)) return ZONED_FORMATTERS.get(tz)!;
+	let formatter: Intl.DateTimeFormat | null = null;
+	try {
+		formatter = new Intl.DateTimeFormat("en-US", {
+			timeZone: tz, year: "numeric", month: "numeric", day: "numeric",
+			hour: "numeric", minute: "numeric", second: "numeric", hour12: false
+		});
+	} catch {}
+	ZONED_FORMATTERS.set(tz, formatter);
+	return formatter;
+}
+
 export function getZonedParts(timestamp: number, tz?: string) {
 	const d = new Date(timestamp);
-	if (!tz) {
+	const formatter = tz ? zonedFormatter(tz) : null;
+	if (!formatter) {
 		return {
 			year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(),
 			hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds()
 		};
 	}
 	try {
-		const formatter = new Intl.DateTimeFormat("en-US", {
-			timeZone: tz, year: "numeric", month: "numeric", day: "numeric",
-			hour: "numeric", minute: "numeric", second: "numeric", hour12: false
-		});
 		const parts = formatter.formatToParts(d);
 		const partMap: Record<string, string> = {};
 		for (const p of parts) partMap[p.type] = p.value;

@@ -23,6 +23,7 @@ import {
 } from "./lib/wtft-shared.js";
 import { readConfig, writeConfig, hasConfig } from "@princess-pi/libs/config";
 import wtftManifest from "../docs/manifests/wtft-cmd.json" with { type: "json" };
+import { loadUserPricing } from "./lib/wtft-pricing-config.js";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { chartLines, chartUnit } from "./lib/chart-call.js";
@@ -317,6 +318,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		_wtftCtx = ctx;
 		_widgetHidden = false;
+		loadUserPricing(undefined, (line) => ctx.ui.notify(line, "warning"));
 		// Spawn daemon for this session to keep wtft-tag file warm for CLI use.
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (sessionFile) {
@@ -417,7 +419,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (showVersion) {
 				try {
-					ctx.ui.notify(renderWtftVersion(wtftManifest, import.meta.url), "info");
+					ctx.ui.notify(renderWtftVersion(wtftManifest, import.meta.url, "/wtft"), "info");
 				} catch (err) {
 					ctx.ui.notify(`\u26A0\uFE0F Failed to load WTFT command manifest: ${err}`, "error");
 				}

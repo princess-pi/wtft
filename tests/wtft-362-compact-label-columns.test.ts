@@ -56,6 +56,16 @@ console.log("\nValues under $1 and under 1k keep their digits");
 	check(row.includes("$0.25") && row.includes("0.13"), `a $0.25 total and a $0.13 delta keep their cents: ${JSON.stringify(row)}`);
 }
 
+console.log("\nA column that shows cents anywhere shows them everywhere, $1.00 included");
+{
+	const mixed = [ix(day + HOUR, 100, 389_400_000), ix(day + 2 * HOUR, 0.8, 389_400_000), ix(day + 3 * HOUR, 0.997, 389_400_000), ix(day + 4 * HOUR, 0.91, 389_400_000)];
+	const fields = (hhmm: string) => labels(rowAt(mixed, 100, hhmm)).trim().split(/\s+/);
+	const rows = ["01:00", "02:00", "03:00", "04:00"].map(fields);
+	check(rows.every(r => !r[2].includes(".")), `fixture precondition: compacted, so the totals over $1 are whole dollars: ${JSON.stringify(rows.map(r => r[2]))}`);
+	check(rows.every(r => /\.\d\d$/.test(r[1])), `every delta keeps its cents, $100 and $1 too: ${JSON.stringify(rows.map(r => r[1]))}`);
+	check(rows[2][1].endsWith("1.00"), `$0.997 reads 1.00, not 1: ${JSON.stringify(rows[2][1])}`);
+}
+
 console.log("\nRounding is to the nearest whole unit");
 {
 	const half = [ix(day + 3 * HOUR, 1, 588_998), ix(day + 4 * HOUR, 1, 1)];

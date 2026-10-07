@@ -306,6 +306,14 @@ function surgeRejection(surge: unknown): string | null {
 
 export type PricingRejection = { key: string; reason: string };
 
+const BUILT_IN_PRICING: Record<string, ModelPricing> = structuredClone(MODEL_PRICING);
+
+/** Drops every user entry applied so far, restoring the built-in table. */
+export function resetUserPricing(): void {
+	for (const id of Object.keys(MODEL_PRICING)) if (!(id in BUILT_IN_PRICING)) delete MODEL_PRICING[id];
+	Object.assign(MODEL_PRICING, structuredClone(BUILT_IN_PRICING));
+}
+
 /**
  * Pure merge — reading the pricing file from disk lives in
  * wtft-pricing-config.ts so this module stays fs-free.

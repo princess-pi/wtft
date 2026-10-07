@@ -53,8 +53,13 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 - **Install** — plain node/npm with bun absent from PATH (the real node binary
   is resolved and verified not to be bun, since this suite itself runs under
   bun and `process.execPath` would lie).
+- **Environment** — install and run see only `PATH` (a directory holding `node`
+  and `npm` links, then `/usr/bin:/bin`), the real `HOME`, the suite's private
+  `TMPDIR`, and one fresh `XDG_STATE_HOME` for the whole suite, so the installed
+  daemon's log, reap log, spawn ledger and daemon roster stay off the host. Each
+  installed run also gets its own fresh `XDG_CONFIG_HOME` and `COLUMNS=250`.
 - **Run** — `wtft --version`, `wtft-daemon --help`, and a synthesized
-  Claude-Code-shaped session rendered through `wtft -s <fixture> --cost`
+  session rendered through `wtft -s <fixture> --cost --no-emoji --pad 0`
   (parse → interaction → rendered cost, not just argument handling).
 
 ## Disposition of the third decision-3 guard

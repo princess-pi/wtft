@@ -17,6 +17,7 @@ import { fakeProcessTable } from "./lib/fake-process-table.ts";
 import { piHeader, piTurn } from "./lib/golden-corpus.ts";
 import { pollUntil } from "./lib/poll.ts";
 import { isolateTmpdir, trackSandbox } from "./lib/sandbox.ts";
+import { skip } from "./lib/skips.ts";
 
 const NOW = 1_800_000_000_000;
 
@@ -38,8 +39,12 @@ describe("decideActive", () => {
 			roster("/r/203.json", "other", [["/t/recycled.jsonl", 900_000], ["/t/vanished.jsonl", null]]),
 			roster("/r/204.json", "gone", []),
 			roster("/r/205.json", "daemon", [["/t/live-but-quiet.jsonl", 900_000]]),
+			roster("/r/206.json", "other", [["/t/recycled-but-recent.jsonl", 1_000]]),
 		], NOW);
-		assert.deepStrictEqual(active, [{ path: "/t/recent.jsonl", mtime: NOW - 119_999 }]);
+		assert.deepStrictEqual(active, [
+			{ path: "/t/recent.jsonl", mtime: NOW - 119_999 },
+			{ path: "/t/recycled-but-recent.jsonl", mtime: NOW - 1_000 },
+		]);
 		assert.deepStrictEqual(prune, ["/r/202.json", "/r/203.json", "/r/204.json"]);
 	});
 
@@ -111,6 +116,11 @@ describe("the roster on disk", () => {
 		const own = path.join(rosterDir(), `${process.pid}.json`);
 		assert.deepStrictEqual(JSON.parse(fs.readFileSync(own, "utf8")), { v: 1, pid: process.pid, tags: [live, quiet].sort() });
 
+		const writeRosterText = (pid: number, doc: unknown): string => {
+			const file = path.join(rosterDir(), `${pid}.json`);
+			fs.writeFileSync(file, JSON.stringify(doc));
+			return file;
+		};
 		const writeRoster = (pid: number, tags: string[]): string => {
 			const file = path.join(rosterDir(), `${pid}.json`);
 			fs.writeFileSync(file, JSON.stringify({ v: 1, pid, tags }));
@@ -120,6 +130,17 @@ describe("the roster on disk", () => {
 		const longStopped = writeRoster(4_000_002, [tag("dead.jsonl", 600_000)]);
 		const garbage = path.join(rosterDir(), "4000003.json");
 		fs.writeFileSync(garbage, "not json");
+		const malformed = [
+			writeRosterText(4_000_004, { v: 2, pid: 4_000_004, tags: [] }),
+			writeRosterText(4_000_005, { v: 1, pid: 4_000_099, tags: [] }),
+			writeRosterText(4_000_006, { v: 1, pid: 4_000_006, tags: "not a list" }),
+		];
+		const deadTmp = path.join(rosterDir(), "4000007.json.tmp");
+		fs.writeFileSync(deadTmp, "{");
+		const liveTmp = path.join(rosterDir(), `${process.pid}.json.tmp`);
+		fs.writeFileSync(liveTmp, "{");
+		const stray = path.join(rosterDir(), "notes.txt");
+		fs.writeFileSync(stray, "kept");
 
 		const found = activeTagFiles(Date.now());
 		assert.deepStrictEqual(found.map(f => f.path).sort(), [live, path.join(tmp, "tags", "last-minute.jsonl")].sort());
@@ -127,6 +148,42 @@ describe("the roster on disk", () => {
 		assert.ok(fs.existsSync(justStopped), "a stopped daemon's roster stays while its last turns are in the window");
 		assert.ok(!fs.existsSync(longStopped), "a stopped daemon's quiet roster is deleted");
 		assert.ok(!fs.existsSync(garbage), "an unreadable roster is deleted");
+		for (const f of malformed) assert.ok(!fs.existsSync(f), `a roster with the wrong version, pid or tags is deleted: ${path.basename(f)}`);
+		assert.ok(!fs.existsSync(deadTmp), "a stopped daemon's half-written roster is deleted");
+		assert.ok(fs.existsSync(liveTmp), "a live daemon's half-written roster stays");
+		assert.ok(fs.existsSync(stray), "a file that is not a roster is left alone");
+		assert.strictEqual(fs.statSync(rosterDir()).mode & 0o777, 0o700, "the roster directory is private");
+	});
+});
+
+describe("a roster that cannot be deleted", () => {
+	it("still returns the active tags", () => {
+		const tmp = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-442-ro-")));
+		const saved = process.env.XDG_STATE_HOME;
+		process.env.XDG_STATE_HOME = path.join(tmp, "state");
+		const table = fakeProcessTable();
+		const restore = useProcessTable(table);
+		const dir = rosterDir();
+		try {
+			const live = path.join(tmp, "live.jsonl");
+			fs.writeFileSync(live, "{}\n");
+			fs.mkdirSync(dir, { recursive: true });
+			table.daemon(4_100_001, ["--session", "/s.jsonl"]);
+			fs.writeFileSync(path.join(dir, "4100001.json"), JSON.stringify({ v: 1, pid: 4_100_001, tags: [live] }));
+			fs.writeFileSync(path.join(dir, "4100002.json"), "not json");
+			fs.chmodSync(dir, 0o500);
+			let unlinkRefused = false;
+			try { fs.unlinkSync(path.join(dir, "4100002.json")); } catch { unlinkRefused = true; }
+			if (!unlinkRefused) {
+				skip("this process can unlink inside a read-only directory (root), so a refused delete cannot be staged");
+				return;
+			}
+			assert.deepStrictEqual(activeTagFiles(Date.now()).map(f => f.path), [live]);
+		} finally {
+			fs.chmodSync(dir, 0o700);
+			restore();
+			if (saved === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = saved;
+		}
 	});
 });
 

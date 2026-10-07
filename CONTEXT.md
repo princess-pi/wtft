@@ -77,11 +77,14 @@ file.
 _Avoid_: lock file, session pid file
 
 **Daemon roster** (#442):
-`$XDG_STATE_HOME/wtft/roster/<pid>.json`, one per daemon process, naming every tag file that
-process writes; rewritten when that list changes (`extensions/lib/daemon-roster.ts`). Token Budget
-reads the roster directory to find tag files written in the last 2 minutes, instead of walking the
-session trees. A stopped daemon's roster stays while one of its tags is still in that window, then
-any reader, or the next daemon to start, deletes it. Not the **Lease** (per session: who serves
+`$XDG_STATE_HOME/wtft/roster/<pid>.json`, one per daemon process, naming the tag file of every
+session that process serves (`extensions/lib/daemon-roster.ts`). It is rewritten when that list
+changes or the file has gone; an empty list removes it, so a harness serving nothing has none.
+Token Budget reads the roster directory to find tag files written in the last 2 minutes, instead
+of walking the session trees. A stopped daemon's roster (its pid gone, or reused by another
+program) stays while one of its tags is still in that window; then Token Budget's next read, or
+the next daemon start that claims its lease or root, deletes it. A roster that cannot be read
+is deleted at the next read. Not the **Lease** (per session: who serves
 it) and not the harness hand-off `.served` (per harness root: what the next harness adopts).
 _Avoid_: active index, served list
 
@@ -382,7 +385,8 @@ _Avoid_: Thinking level (see above)
 **Token Budget** (the tool — not the `--thinking-budget` flag):
 The Pi extension (`extensions/token-budget.ts`, command `/budget`) that budgets **velocity** —
 tokens per minute (TPM) per model — to keep an agent from breaching its model subscription
-quota. It intercepts provider requests, sums each model's recent TPM from the wtft tag files,
+quota. It intercepts provider requests, sums each model's recent TPM from the wtft tag files
+that a **Daemon roster** lists,
 and when a TPM-limited model crosses its ceiling (`MODEL_QUOTA_REGISTRY`) it enforces a 40s
 synchronous cooldown rather than letting the provider hard-fail. Models that are
 concurrency-limited rather than TPM-limited (DeepSeek, short-code prefix `d`) redline the meter

@@ -57,7 +57,7 @@ Whole-file properties that are also read as state:
 
 | Property | Writer | Readers → what they take |
 |---|---|---|
-| size, mtime | every append; the in-place heartbeat write changes mtime with no append | `readHealthFacts` → both; `decideHealth` → size > 0 before a live holder's tail scan (its 2 s write grace was removed by spec-281); `token-budget` → active if mtime < 2 min; `reapAndWarn` → warns above 1 MB |
+| size, mtime | every append; the in-place heartbeat write changes mtime with no append | `readHealthFacts` → both; `decideHealth` → size > 0 before a live holder's tail scan (its 2 s write grace was removed by spec-281); Token Budget, since spec-442 only for a tag a daemon roster lists → active if mtime < 2 min; `reapAndWarn` → warns above 1 MB |
 | truncate to 0 | `initClassified` on rebuild, on a partial tail (cut to `lastLineStartByte` first), on a tag with no data record, and on a tag with no offset marker; a tag it cannot read or truncate there is fatal (spec-272) | `watchTagFile` → reseed when size < offset, or when the prefix sentinel changed after a regrowth |
 | heartbeat overwritten in place | `upsertHeartbeat` | `watchTagFile` → prefix sentinel unchanged |
 | file name version | `getCurrentVersionTagPath` names the writer's path; per-session `main` deletes older-version tags at start and 5 s later, a harness adoption never does | `tagProvisionalFromContent` → `stale-version`; `waitingForDataLine`; `getTagPath` → the other-version fallback; per-session `main` → on a newer tag, exit 0 when a live daemon other than itself holds the lease (not checked to be the newer version; off Linux any live pid), else serve; on an older tag, take over; `--list` → the printed version; `forceRebuildSession` → deletes every version |

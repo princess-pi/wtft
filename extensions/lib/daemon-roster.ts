@@ -32,7 +32,7 @@ export function publishRoster(tagPaths: string[]): void {
 	if (text === "") {
 		fs.rmSync(file, { force: true });
 	} else {
-		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 		const tmp = `${file}.tmp`;
 		fs.writeFileSync(tmp, text + "\n");
 		fs.renameSync(tmp, file);
@@ -99,7 +99,9 @@ function readRosters(dir: string, bad: string[]): RosterEntry[] {
 }
 
 function unlinkAll(files: string[]): void {
-	for (const f of files) fs.rmSync(f, { force: true });
+	for (const f of files) {
+		try { fs.rmSync(f, { force: true }); } catch { /* left for a reader allowed to delete it */ }
+	}
 }
 
 /** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster. Prunes as it reads. */

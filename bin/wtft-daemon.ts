@@ -1559,7 +1559,9 @@ Environment:
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)
   A *_MS value that is not all digits is ignored, and the default used.
-  WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).`);
+  WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).
+  XDG_STATE_HOME: where wtft/daemon.log, wtft/reap.log and the daemon roster wtft/roster/<pid>.json live
+                               (default ~/.local/state).`);
   const usage = (why: string): never => {
     process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
     process.exit(2);

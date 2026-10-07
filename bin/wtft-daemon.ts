@@ -1516,8 +1516,8 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per stopped lease holder with its own --session or --harness,
-                        claiming its lease when free; a harness holding no lease is stopped (unless a respawn
+                        and respawn one per stopped lease holder with its own --session or --harness, root
+                        environment and XDG_STATE_HOME, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
                         handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
                         outlives SIGKILL, or a respawn that neither runs nor hands off within
                         WTFT_RESPAWN_SETTLE_MS (one wait for all), makes it exit 1. Linux only (/proc)

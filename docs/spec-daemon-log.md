@@ -45,4 +45,5 @@ All three spawn a daemon with `daemonStdio`:
 - `daemonStdio` on a FIFO returns `"ignore"` at once; it creates the file 0600 in a 0700 directory and tightens an existing one;
 - `daemonLogPath` and `reapLogPath` under `XDG_STATE_HOME` and without it;
 - a spawn through `spawnWtftDaemon` and `restartDaemon` whose stand-in daemon writes to stderr:
-  the text is in the log. `--restart`'s respawn runs the real daemon, so it has no test here.
+  the text is in the log. `--restart`'s respawn runs the real daemon, so it has no test here; which log it lands in is
+  checked in `tests/wtft-274-restart.test.ts` C5.

@@ -4,7 +4,7 @@ Issue: https://github.com/princess-pi/wtft/issues/442. Direction A, chosen by Du
 Status: **Spec Approved** (Duppy, 2026-10-06).
 
 Module: `extensions/lib/daemon-roster.ts` · Seam: `decideActive`, tested in `tests/wtft-442-daemon-roster.test.ts`
-Also: `bin/wtft-daemon.ts` — publishes this process's roster. `extensions/token-budget.ts` — reads the roster in place of the walk.
+Also: `bin/wtft-daemon.ts` — publishes this process's roster; a `--restart` respawn keeps the stopped daemon's `XDG_STATE_HOME`, so its roster and log stay where they were. `extensions/token-budget.ts` — reads the roster in place of the walk.
 
 ## 1. Problem, measured
 
@@ -50,8 +50,8 @@ on its next publish. An empty list removes the file: a harness serving nothing h
 write warns on the daemon's stderr when its message differs from the last one warned, and the
 daemon keeps serving.
 
-**A dropped session leaves the roster.** When a harness stops serving a session, its roster
-stops listing that tag, so that session's last turns can stop counting toward Token Budget.
+**A dropped session can stop counting early.** A session a harness stops serving can stop counting
+toward Token Budget before its last turns leave the 2-minute window.
 
 **At exit, a daemon leaves its file.** Its turns from the last minute still count toward TPM, and
 the roster is how a reader finds them. Readers keep a stopped daemon's file while one of its tags
@@ -82,8 +82,7 @@ export function pruneRoster(now: number): void;                 // daemon start
 - It parses each `<pid>.json`, classifies its pid, and stats each listed tag. Entries of `tags`
   that are not strings are ignored. The reader trusts the writer's absolute paths.
 - A `<pid>.json` it cannot read as a roster, and a `<pid>.json.tmp` left by a write that died
-  mid-way, are entries with no tags, so they are deleted once their pid has stopped (§2c). A live
-  daemon's own next publish replaces them.
+  mid-way, are entries with no tags, so §2c decides them like any roster with no active tag.
 - It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
@@ -114,7 +113,8 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
   text. Which files are found does change: the ones daemon rosters list, not the walk's set. A
   daemon that publishes no roster under the reader's `$XDG_STATE_HOME` is not counted, and a listed
   tag outside the two trees now is.
-- The tag-file format, leases, the harness hand-off (`.served`) and every `wtft` CLI surface.
+- The tag-file format, leases and the harness hand-off (`.served`). A `--restart` respawn now keeps
+  the stopped daemon's `XDG_STATE_HOME` (`docs/spec-274-restart.md`).
   `wtft-daemon --help` gains its `XDG_STATE_HOME` and `TMPDIR` lines, and the daemon's stderr a
   roster-publish warning.
 - The 1 s default tick. Even with the roster, an idle widget re-renders every second; whether
@@ -140,7 +140,7 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | # | Check | How |
 |---|---|---|
 | V1 | `decideActive`'s three rows of §2c, plus duplicate paths, a null mtime and a tag outside the window | `tests/wtft-442-daemon-roster.test.ts`, in memory |
-| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, a stopped daemon's unreadable roster of each kind and its `.tmp`; keeps a live daemon's unreadable roster and its `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
+| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, a stopped daemon's unreadable roster of each kind and a stopped daemon's `.tmp`; keeps a live daemon's unreadable roster and a live daemon's `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's `turn_start` handler and its widget text |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |

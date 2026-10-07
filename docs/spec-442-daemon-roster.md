@@ -1,7 +1,7 @@
 # Spec 442 — the daemon roster: Token Budget asks the daemons, never walks the session trees
 
 Issue: https://github.com/princess-pi/wtft/issues/442. Direction A, chosen by Duppy on 2026-10-06.
-Status: **Spec Draft**: awaiting Duppy's approval before RED.
+Status: **Spec Approved** (Duppy, 2026-10-06).
 
 Module: `extensions/lib/daemon-roster.ts` · Seam: `decideActive`, tested in `tests/wtft-442-daemon-roster.test.ts`
 Also: `bin/wtft-daemon.ts` — publishes this process's roster. `extensions/token-budget.ts` — reads the roster in place of the walk.

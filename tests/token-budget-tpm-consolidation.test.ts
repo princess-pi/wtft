@@ -1,10 +1,4 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/**
- * Validates that the token-budget's TPM computation, now routed
- *   through wtft-shared's parseEntryToInteraction, produces the correct
- *   per-model token counts from session .jsonl files.
- */
-
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -175,15 +169,13 @@ for (const tc of TEST_LINES) {
 // ---
 // Cache schema stability check
 // ---
-console.log("\n2. Cache schema contract (unchanged from #68 baseline)");
+console.log("\n2. Cache schema contract");
 
-// The token-budget writes to /tmp/pi-rate-limit-stats.json with this schema:
 interface CacheSchema {
 	timestamp: number;
 	stats: Record<string, { tpm: number; lastActiveAge: number }>;
 }
 
-// Verify the schema shape matches what budget_meter.js expects to read
 const schemaCheck: CacheSchema = {
 	timestamp: 1750000000000,
 	stats: {
@@ -204,9 +196,8 @@ assert(
 );
 
 // ---
-// No entry.usage references in token-budget.ts (DoD #1)
 // ---
-console.log("\n3. No inline token parsing in token-budget.ts (DoD #1)");
+console.log("\n3. No inline token parsing in token-budget.ts");
 
 const source = fs.readFileSync(
 	path.resolve(import.meta.dirname, "..", "extensions", "token-budget.ts"),

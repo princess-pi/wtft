@@ -74,13 +74,20 @@ appears nowhere in this repo). The table records the code, not the misquote.
   trees. It counts input plus cache-read tokens only, and reuses a tag file's
   parse while its size and inode are unchanged (`docs/spec-451-tag-read-cache.md`).
 
-## Renamed, except where the name is an external contract
+## State files
 
-The `/tmp` state files keep their names — `pi-rate-limit-coffee.json` (the
-cooldown lockfile) and `pi-rate-limit-stats.json` (the stats cache). The
-lockfile is read by external tmux / status-bar integrations, so renaming it is a
-breaking change for *them*, not a rename of this tool. Treat "rate-limit" there
-as describing what the file holds, not the tool's name.
+Token Budget keeps two files in the wtft state directory (`wtftStateDir`,
+`docs/spec-daemon-log.md`):
+
+- `token-budget-stats.json` — the stats cache, `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }`,
+  shared by the Token Budgets that use that directory. It is used only while fresh, and only when
+  it is a regular file owned by the reading user.
+- `token-budget-cooldown.json` — the cooldown file, `{ startTime, endTime }` in epoch ms, written when a
+  cooldown starts, for tmux scripts outside wtft to read.
+
+Both are replaced by a rename, never written through whatever sits at their path. Neither is
+under `/tmp`. A file at the former `/tmp` names (`pi-rate-limit-stats.json`,
+`pi-rate-limit-coffee.json`) changes nothing.
 
 ## Not this tool
 

@@ -84,9 +84,7 @@ Token Budget reads the roster directory to find tag files written in the last 2 
 of walking the session trees. A stopped daemon's roster (its pid gone, or reused by another
 program) stays while one of its tags is still in that window; then Token Budget's next read, or the next
 start of any daemon that gets past its own lease or root claim, deletes it. A roster that cannot
-be read (bad JSON, or the wrong version, pid or tags) and a stopped daemon's half-written
-`<pid>.json.tmp` go the same way. A pid whose command line cannot be read (off Linux, every pid)
-counts as live, so its roster stays while that process lives. Not the **Lease** (per session: who serves
+be read is deleted at the next read. A pid whose command line cannot be read counts as live. Not the **Lease** (per session: who serves
 it) and not the harness hand-off `.served` (per harness root: what the next harness adopts).
 _Avoid_: active index, served list
 

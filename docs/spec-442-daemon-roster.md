@@ -8,8 +8,8 @@ Also: `bin/wtft-daemon.ts` — publishes this process's roster. `extensions/toke
 
 ## 1. Problem, measured
 
-Before this change, every Token Budget widget update (each tick, default 1 s, and each session
-start, turn start and turn end) and every provider request called `findActiveSessionFiles`, which `readdirSync`ed and `statSync`ed every entry under
+Before this change, every Token Budget widget update that draws and every provider request called
+`findActiveSessionFiles`, which `readdirSync`ed and `statSync`ed every entry under
 `~/.pi/agent/sessions` and the Claude projects root, looking for `wtft-tags/*.jsonl` files touched
 in the last 2 minutes. On Duppy's host on 2026-10-06 that walk covered about 72,000 entries and
 3,459 `wtft-tags/` directories. An idle Pi with only `pi/token-budget.js` loaded measured **20.6%**
@@ -50,19 +50,16 @@ on its next publish. An empty list removes the file: a harness serving nothing h
 write warns on the daemon's stderr when its message differs from the last one warned, and the
 daemon keeps serving.
 
-**A harness drops a session from its roster at once.** When a harness stops serving one session
-(its transcript was removed, it was never written within an hour, its lease went to another daemon
-or was removed by `--stop`, or it idled out), the next publish leaves that tag out. A session that
-moves is re-keyed and stays served, so its tag stays listed. Up to a minute of that session's last turns then stops counting toward
-TPM, unless the new holder lists the same tag. The cases are rare and none follows heavy spend, so
-the roster does not keep dropped tags.
+**A harness drops a session from its roster at once.** When a harness stops serving one session,
+for any reason, the next publish leaves that tag out. Up to a minute of that session's last turns
+then stops counting toward TPM, unless another daemon lists the same tag. The roster does not keep
+dropped tags.
 
 **At exit, a daemon leaves its file.** Its turns from the last minute still count toward TPM, and
 the roster is how a reader finds them. Readers keep a stopped daemon's file while one of its tags
-was written in the last 2 minutes, then delete it (§2c). A successor serving the same session
-writes the same tag, and its heartbeat keeps that tag's mtime fresh, so the stopped daemon's file
-stays as long as the successor does: one extra file per takeover, listing a path the successor's
-roster also lists, deleted within 2 minutes of the successor stopping. A daemon start that gets past its lease or root claim runs the same prune, silently, so
+was written in the last 2 minutes, then delete it (§2c). A successor at the same tagger version serving
+the same session writes the same tag, which keeps the stopped daemon's file while that tag stays
+active; a later read deletes it once the tag goes quiet. A daemon start that gets past its lease or root claim runs the same prune, silently, so
 files from crashed daemons stay bounded even when no Token Budget runs.
 
 ### 2b. Interface (`extensions/lib/daemon-roster.ts`)
@@ -105,10 +102,8 @@ export function pruneRoster(now: number): void;                 // daemon start
 | holder `gone` or `other`, with no active tag | pruned |
 | unreadable, not JSON, `v` not 1, the file name's pid not the content's, or `tags` not a list | deleted by the adapter, never seen by `decideActive` |
 
-`classifyPid` reads `unverified` for a live pid whose command line cannot be read, which off Linux
-is every live pid, and `daemon` or `harness` for a pid reused by another daemon. A roster in either
-case is kept for as long as that process lives; the reused-by-a-daemon case is overwritten by that
-daemon's own first publish.
+`classifyPid` reads `unverified` for a live pid whose command line cannot be read (always so off
+Linux), so a roster whose pid is held by such a process stays while that process lives.
 
 A candidate tag is **active** when its `mtimeMs` is not null and `now - mtimeMs < ACTIVE_WINDOW_MS`,
 the rule the deleted walk applied. A path listed by two rosters (a hand-over between daemons) is
@@ -127,26 +122,20 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 
 - TPM, session TPM, the cooldown, and the widget's text: the tag files found are read the same way,
   but the set found is not the walk's.
-  - **No longer found:** a tag written by a daemon on a build from before the roster (on Linux
-    `bin/install-wtft` stops it; a per-session one restarts at once, a harness on the next `wtft`;
-    off Linux older daemons are not detected); a tag written by a daemon whose `$XDG_STATE_HOME`
-    differs from the reader's; another-version tag beside a session, which a takeover leaves for up
-    to 5 s; any other `.jsonl` in a `wtft-tags/` directory; a session a harness has just dropped
-    (§2a).
-  - **Newly found:** a tag outside `~/.pi/agent/sessions` and the Claude projects root, such as a
-    per-session daemon's on a transcript elsewhere or a Pi harness under `WTFT_PI_SESSIONS_DIR`.
-  - The global stats cache, `/tmp/pi-rate-limit-stats.json`, is one fixed path shared by every
-    Token Budget on the host whatever its `$XDG_STATE_HOME`, so a reader can still see global TPM
-    another reader computed (#433).
+  - **No longer found:** any tag that no live or recently stopped daemon's roster lists. That
+    covers a daemon on a build from before the roster (until it is restarted), a daemon under
+    another `$XDG_STATE_HOME`, a session a harness has just dropped (§2a), and any other file in a
+    `wtft-tags/` directory, such as another tagger version's tag.
+  - **Newly found:** a tag outside `~/.pi/agent/sessions` and the Claude projects root.
+  - Global TPM can still come from the shared stats cache at a fixed `/tmp` path (#433).
 - The tag-file format, leases, the harness hand-off (`.served`) and every `wtft` CLI surface.
   `wtft-daemon --help` gains its `XDG_STATE_HOME` and `TMPDIR` lines, and the daemon's stderr a
   roster-publish warning.
 - The 1 s default tick. Even with the roster, an idle widget re-renders every second; whether
   that default should move is a separate question, not this issue.
-- Reading an *active* tag file in full on each uncached tick. A live per-session daemon rewrites
-  its heartbeat every 667 ms, and a displayed harness session's too, so their tags are always
-  active and are re-read even while idle: 2.2% of one core on a 354 KB tag, growing with tag size.
-  Filed as #451, not fixed here.
+- Reading an active tag file in full. A live per-session daemon heartbeats its tag every poll, so
+  that tag is always active and Token Budget re-reads it in full even while idle: 2.2% of one core
+  on a 354 KB tag on 2026-10-07. Filed as #451, not fixed here.
 
 ## 4. Roads not taken
 

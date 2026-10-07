@@ -260,16 +260,20 @@ export function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: stri
   const statsFile = stateFile("token-budget-stats.json");
   let cached: CacheSchema | null = null;
 
-  if (fs.existsSync(statsFile)) {
+  try {
+    const fd = fs.openSync(statsFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     try {
-      const content = fs.readFileSync(statsFile, "utf8");
-      const data = JSON.parse(content) as CacheSchema;
-      const freshWindow = Math.max(1000, tickMs);
-      if (now - data.timestamp < freshWindow) {
-        cached = data;
+      if (fs.fstatSync(fd).uid === process.getuid?.()) {
+        const data = JSON.parse(fs.readFileSync(fd, "utf8")) as CacheSchema;
+        const age = now - data.timestamp;
+        if (age >= 0 && age < Math.max(1000, tickMs)) {
+          cached = data;
+        }
       }
-    } catch (e) {
+    } finally {
+      fs.closeSync(fd);
     }
+  } catch (e) {
   }
 
   let baseStats: Record<string, { tpm: number; lastActiveAge: number }> = {};

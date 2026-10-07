@@ -175,7 +175,7 @@ for (const tc of TEST_LINES) {
 // ---
 // Cache schema stability check
 // ---
-console.log("\n2. Cache schema contract (unchanged from #68 baseline)");
+console.log("\n2. Cache schema contract");
 
 interface CacheSchema {
 	timestamp: number;
@@ -203,9 +203,8 @@ assert(
 );
 
 // ---
-// No entry.usage references in token-budget.ts (DoD #1)
 // ---
-console.log("\n3. No inline token parsing in token-budget.ts (DoD #1)");
+console.log("\n3. No inline token parsing in token-budget.ts");
 
 const source = fs.readFileSync(
 	path.resolve(import.meta.dirname, "..", "extensions", "token-budget.ts"),

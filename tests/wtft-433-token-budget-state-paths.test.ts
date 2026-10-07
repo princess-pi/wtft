@@ -35,6 +35,29 @@ describe("the stats cache", () => {
 		assert.deepStrictEqual(stats.zz, { tpm: 4321, lastActiveAge: 7, sessionTpm: 0 });
 	});
 
+	it("is not read through a symlink", () => {
+		const real = path.join(tmp, "elsewhere.json");
+		fs.writeFileSync(real, JSON.stringify({ timestamp: Date.now(), stats: { zz: { tpm: 4321, lastActiveAge: 7 } } }));
+		const file = path.join(tmp, "state", "wtft", "token-budget-stats.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.symlinkSync(real, file);
+		assert.strictEqual(JSON.parse(fs.readFileSync(file, "utf8")).stats.zz.tpm, 4321);
+
+		const stats = getOrUpdateStats([], null, 1000);
+
+		assert.strictEqual(stats.zz, undefined);
+	});
+
+	it("is not read when its timestamp is in the future", () => {
+		const file = path.join(tmp, "state", "wtft", "token-budget-stats.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify({ timestamp: Date.now() + 3_600_000, stats: { zz: { tpm: 4321, lastActiveAge: 7 } } }));
+
+		const stats = getOrUpdateStats([], null, 1000);
+
+		assert.strictEqual(stats.zz, undefined);
+	});
+
 	it("is written there, creating the directory", () => {
 		const file = path.join(tmp, "state", "wtft", "token-budget-stats.json");
 		assert.strictEqual(fs.existsSync(path.join(tmp, "state")), false);

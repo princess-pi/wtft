@@ -8,6 +8,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir, mkSandbox } from "./lib/sandbox";
+import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon.ts";
+import { getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
 
 isolateTmpdir("46-install-wtft");
 
@@ -769,7 +771,6 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		try {
 			out = execFileSync(INSTALLER, ["--json", "--dir", dir], {
 				encoding: "utf8", stdio: "pipe",
-				// Without TMPDIR the wtft-daemon --restart this install runs stops every daemon leased in /tmp — the host's own.
 				env: {
 					PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":"),
 					TMPDIR: mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-tmp-")),
@@ -1116,8 +1117,15 @@ if (!fs.existsSync("/proc/self/stat")) {
 	// Not a lease holder, so --restart cannot reach it: the failure path. It must
 	// outlive four builds on a slow runner; the finally kills it.
 	const bystander = spawn("bash", ["-c", 'exec -a "$0" sleep 600', bundle], { stdio: "ignore" });
+	// A daemon from neither bin/ nor --dir, leased in the same TMPDIR: install-wtft does not count it.
+	const unrelatedSession = path.join(mkSandbox(path.join(os.tmpdir(), "46-restart-unrelated-")), "u.jsonl");
+	fs.writeFileSync(unrelatedSession, "");
+	const unrelated = spawn(process.execPath, [standInDaemonArgs("setInterval(() => {}, 1000);")[0], "--session", unrelatedSession], { stdio: "ignore" });
+	const unrelatedLease = getDaemonPidPath(unrelatedSession);
 	const respawned: number[] = [];
 	try {
+		check(awaitStandIn(unrelated.pid!), "V11 precondition: the unrelated stand-in reads as a daemon");
+		fs.writeFileSync(unrelatedLease, String(unrelated.pid));
 		pause(1.1);
 		const now = new Date();
 		fs.utimesSync(bundle, now, now);
@@ -1127,13 +1135,15 @@ if (!fs.existsSync("/proc/self/stat")) {
 		const doc = docOf(out);
 		check(code === 0 && doc?.daemons?.older === 2, "V11c: both processes on the older build are counted", JSON.stringify(doc?.daemons));
 		check(!alive(daemon.pid!), "V11d: the lease-holding daemon was stopped");
-		const lease = path.join(process.env.TMPDIR!, fs.readdirSync(process.env.TMPDIR!).find(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid")) ?? "none");
+		const lease = path.join(process.env.TMPDIR!, fs.readdirSync(process.env.TMPDIR!).find(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid") && f !== path.basename(unrelatedLease)) ?? "none");
 		const leaseHolder = () => Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
 		const holder = leaseHolder();
 		if (holder > 0) respawned.push(holder);
 		check(holder > 0 && holder !== daemon.pid && alive(holder), "V11e: a new daemon was started for its session", `lease=${lease} holder=${holder}`);
 		check(doc?.daemons?.restart === "failed" && doc?.daemons?.left === 1,
 			"V11f: the one --restart could not reach is still counted, and the restart reads failed", JSON.stringify(doc?.daemons));
+		check(alive(unrelated.pid!) && fs.readFileSync(unrelatedLease, "utf8").trim() === String(unrelated.pid),
+			"V11h: a daemon install-wtft did not count keeps its pid and its lease");
 		// run() drops stderr on exit 0, and the failure line is on stderr.
 		const human = spawnSync(INSTALLER, ["--dir", dir], { encoding: "utf8", env: { ...process.env, HOME: mkSandbox(path.join(os.tmpdir(), "46-restart-home-")), PATH: [nodeDir, BUN_DIR, "/usr/bin", "/bin"].join(":") } });
 		if (leaseHolder() > 0) respawned.push(leaseHolder());
@@ -1142,6 +1152,7 @@ if (!fs.existsSync("/proc/self/stat")) {
 	} finally {
 		daemon.kill("SIGKILL");
 		bystander.kill("SIGKILL");
+		unrelated.kill("SIGKILL");
 		for (const pid of respawned) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
 	}
 }

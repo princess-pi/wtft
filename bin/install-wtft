@@ -6,9 +6,9 @@
 #                                    move any config file still at the old
 #                                    princess-pi-tools path into
 #                                    ~/.config/wtft/ (once — no fallback read),
-#                                    and run wtft-daemon --restart when a daemon
-#                                    runs an older build (a harness then starts
-#                                    again on the next wtft)
+#                                    and run wtft-daemon --restart for the log
+#                                    parser daemons it counts on an older build
+#                                    and only those
 #   install-wtft --check [--json]    report drift, write nothing (doctor mode)
 #   install-wtft --dir <dir>         install somewhere else (the test seam)
 #   install-wtft --json              machine-readable document, either mode
@@ -449,7 +449,9 @@ if [ "$STATUS" != build-failed ] && [ "$STATUS" != no-dir ] && [ "$STATUS" != dr
   OLDER_LIST="$(older_daemons)"
   OLDER_DAEMONS="$(printf '%s' "$OLDER_LIST" | grep -c . || true)"
   if [ "$MODE" = install ] && [ "$OLDER_DAEMONS" -gt 0 ]; then
-    "$DEST_DIR/wtft-daemon" --restart >&2
+    restart_args=(--restart)
+    for entry in $OLDER_LIST; do restart_args+=(--pid "${entry%%:*}"); done
+    "$DEST_DIR/wtft-daemon" "${restart_args[@]}" >&2
     # Left: the same processes still running, by pid and start time, so a daemon
     # --restart has just started is never counted.
     # A zombie was stopped.

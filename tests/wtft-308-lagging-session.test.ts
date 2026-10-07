@@ -346,7 +346,7 @@ console.log("\n6. Pending session + a daemon that dies during startup");
 		code = err.status ?? 1;
 	}
 	const clean = stripAnsi(out).trim();
-	// Exit 1 specifically, not merely nonzero (#513). #443 added exit 9 for a
+	// Exit 1 specifically, not merely nonzero (#513). duppypro/princess-pi-tools#443 added exit 9 for a
 	// PROVISIONAL read — a successful render whose total may still grow — and a
 	// `code !== 0` assertion accepts that as though it were the daemon-death
 	// failure this case is about. It cannot happen on this path today, because

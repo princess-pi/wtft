@@ -267,7 +267,7 @@ console.log("\n3. models[] and categories[] each sum to total");
 // ---
 // 4. The provisional path still yields one JSON object — and still exits 9.
 // ---
-// #443 spent an exit code on this bit for want of a structured surface, and the
+// duppypro/princess-pi-tools#443 spent an exit code on this bit for want of a structured surface, and the
 // issue is explicit that `--json` must not preempt it: the code KEEPS its
 // meaning and the field is added beside it. So both must be true at once, and a
 // consumer choosing either one gets the same answer.
@@ -296,7 +296,7 @@ console.log("\n4. Provisional: exit 9 AND a parseable object");
 	assert("  ...and the same sentence is on stderr, ANSI-wrapped, for the human",
 		r.stderr.includes(notice?.text ?? "\u0000"), r.stderr);
 	assert("  ...and none of it reached stdout", !r.stdout.includes("PROVISIONAL"), r.stdout);
-	// The #443 rule the rendered path is held to, held here too: the remedy
+	// The duppypro/princess-pi-tools#443 rule the rendered path is held to, held here too: the remedy
 	// never advises -F, because -F falls through to this same read path. Weak by
 	// construction — neither arm of describeProvisionalRemedy can emit `-F` — and
 	// kept because that is precisely the property a reword could destroy.

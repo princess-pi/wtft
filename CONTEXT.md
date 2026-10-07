@@ -473,7 +473,7 @@ Suppresses the rendering flags, but not the commands that run instead of a repor
 _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "JSON mode"
 names the usage mode)
 
-**Provisional (total)** (#443, a field since #26):
+**Provisional (total)** (duppypro/princess-pi-tools#443, a field since #26):
 A total that may still change: the tag file was written by another tagger build
 (`stale-version`) or read before the log parser daemon swept it — read every subagent
 transcript and wrote every subagent turn (`unswept`), the CLI's

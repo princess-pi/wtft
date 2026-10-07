@@ -42,7 +42,7 @@ function stripComments(text: string): string {
 	return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
-const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById)`;
+const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById|createTagReadCache)`;
 
 /** Routed means the file actually IMPORTS or CALLS the canonical collapse —
  *  never merely mentions it.
@@ -138,6 +138,10 @@ assert(
 assert(
 	`readClassifiedTagFile applies it on every read`,
 	/return dedupeClassifiedById\(interactions\)/.test(libText),
+);
+assert(
+	`createTagReadCache parses through classifiedInteractionsFromContent`,
+	/\bclassifiedInteractionsFromContent\(/.test(stripComments(fs.readFileSync(path.join(repoRoot, "extensions", "lib", "tag-read-cache.ts"), "utf8"))),
 );
 
 console.log("");

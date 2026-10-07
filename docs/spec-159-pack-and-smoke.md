@@ -46,14 +46,13 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
   `bun install`) has uncommitted changes. The gitignored bundles it rebuilds are not
   guarded.
 - **Pack** — `npm pack`, with bun on PATH for `prepare`; then assert those tracked
-  files are unchanged. One left changed fails the run and is restored with `git
-  checkout`.
+  files are unchanged.
 - **Allowlist** — the tarball holds exactly `package.json`'s `files` entries plus
   npm's mandatory `package.json`/`LICENSE`/`README.md`, each of those present, and
   every `bin` target is among them.
 - **Install** — plain node/npm with bun absent from PATH. node is the first
-  `node` on the suite's own PATH whose real path is named `node` (bun puts a
-  `node` shim ahead of it), and `npm` must sit beside it. No login shell, so no
+  `node` on the suite's own PATH whose real path is named `node`, and `npm` must
+  sit beside it. No login shell, so no
   profile is read.
 - **Environment** — install and run see only `PATH` (a directory holding `node`
   and `npm` links, then `/usr/bin:/bin`), the real `HOME`, the suite's private
@@ -66,9 +65,9 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
   (the precondition), and with walk-up off the render is still cumulative with
   `$4.50`.
 - **Run** — `wtft --version`'s first line is `wtft <package.json version>`, `wtft-daemon
-  --help` exits 0, and a synthesized Pi-shaped session rendered through
+  --help` exits 0, and a synthesized session rendered through
   `wtft -s <fixture> --cost --no-emoji --pad 0` shows the deterministic `$4.50`
-  with no error banner on stdout or stderr (parse → interaction → rendered cost,
+  with no `❌` line on stdout or stderr (parse → interaction → rendered cost,
   not just argument handling).
 
 ## Disposition of the third decision-3 guard

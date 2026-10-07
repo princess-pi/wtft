@@ -90,7 +90,7 @@ const preExistingDirt = gitStatusLines(REBUILD_TOUCHED);
 
 if (preExistingDirt.length > 0) {
 	console.log(`${RED}FAIL${RESET} pre-flight: ${REBUILD_TOUCHED.join(", ")} already has uncommitted changes`);
-	console.log(`       npm pack runs prepare, which can rewrite them, and this suite restores them with git checkout.`);
+	console.log(`       npm pack runs prepare, which can rewrite them.`);
 	for (const l of preExistingDirt) console.log(`       ${l}`);
 	failed++;
 	console.log(`\nResults: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
@@ -146,7 +146,7 @@ try {
 
 	check("every package.json bin target is in the tarball", () => {
 		const missing = Object.values(PKG.bin as Record<string, string>).map((t) => t.replace(/^\.\//, "")).filter((t) => !tarballEntries.has(t));
-		assert.deepStrictEqual(missing, [], `bin targets missing from tarball: ${missing.join(", ")}`);
+		assert.deepStrictEqual(missing, [], `bin targets absent from tarball: ${missing.join(", ")}`);
 	});
 
 	// ---
@@ -159,7 +159,7 @@ try {
 	}) ?? "";
 	const npmPath = path.join(path.dirname(nodePath), "npm");
 
-	check("resolved node is real node, not bun, with npm beside it", () => {
+	check("resolved node's real path is named node, with npm beside it", () => {
 		const v = execFileSync(nodePath, ["--version"], { encoding: "utf8" });
 		assert.ok(/^v\d+\.\d+\.\d+/.test(v.trim()), `unexpected node --version: ${v}`);
 		assert.strictEqual(path.basename(fs.realpathSync(nodePath)), "node");
@@ -254,7 +254,7 @@ try {
 		mkTemp("wtft-xdg-"),
 	);
 
-	check("wtft -s <fixture> renders the deterministic $4.50 cost (exit 0, no error banner on stdout or stderr)", () => {
+	check("wtft -s <fixture> shows the deterministic $4.50 cost (exit 0, no ❌ or System Error line on stdout or stderr)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
 		assert.ok(!/❌|System Error/.test(renderResult.stdout + renderResult.stderr), `error banner in output:\n${renderResult.stdout}${renderResult.stderr}`);
 		// $4.50 is the deterministic total (1M in × $3/M + 100K out × $15/M) and is
@@ -268,8 +268,8 @@ try {
 	fs.writeFileSync(path.join(consumerParent, ".wtft", "config.json"), JSON.stringify({ mode: "bucket" }));
 	const walked = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"), true);
 	const planted = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"));
-	check("fixture precondition: with config walk-up on, the planted config drops the cumulative key from a render that still exits 0 with $4.50", () => {
-		assert.ok(renderResult.stdout.includes("earlier bins"), `cumulative key missing from the plain render:\n${renderResult.stdout}`);
+	check("fixture precondition: with config walk-up on, the render loses the cumulative key and still exits 0 with $4.50", () => {
+		assert.ok(renderResult.stdout.includes("earlier bins"), `cumulative key absent from the plain render:\n${renderResult.stdout}`);
 		assert.strictEqual(walked.status, 0, `exit ${walked.status}: ${walked.stderr}`);
 		assert.ok(walked.stdout.includes("$4.50") && !walked.stdout.includes("earlier bins"), `the planted config did not reach a walking-up run:\n${walked.stdout}`);
 	});

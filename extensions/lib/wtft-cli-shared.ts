@@ -362,8 +362,7 @@ export interface WtftManifest {
 
 /**
  * The CLI hands over a manifest the bundler inlined — a published `bin/wtft.mjs`
- * has no package.json/manifest beside it. The path form stays because the Pi
- * extension still reads the repo copy from `process.cwd()`.
+ * has no package.json/manifest beside it.
  */
 export type ManifestSource = string | WtftManifest;
 
@@ -376,7 +375,7 @@ function loadManifest(src: ManifestSource): WtftManifest {
 export function renderWtftHelp(src: ManifestSource, invokedAs: string): string {
 	const manifest = loadManifest(src);
 
-	let text = `\x1b[1m\x1b[36m${manifest.name}\x1b[0m - ${manifest.tagline}\n\n`;
+	let text = `\x1b[1m\x1b[36m${invokedAs}\x1b[0m - ${manifest.tagline}\n\n`;
 	text += `${manifest.description}\n\n`;
 
 	text += `\x1b[1mUsage:\x1b[0m\n`;
@@ -438,10 +437,10 @@ export async function renderWtftWhy(src: ManifestSource, invokedAs: string): Pro
 // `typeof` keeps the source path from throwing a ReferenceError.
 declare const __WTFT_BUILD_VERSION__: string | undefined;
 
-export function renderWtftVersion(src: ManifestSource, moduleUrl: string): string {
+export function renderWtftVersion(src: ManifestSource, moduleUrl: string, invokedAs: string): string {
 	const manifest = loadManifest(src);
 	const injected = typeof __WTFT_BUILD_VERSION__ === "string" ? __WTFT_BUILD_VERSION__ : "";
-	if (injected) return formatVersion(manifest.name, injected, moduleUrl);
+	if (injected) return formatVersion(invokedAs, injected, moduleUrl);
 
 	const pkgPath = path.join(path.dirname(fileURLToPath(moduleUrl)), "..", "package.json");
 	let semver: string;
@@ -451,5 +450,5 @@ export function renderWtftVersion(src: ManifestSource, moduleUrl: string): strin
 		// Do not fall back to a second copy of the version — say what is missing.
 		semver = `unknown (cannot read ${pkgPath}: ${(err as Error).message})`;
 	}
-	return formatVersion(manifest.name, semver, moduleUrl);
+	return formatVersion(invokedAs, semver, moduleUrl);
 }

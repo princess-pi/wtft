@@ -309,7 +309,7 @@
     },
     {
       "flags": "--by-model",
-      "desc": "Alias of --tokens, the same in every respect: the bar counts tokens, still split by category, and the per-model token and cost table is printed. Unpriced models (no registry entry and no legacy rate branch) are marked '?', and a legend names, per model, the fallback wtft would price it with. Extend the registry without a rebuild via ~/.config/wtft/pricing.json, which the CLI and the log parser daemon read and the Pi widget does not: under /wtft a model priced only there is still marked '?'."
+      "desc": "Alias of --tokens, the same in every respect: the bar counts tokens, still split by category, and the per-model token and cost table is printed. Unpriced models (no registry entry and no legacy rate branch) are marked '?', and a legend names, per model, the fallback wtft would price it with. Extend the registry without a rebuild via ~/.config/wtft/pricing.json: the CLI reads it on every run, and the log parser daemon and the Pi widget when they start, so a widget picks up an edit at its next Pi session."
     },
     {
       "flags": "--pad <N>",

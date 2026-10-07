@@ -379,7 +379,7 @@ async function main() {
 		return;
 	}
 	if (opts.showVersion) {
-		console.log(renderWtftVersion(manifest, import.meta.url));
+		console.log(renderWtftVersion(manifest, import.meta.url, "wtft"));
 		return;
 	}
 

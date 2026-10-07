@@ -29,8 +29,8 @@ reported `stale-version` (§5); else the current-version path, which may not exi
 re-parses the transcript to price a tagged session. `getCurrentVersionTagPath()` is the
 writer's path: it follows a moved session to its sibling-project tag and never falls back to
 another version. The session picker locates on its own (current version, else the highest
-version number, no sibling lookup) and Token Budget reads every tag written in the last two
-minutes.
+version number, no sibling lookup) and Token Budget reads every tag a daemon roster lists that
+was written in the last two minutes (`docs/spec-442-daemon-roster.md`).
 
 ---
 

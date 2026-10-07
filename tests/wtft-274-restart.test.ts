@@ -117,6 +117,32 @@ try {
 		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
 	}
 
+	console.log("--- C5: a harness comes back with its own XDG_STATE_HOME, where it publishes its roster ---");
+	{
+		const own = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-274-state-own-")));
+		const caller = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-274-state-caller-")));
+		const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+		const fake = spawn(process.execPath, [script, "--harness", "claude"], { stdio: "ignore", env: { ...env, XDG_STATE_HOME: own }, detached: true });
+		children.push(fake);
+		check(awaitStandIn(fake.pid!) || classifyPid(fake.pid!) === "harness", "fixture precondition: the stand-in reads as a harness");
+		const session = path.join(root, "proj", "c5.jsonl");
+		fs.mkdirSync(path.dirname(session), { recursive: true });
+		fs.writeFileSync(session, "");
+		fs.writeFileSync(getDaemonPidPath(session), String(fake.pid));
+		const r = restart({ XDG_STATE_HOME: caller });
+		check(/Restarted: PID \d+ → fresh harness daemon \(claude\)/.test(r.stdout), `restarted:\n${r.stdout}`);
+		let holder = 0;
+		for (let i = 0; i < 50 && !(holder > 0 && holder !== fake.pid && classifyPid(holder) === "harness"); i++) {
+			sleep(100);
+			try { holder = Number(fs.readFileSync(rootPidFile, "utf8").trim()); } catch { holder = 0; }
+		}
+		let state = "";
+		try { state = fs.readFileSync(`/proc/${holder}/environ`, "utf8").split("\0").find(kv => kv.startsWith("XDG_STATE_HOME=")) ?? ""; } catch { /* unreadable */ }
+		check(state === `XDG_STATE_HOME=${own}`, `the respawn keeps the stopped harness's XDG_STATE_HOME, not the caller's (got ${state || "none"})`);
+		check(fs.existsSync(path.join(own, "wtft", "daemon.log")) && !fs.existsSync(path.join(caller, "wtft", "daemon.log")), "its stderr goes to the daemon.log under that XDG_STATE_HOME, not the caller's");
+		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("--- C4: a holder whose cwd was deleted is still respawned ---");
 	{
 		const gone = fs.mkdtempSync(path.join(TMP, "gone-"));

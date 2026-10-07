@@ -1,17 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 import { readClassifiedTagFile } from "./lib/wtft-daemon-lib.ts";
 import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
-import { projectsDir } from "./lib/harness/claude-code/discovery.ts";
+import { activeTagFiles, type FileInfo } from "./lib/daemon-roster.ts";
 
 
 // ---
 
-const HOME = os.homedir();
-const PI_DIR = path.join(HOME, ".pi", "agent", "sessions");
 const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
 // Safe model-specific limit ceilings (80% of actual subscription quota)
@@ -131,51 +128,6 @@ function getReadableSize(tokens: number): string {
     return `${Math.round(tokens / 1000)}K`;
   }
   return `${tokens}`;
-}
-
-interface FileInfo {
-  path: string;
-  mtime: number;
-}
-
-function findActiveSessionFiles(): FileInfo[] {
-  const activeFiles: FileInfo[] = [];
-  const now = Date.now();
-  const TWO_MINUTES_MS = 2 * 60 * 1000;
-
-  // Scan wtft-tags directories for classified tag files
-  function scanDir(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    try {
-      const files = fs.readdirSync(dir);
-      for (const f of files) {
-        const fullPath = path.join(dir, f);
-        const stat = fs.statSync(fullPath);
-        if (stat.isDirectory()) {
-          if (f === "wtft-tags") {
-            const tagFiles = fs.readdirSync(fullPath);
-            for (const tagFile of tagFiles) {
-              if (tagFile.endsWith(".jsonl")) {
-                const tagPath = path.join(fullPath, tagFile);
-                const tagStat = fs.statSync(tagPath);
-                if (now - tagStat.mtimeMs < TWO_MINUTES_MS) {
-                  activeFiles.push({ path: tagPath, mtime: tagStat.mtimeMs });
-                }
-              }
-            }
-          } else {
-            scanDir(fullPath);
-          }
-        }
-      }
-    } catch (err) {
-    }
-  }
-
-  scanDir(PI_DIR);
-  scanDir(projectsDir());
-
-  return activeFiles;
 }
 
 interface ModelStats {
@@ -377,7 +329,7 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
   const emojiDisabled = isEmojiDisabled();
 
   try {
-    const activeFiles = findActiveSessionFiles();
+    const activeFiles = activeTagFiles(Date.now());
     const hostingSessionId = ctx.sessionManager.getSessionId() || null;
     
     const context = ctx.sessionManager.buildSessionContext();
@@ -565,7 +517,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
   pi.on("before_provider_request", async (_event, ctx) => {
     try {
       const now = Date.now();
-      const activeFiles = findActiveSessionFiles();
+      const activeFiles = activeTagFiles(Date.now());
       const hostingSessionId = ctx.sessionManager.getSessionId() || null;
       
       const context = ctx.sessionManager.buildSessionContext();

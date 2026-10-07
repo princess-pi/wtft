@@ -11,7 +11,7 @@ import * as path from "node:path";
 
 export const DAEMON_LOG_MAX_BYTES = 1_000_000;
 
-function wtftStateDir(env: NodeJS.ProcessEnv): string {
+export function wtftStateDir(env: NodeJS.ProcessEnv = process.env): string {
 	return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "wtft");
 }
 

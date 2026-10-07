@@ -16,15 +16,16 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   handed off and exited 0 counts. Otherwise (a tag-file `--session`, a crash at start) it is a failed respawn: its claim on the lease is
   removed and the line reads `Stopped: PID n — the respawn for <session> failed`.
 - **A respawn runs in the stopped holder's cwd** (read from `/proc/<pid>/cwd`), with its root
-  environment, so a relative `--session` or root directory names what it named before.
+  environment and `XDG_STATE_HOME` (below), so a relative `--session` or root directory names what it named before.
 - **One wait for all.** Every respawn is started first, then one wait of `WTFT_RESPAWN_SETTLE_MS`,
   then each is judged. A child slower than that to fail is counted as running: on a loaded host
   node's own start can take longer than 1 s, so the suite sets a wait sized as a hang guard.
 - **A harness a respawn handed off to is left running,** with the line `Left running: PID n —
   harness …; a respawn handed its session to it`. Every other harness found only through its
   root pid file is stopped.
-- **A respawn runs with the holder's root environment:** a root variable the holder did not have
-  is removed, when its environment is readable. A cwd that no longer exists falls back to the
+- **A respawn runs with the holder's root environment and `XDG_STATE_HOME`** (where it publishes
+  its daemon roster and its log): a variable the holder did not have is removed, when its environment is
+  readable. A cwd that no longer exists falls back to the
   caller's.
 - **E. A holder that refused the signal (EPERM) or outlived SIGKILL is left running with its
   lease or root pid file,** and the line says `Not stopped`.

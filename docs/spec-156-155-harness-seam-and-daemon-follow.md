@@ -373,7 +373,7 @@ thing the acceptance criterion forbids.
 
 **Test seams.** `WTFT_CLAUDE_PROJECTS_DIR` and `WTFT_PI_SESSIONS_DIR` redirect the built-in
 discoveries at fixture trees; `WTFT_CLAUDE_PROJECTS_DIR` also redirects the `claude -p`
-sub-agent discovery and the Token Budget scan (the Codex sketch uses `CODEX_SESSIONS_DIR`). Without them the
+sub-agent discovery, and redirected the Token Budget scan until spec-442 replaced it with the daemon roster (the Codex sketch uses `CODEX_SESSIONS_DIR`). Without them the
 union rule could only be tested against the real home directory.
 
 **Registry memoisation.** `getHarnesses()` and `getParseAdapters()` cache their arrays, since

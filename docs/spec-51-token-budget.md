@@ -69,7 +69,9 @@ appears nowhere in this repo). The table records the code, not the misquote.
   per-model TPM as a colored bar against that model's ceiling.
 - **Data source** — reads the wtft tag files under `wtft-tags/`, the same
   classified records the CLI and the session selector consume; the tag wire
-  format is documented in `docs/wtft-tag-format.md`.
+  format is documented in `docs/wtft-tag-format.md`. It finds them through the
+  daemon roster (`docs/spec-442-daemon-roster.md`), never by walking the session
+  trees. It counts input plus cache-read tokens only.
 
 ## Renamed, except where the name is an external contract
 

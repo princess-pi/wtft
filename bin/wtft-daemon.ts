@@ -13,6 +13,7 @@ import { classifyPid, holdsLease, isDaemonCmdline, isFixtureDaemon, pidAlive, pr
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
+import { publishRoster, pruneRoster } from "../extensions/lib/daemon-roster.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
   newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
@@ -61,6 +62,23 @@ const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
 let running = true;
 let harnessMode = false;
+
+let rosterWarned = "";
+function publishOwnRoster(tagPaths: string[]) {
+  try {
+    publishRoster(tagPaths);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    if (why !== rosterWarned) {
+      rosterWarned = why;
+      process.stderr.write(`[wtft-daemon] WARNING: could not publish the daemon roster: ${why}\n`);
+    }
+  }
+}
+
+function pruneRosters() {
+  try { pruneRoster(Date.now()); } catch { /* the next reader prunes */ }
+}
 
 
 // ---
@@ -1093,6 +1111,7 @@ function runHarness(which: string, focus: string) {
     stopHolderSync(live);
   }
   harnessMode = true;
+  pruneRosters();
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-daemon] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-daemon] harness root ${root}\n`);
@@ -1277,6 +1296,7 @@ function sweepIdleSlots() {
     emptySinceMs = 0;
   }
   persistHandOff();
+  publishOwnRoster([...registry.served.values()].map(record => record.state.tagPath));
 }
 
 let rootStatWarned = false;
@@ -1496,8 +1516,8 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         that hold no lease here; never a harness daemon, which stops once it has nothing
                         to serve or watch
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
-                        and respawn one per stopped lease holder with its own --session or --harness,
-                        claiming its lease when free; a harness holding no lease is stopped (unless a respawn
+                        and respawn one per stopped lease holder with its own --session or --harness, root
+                        environment and XDG_STATE_HOME, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
                         handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
                         outlives SIGKILL, or a respawn that neither runs nor hands off within
                         WTFT_RESPAWN_SETTLE_MS (one wait for all), makes it exit 1. Linux only (/proc)
@@ -1541,7 +1561,10 @@ Environment:
   WTFT_RESPAWN_SETTLE_MS       Milliseconds --restart waits before judging its respawns; one still starting
                                then counts as running (default 1000)
   A *_MS value that is not all digits is ignored, and the default used.
-  WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).`);
+  WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).
+  XDG_STATE_HOME: where wtft/daemon.log, wtft/reap.log and the daemon roster wtft/roster/<pid>.json live
+                               (unset or empty: ~/.local/state).
+  TMPDIR: where leases and root pid files live (os.tmpdir()).`);
   const usage = (why: string): never => {
     process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
     process.exit(2);
@@ -1648,7 +1671,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   let stopRefused = false;
   let restartFailed = false;
   const spawnDetached = (args: string[], env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
-    const log = daemonStdio();
+    const log = daemonStdio(daemonLogPath(env));
     try {
       const child = spawn(process.execPath, args, { detached: true, stdio: log.stdio, env, cwd });
       child.unref();
@@ -1727,7 +1750,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (wasDaemon) {
         let environReadable = false;
         try { fs.readFileSync(`/proc/${pid}/environ`); environReadable = true; } catch { /* unreadable */ }
-        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
+        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR", "XDG_STATE_HOME"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
           else if (environReadable) delete restartEnv[key];
@@ -2026,6 +2049,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   resweep.unref();
 
   reapAndWarn();
+  pruneRosters();
 
   initClassified();
 
@@ -2038,6 +2062,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   const loop = () => {
     if (!running) return;
     if (serviceSession() === "stop") return;
+    publishOwnRoster([slot.state.tagPath]);
     setTimeout(loop, POLL_MS);
   };
 

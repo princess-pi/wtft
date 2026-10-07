@@ -14,6 +14,7 @@ shared log; stdout stays ignored.
 | Export | What it is |
 |---|---|
 | `DAEMON_LOG_MAX_BYTES` | 1,000,000 |
+| `wtftStateDir(env = process.env)` | The wtft state directory, under `$XDG_STATE_HOME`: the directory the two logs below live in, and the daemon roster's `roster/` subdirectory (`docs/spec-442-daemon-roster.md`) |
 | `daemonLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/daemon.log`, defaulting to `~/.local/state/wtft/daemon.log` |
 | `reapLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/reap.log`, defaulting to `~/.local/state/wtft/reap.log`: the reap warnings `reapAndWarn` appends and the CLI's `showReapWarnings` prints the last hour's lines of, truncating it when it printed any |
 | `rotateDaemonLog(file, maxBytes)` | When `file` holds `maxBytes` or more: copies it to `file.1` (replacing any earlier one), then truncates `file` to 0. The copy is set to 0600. Otherwise does nothing, and a path that is not a regular file (a symlink included: it is not followed) is never rotated. Rotates only while holding `file.lock` (created exclusively), and checks the size again under it. A lock older than a minute is removed and raced for again; two takers of the same stale lock can still both rotate, the second copying a short file over `.1`, a window accepted as rare. Never throws |
@@ -29,11 +30,12 @@ shared log; stdout stays ignored.
 
 ## 2. Spawn sites
 
-All three spawn a daemon with `daemonStdio()`:
+All three spawn a daemon with `daemonStdio`:
 - `spawnWtftDaemon` (`extensions/lib/wtft-cli-shared.ts`): the CLI and the Pi widget;
 - `restartDaemon` (`extensions/lib/wtft-daemon-lib.ts`), through the process-table port's
   `spawn` (`docs/spec-holder.md` §1): `--watch`'s `r`;
-- `wtft-daemon --restart`'s respawn (`bin/wtft-daemon.ts`).
+- `wtft-daemon --restart`'s respawn (`bin/wtft-daemon.ts`), on the daemon log under the
+  `XDG_STATE_HOME` it gives the respawn (`docs/spec-274-restart.md`).
 
 ## 3. Tests
 
@@ -43,4 +45,5 @@ All three spawn a daemon with `daemonStdio()`:
 - `daemonStdio` on a FIFO returns `"ignore"` at once; it creates the file 0600 in a 0700 directory and tightens an existing one;
 - `daemonLogPath` and `reapLogPath` under `XDG_STATE_HOME` and without it;
 - a spawn through `spawnWtftDaemon` and `restartDaemon` whose stand-in daemon writes to stderr:
-  the text is in the log. `--restart`'s respawn runs the real daemon, so it has no test here.
+  the text is in the log. `--restart`'s respawn runs the real daemon, so it has no test here; which log it lands in is
+  checked in `tests/wtft-274-restart.test.ts` C5.

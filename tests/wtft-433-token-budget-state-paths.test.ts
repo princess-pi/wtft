@@ -3,6 +3,7 @@
  */
 
 import * as assert from "node:assert";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -46,6 +47,19 @@ describe("the stats cache", () => {
 		const stats = getOrUpdateStats([], null, 1000);
 
 		assert.strictEqual(stats.zz, undefined);
+		assert.strictEqual(JSON.parse(fs.readFileSync(real, "utf8")).stats.zz.tpm, 4321);
+		assert.ok(fs.lstatSync(file).isFile());
+	});
+
+	it("is skipped, without blocking, when a FIFO sits at its path", () => {
+		const file = path.join(tmp, "state", "wtft", "token-budget-stats.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		execFileSync("mkfifo", [file]);
+		assert.ok(fs.lstatSync(file).isFIFO());
+
+		const stats = getOrUpdateStats([], null, 1000);
+
+		assert.deepStrictEqual(stats, {});
 	});
 
 	it("is not read when its timestamp is in the future", () => {

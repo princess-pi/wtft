@@ -80,12 +80,13 @@ Token Budget keeps two files in the wtft state directory (`wtftStateDir`,
 `docs/spec-daemon-log.md`):
 
 - `token-budget-stats.json` — the stats cache, `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }`,
-  shared by the Token Budgets that use that directory. It is used only when it is a regular file
-  (not a symlink) owned by the reading user, with a timestamp no later than now.
+  shared by the Token Budgets that use that directory. It is used only while fresh, and only when
+  it is a regular file owned by the reading user.
 - `token-budget-cooldown.json` — the cooldown file, `{ startTime, endTime }` in epoch ms, written when a
   cooldown starts, for tmux scripts outside wtft to read.
 
-Neither is under `/tmp`. A file at the former `/tmp` names (`pi-rate-limit-stats.json`,
+Both are replaced by a rename, never written through whatever sits at their path. Neither is
+under `/tmp`. A file at the former `/tmp` names (`pi-rate-limit-stats.json`,
 `pi-rate-limit-coffee.json`) changes nothing.
 
 ## Not this tool

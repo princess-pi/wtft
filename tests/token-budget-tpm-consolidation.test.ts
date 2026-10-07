@@ -1,10 +1,4 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/**
- * Validates that the token-budget's TPM computation, now routed
- *   through wtft-shared's parseEntryToInteraction, produces the correct
- *   per-model token counts from session .jsonl files.
- */
-
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -182,7 +176,6 @@ interface CacheSchema {
 	stats: Record<string, { tpm: number; lastActiveAge: number }>;
 }
 
-// Verify the schema shape matches what budget_meter.js expects to read
 const schemaCheck: CacheSchema = {
 	timestamp: 1750000000000,
 	stats: {

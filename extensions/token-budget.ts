@@ -238,11 +238,16 @@ function stateFile(name: string): string {
   return path.join(wtftStateDir(), name);
 }
 
+function replaceStateFile(file: string, content: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content, "utf8");
+  fs.renameSync(tmp, file);
+}
+
 export function writeCooldownFile(now: number): void {
-  const file = stateFile("token-budget-cooldown.json");
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
+    replaceStateFile(stateFile("token-budget-cooldown.json"), JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }));
   } catch (e) {
   }
 }
@@ -261,9 +266,10 @@ export function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: stri
   let cached: CacheSchema | null = null;
 
   try {
-    const fd = fs.openSync(statsFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const fd = fs.openSync(statsFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     try {
-      if (fs.fstatSync(fd).uid === process.getuid?.()) {
+      const st = fs.fstatSync(fd);
+      if (st.isFile() && st.uid === process.getuid?.()) {
         const data = JSON.parse(fs.readFileSync(fd, "utf8")) as CacheSchema;
         const age = now - data.timestamp;
         if (age >= 0 && age < Math.max(1000, tickMs)) {
@@ -290,8 +296,7 @@ export function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: stri
         timestamp: now,
         stats: baseStats
       };
-      fs.mkdirSync(path.dirname(statsFile), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(statsFile, JSON.stringify(cacheData), "utf8");
+      replaceStateFile(statsFile, JSON.stringify(cacheData));
     } catch (e) {
     }
   }

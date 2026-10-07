@@ -47,7 +47,7 @@
     <p><strong>Domain:</strong> Quota Management, Proactive Rate Limiting & Cooldown Breaks</p>
 
     <h3>Overview</h3>
-    <p>The Token Budget extension prevents the agent from breaching model subscription quota limits (TPM - Tokens Per Minute). It runs transparently in the background, intercepting provider requests to check sliding-window usage metrics across every local agent session whose tag file a daemon roster lists and that was written in the last 2 minutes. When a safety threshold is crossed, it enforces a 40-second synchronous "coffee break" (cooldown) to let API quota windows reset safely, notifying the user and maintaining a lockfile for external status bar / tmux integration.</p>
+    <p>The Token Budget extension prevents the agent from breaching model subscription quota limits (TPM - Tokens Per Minute). It runs transparently in the background, intercepting provider requests to check sliding-window usage metrics across the local agent sessions listed in the daemon roster. When a safety threshold is crossed, it enforces a 40-second synchronous "coffee break" (cooldown) to let API quota windows reset safely, notifying the user and maintaining a lockfile for external status bar / tmux integration.</p>
 
     <h3>Specification & Mechanisms</h3>
     
@@ -121,7 +121,7 @@ for (const interaction of interactions) {
     <h3>Architectural Scope & Quota Isolation Boundaries</h3>
     <div style="background: var(--box-bg); padding: 15px; border-radius: 8px; border: 1px solid #404040; margin-bottom: 20px;">
         <p><strong>1. Single Host / Local User Limit:</strong></p>
-        <p>Because the Token Budget aggregates rolling TPM by reading the <code>wtft-tags/</code> tag files that local log parser daemons list in the daemon roster under the same <code>$XDG_STATE_HOME</code>, rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
+        <p>Because the Token Budget aggregates rolling TPM by reading the <code>wtft-tags/</code> tag files that local log parser daemons list in the daemon roster under the same <code>$XDG_STATE_HOME</code> (the global stats cache at a fixed <code>/tmp</code> path is the exception, <a href="https://github.com/princess-pi/wtft/issues/433">#433</a>), rate limits are only computed and tracked for active sessions running under the <strong>same user account on the same local host machine</strong>. There is no inter-host, inter-machine, or network-level tracking for other development machines or autonomous services sharing the same model API key.</p>
         
         <p><strong>2. Best Practices & Isolation Workarounds:</strong></p>
         <ul>

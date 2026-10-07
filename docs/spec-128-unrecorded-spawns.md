@@ -50,7 +50,8 @@ to start the scan, so `unrecorded` is `[]` without a look.
   other parent recorded cannot be excluded, and may be listed. The `--tokens` header then says so
   instead of "no spawn record names".
 - **One id in two project directories** is a moved session; only its newest copy by mtime is
-  classified — the copy every other reader prices — so an older copy is never listed in its place.
+  classified — the copy every other reader prices. When the newest copy cannot be read, an older
+  copy may be listed in its place (#369).
 
 ### The launch span
 
@@ -166,8 +167,9 @@ interface UnrecordedSpawn {
 
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none — or, for a session that ran
-  no command (the pending and no-data arms included), that there was no launch span to look in. A read error never sits behind
-  a `[]`: it fails the run. A harness that is disabled, or that does not implement
+  no command (the pending and no-data arms included), that there was no launch span to look in. A directory read error never sits
+  behind a `[]`: it fails the run. A transcript the scan cannot read is skipped (#369), so `[]` can
+  hide one. A harness that is disabled, or that does not implement
   `listSpawnCandidates`, is not looked in at all.
 - **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
   `SPAWNED` block, shown whenever the list is non-empty — whether or not a `SPAWNED` block prints.
@@ -347,7 +349,9 @@ Macroscope's High on PR #211 asked for a read failure to be caught and skipped. 
 went the other way, and further: `[]` must only ever mean "looked and found none", so every read
 error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned by L1–L5b in
 `tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document for an
-unreadable project directory and for an unreadable transcript.
+unreadable project directory and for an unreadable transcript. #369 (Duppy, 2026-09-28)
+superseded the transcript half: a transcript the scan cannot read is skipped, and L4/L5b now pin
+that.
 
 | Artifact | Claim | Contradicted by | Covered by a test? | Action |
 |---|---|---|---|---|

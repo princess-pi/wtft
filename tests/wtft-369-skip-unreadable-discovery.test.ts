@@ -82,10 +82,10 @@ console.log("\n=== claude -p discovery: the report ===\n");
 	fs.writeFileSync(parent,
 		JSON.stringify({ type: "session", version: 3, id: "parent-369", timestamp: new Date(T0).toISOString(), cwd: dir }) + "\n"
 		+ turnLine("parent-turn", T0, 100, `cd ${childCwd} && claude -p "go"`));
-	const { result: settled, stderr: tagStderr } = captureStderr(() => {
-		try { tagForCli(parent); return true; } catch { return false; }
+	const { result: tagLog, stderr: tagStderr } = captureStderr(() => {
+		try { return JSON.stringify(tagForCli(parent).log); } catch { return null; }
 	});
-	check(settled, "the tagger sweeps the parent: the unreadable transcript does not hold its tag provisional");
+	check(tagLog !== null, "the tagger sweeps the parent: the unreadable transcript does not hold its tag provisional");
 	const r = spawnSync(process.execPath, [cliWithoutDaemon(), "-s", parent, "--json"], {
 		cwd: dir, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"],
 		env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: projects, COLUMNS: "250" },
@@ -95,7 +95,8 @@ console.log("\n=== claude -p discovery: the report ===\n");
 	check(r.status === 0, `wtft -s <parent> --json exits 0 (got ${r.status})`, r.stderr);
 	check(doc?.total?.outputTokens === 800,
 		`the report folds the child: 100 output tokens of its own plus the child's 700 (got ${doc?.total?.outputTokens})`);
-	check(!(tagStderr + r.stderr).includes(STRAY), "neither the tagger nor the report names the unreadable transcript", tagStderr + r.stderr);
+	const said = [tagLog ?? "", tagStderr, r.stdout, r.stderr].join("\n");
+	check(!said.includes(STRAY), "neither the tagger's log or stderr nor the report's stdout or stderr names the unreadable transcript", said.slice(0, 400));
 }
 
 console.log("\n=== Pi sibling scan ===\n");

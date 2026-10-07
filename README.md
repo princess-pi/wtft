@@ -205,9 +205,9 @@ retired in `@4`.
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
   10 s), `--list`/`--cleanup`/`--restart`/`--stop` unable to run `wtft-daemon` (within 10 s,
-  unless the call includes `--restart`), a read error other than a missing path in a harness's session
-  tree (Claude Code's projects directory today) while `--json` or `--tokens` lists unrecorded spawns (so `unrecorded: []`
-  never hides one), or an unhandled exception. The reason is on stderr; under
+  unless the call includes `--restart`), a directory in a harness's session tree (Claude Code's projects
+  directory today) that could not be read, other than one that is gone, while `--json` or `--tokens` lists unrecorded
+  spawns (a transcript there that cannot be read is skipped), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.
 - **9** — provisional ([duppypro/princess-pi-tools#443](https://github.com/duppypro/princess-pi-tools/issues/443)):
   the report was produced in full, but a number in it may still change.

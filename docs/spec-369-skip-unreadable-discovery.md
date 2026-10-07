@@ -27,13 +27,17 @@ Discovery folds only files it can read that match its pattern.
 - **A file discovery cannot read is a non-match.** In `claude -p` discovery, the Pi sibling scan,
   and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
   does not match: no warning, no `unreadable`, no throw.
+- **What a skipped file costs.** A `claude -p` child or Pi sibling discovery cannot read is not
+  folded or listed, and nothing reports it: its cost is not in the total, and the report does not
+  say so. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
+  copy cannot be read.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.
 - **Unchanged:**
   - A directory discovery searches that is absent reads as "none here".
-  - A directory it finds but cannot list still warns and throws.
-  - The walk of a session's own `subagents/` directory still reports an entry it cannot stat:
-    every file it lists is this session's own cost, not another session's transcript.
+  - A directory it finds but cannot list still throws.
+  - The walk of a session's own `subagents/` directory is unchanged: every file it lists is this
+    session's own cost, not another session's transcript.
   - The session transcript's own read failure is still reported as `unreadable` /
     `sessionUnreadable`.
   - A discovered file that then fails to parse is still reported by the parse.
@@ -47,12 +51,12 @@ file):
   unrelated transcript. `discoverClaudeSubAgentSessionFiles` returns exactly the child and writes
   nothing to stderr.
 - **Claude, the report (the issue's Closer):** the tagger sweeps the parent, and
-  `wtft -s <parent> --json` folds the child, exits 0, and its stderr does not name the unreadable
-  file.
+  `wtft -s <parent> --json` folds the child and exits 0. Neither the tagger's log, its stderr, nor
+  the report's stdout or stderr names the unreadable file.
 - **Pi siblings:** a session directory holds one readable child sibling and one mode-000 sibling.
   `discoverSubagentSessionFiles` returns the child with `unreadable: null`, and writes nothing to
   stderr.
 - **Unrecorded-spawn scan:** `tests/wtft-128-unrecorded-spawns.test.ts` L4/L5b — a mode-000
-  transcript, and a symlink to it, are not listed and do not throw; `--json` exits 0 and names
-  neither.
+  transcript, and a symlink to it, are not listed and do not throw; `--json` exits 0, lists
+  neither, and names neither path on stdout or stderr.
 - **Precondition, each case:** opening the mode-000 file fails.

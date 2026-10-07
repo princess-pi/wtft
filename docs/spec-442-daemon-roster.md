@@ -118,7 +118,7 @@ hides another daemon's spend, and pruning still runs. A roster error is:
   published yet);
 - a `<pid>.json` that cannot be read as a roster while its pid is classed `daemon` or `harness`;
 - a tag a `daemon` or `harness` roster lists that cannot be stat'd for a reason other than its
-  being gone, or cannot be read.
+  being gone, or, while written in the last 2 minutes, cannot be read.
 
 A pid classed `unverified` raises none: off Linux every pid is, and a reused pid would raise an
 error that never clears. Each error is one line a person or an agent can start debugging from:

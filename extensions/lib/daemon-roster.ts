@@ -67,7 +67,7 @@ function why(err: unknown): string {
 	return (err as NodeJS.ErrnoException).code ?? (err as Error).message;
 }
 
-function readRosters(dir: string, errors: string[]): RosterEntry[] {
+function readRosters(dir: string, errors: string[], now: number): RosterEntry[] {
 	let names: string[];
 	try {
 		names = fs.readdirSync(dir);
@@ -102,7 +102,7 @@ function readRosters(dir: string, errors: string[]): RosterEntry[] {
 				if (daemon && (err as NodeJS.ErrnoException).code !== "ENOENT") errors.push(rosterError(`stat ${t} listed by daemon pid ${pid} (${why(err)})`, "that session's spend"));
 				return { path: t, mtimeMs: null };
 			}
-			if (daemon) {
+			if (daemon && now - mtimeMs < ACTIVE_WINDOW_MS) {
 				try {
 					fs.accessSync(t, fs.constants.R_OK);
 				} catch (err) {
@@ -124,7 +124,7 @@ function unlinkAll(files: string[]): void {
 /** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster, and the roster errors met reading them. Prunes as it reads. */
 export function activeTagFiles(now: number): { files: FileInfo[]; errors: string[] } {
 	const errors: string[] = [];
-	const { active, prune } = decideActive(readRosters(rosterDir(), errors), now);
+	const { active, prune } = decideActive(readRosters(rosterDir(), errors, now), now);
 	unlinkAll(prune);
 	return { files: active, errors };
 }

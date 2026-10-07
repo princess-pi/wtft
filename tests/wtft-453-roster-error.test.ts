@@ -107,6 +107,9 @@ describe("roster errors", () => {
 		const { errors } = activeTagFiles(Date.now());
 		assert.strictEqual(errors.length, 1, JSON.stringify(errors));
 		assert.ok(errors[0].includes(unreadable) && errors[0].includes("EACCES"), `names the tag and the code: ${errors[0]}`);
+		const old = (Date.now() - 600_000) / 1000;
+		fs.utimesSync(unreadable, old, old);
+		assert.deepStrictEqual(activeTagFiles(Date.now()).errors, [], "a quiet tag that could not count anyway raises none");
 	});
 
 	it("a daemon's tag that cannot be stat'd is an error; a vanished one is not", () => {

@@ -138,8 +138,6 @@ an error notice on each provider request; the meters still show the spend it cou
   roster-publish warning.
 - The 1 s default tick. Even with the roster, an idle widget re-renders every second; whether
   that default should move is a separate question, not this issue.
-- Reading active tag files in full. A live per-session daemon's heartbeat keeps its tag active
-  while idle, so Token Budget keeps re-reading it (#451).
 
 ## 4. Roads not taken
 

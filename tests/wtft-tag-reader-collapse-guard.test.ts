@@ -24,8 +24,6 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
  *  the reason it is exempt. An entry here is a claim someone can check, which is the
  *  whole difference between this and the prose rule it replaces. */
 const ALLOWED: Record<string, string> = {
-	// extensions/token-budget.ts routed through readClassifiedTagFile in #17
-	// (filed as #454) — no longer needs an allowlist entry.
 	// Tag WRITER: reads its own markers and the tail it resumes from, through
 	// tag-log; never sums a cost from a tag.
 	"bin/wtft-daemon.ts": "tag WRITER; reads its own markers through tag-log, sums nothing",
@@ -42,7 +40,7 @@ function stripComments(text: string): string {
 	return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
-const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById)`;
+const CANONICAL = String.raw`(?:readClassifiedTagFile|readTagFileWithVerdict|seedClassifiedTagFile|classifiedInteractionsFromContent|dedupeClassifiedById|createTagReadCache)`;
 
 /** Routed means the file actually IMPORTS or CALLS the canonical collapse —
  *  never merely mentions it.
@@ -138,6 +136,10 @@ assert(
 assert(
 	`readClassifiedTagFile applies it on every read`,
 	/return dedupeClassifiedById\(interactions\)/.test(libText),
+);
+assert(
+	`createTagReadCache parses through classifiedInteractionsFromContent`,
+	/\bclassifiedInteractionsFromContent\(/.test(stripComments(fs.readFileSync(path.join(repoRoot, "extensions", "lib", "tag-read-cache.ts"), "utf8"))),
 );
 
 console.log("");

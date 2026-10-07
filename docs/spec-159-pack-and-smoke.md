@@ -43,11 +43,11 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 
 - **Pre-flight** — refuses to run if a tracked file `prepare` can rewrite
   (`extensions/lib/harness/builtins.generated.ts`, and `bun.lock` when it runs
-  `bun install`) has uncommitted changes. The gitignored bundles it rebuilds are not
-  guarded.
+  `bun install`) has uncommitted changes, or is not tracked. The gitignored files it
+  writes are not guarded.
 - **Pack** — `npm pack`, with bun on PATH for `prepare`; then assert those tracked
   files are unchanged.
-- **Allowlist** — the tarball holds exactly `package.json`'s `files` entries plus
+- **Allowlist** — `files` lists exactly the four bundles above, the tarball holds exactly those entries plus
   npm's mandatory `package.json`/`LICENSE`/`README.md`, each of those present, and
   every `bin` target is among them.
 - **Install** — plain node/npm with bun absent from PATH. node is the first
@@ -67,7 +67,7 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 - **Run** — `wtft --version`'s first line is `wtft <package.json version>`, `wtft-daemon
   --help` exits 0, and a synthesized session rendered through
   `wtft -s <fixture> --cost --no-emoji --pad 0` shows the deterministic `$4.50`
-  with no `❌` line on stdout or stderr (parse → interaction → rendered cost,
+  with no `❌` or `System Error` line on stdout or stderr (parse → interaction → rendered cost,
   not just argument handling).
 
 ## Disposition of the third decision-3 guard

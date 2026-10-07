@@ -4,8 +4,7 @@
 // ---
 // WHY NOTHING IS `external` (#36)
 //
-// These two files are the WHOLE published artifact: `files` in package.json
-// ships `bin/*.mjs` and nothing else. Anything left external is therefore a
+// Anything left external is a
 // bare import that survives into the emitted ESM, and node resolves those by
 // walking up from the FILE — so the artifact only runs from a directory that
 // happens to have the dependency in an ancestor `node_modules`.

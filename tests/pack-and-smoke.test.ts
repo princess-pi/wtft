@@ -70,12 +70,6 @@ function killLingeringDaemons() {
 	} catch {}
 }
 
-// ---
-// Guard: `npm pack` fires `prepare`, which re-runs `bun build.ts` and rewrites
-// bin/*.mjs. That is a no-op only if the tree was clean going in. Detect the
-// pre-existing state and refuse to touch it, rather than clobbering WIP.
-// ---
-
 const REBUILD_TOUCHED = ["extensions/lib/harness/builtins.generated.ts", "bun.lock"];
 
 function gitStatusLines(paths: string[]): string[] {
@@ -86,6 +80,11 @@ function gitStatusLines(paths: string[]): string[] {
 	return out.split("\n").map((l) => l.trimEnd()).filter(Boolean);
 }
 
+const untracked = REBUILD_TOUCHED.filter((f) => spawnSync("git", ["ls-files", "--error-unmatch", "--", f], { cwd: REPO_ROOT }).status !== 0);
+if (untracked.length > 0) {
+	console.log(`${RED}FAIL${RESET} pre-flight: not tracked, so their status says nothing: ${untracked.join(", ")}`);
+	process.exit(1);
+}
 const preExistingDirt = gitStatusLines(REBUILD_TOUCHED);
 
 if (preExistingDirt.length > 0) {
@@ -140,6 +139,10 @@ try {
 	const filesEntries: string[] = PKG.files;
 	const mandatory = ["package.json", "LICENSE", "README.md"];
 
+	check("package.json's files lists exactly the two CLI bundles and the two Pi-extension bundles", () => {
+		assert.deepStrictEqual([...filesEntries].sort(), ["bin/wtft-daemon.mjs", "bin/wtft.mjs", "pi/token-budget.js", "pi/wtft.js"]);
+	});
+
 	check("the tarball holds exactly package.json's files entries plus package.json, LICENSE and README.md", () => {
 		assert.deepStrictEqual([...tarballEntries].sort(), [...filesEntries, ...mandatory].sort());
 	});
@@ -179,6 +182,9 @@ try {
 	const consumerParent = mkTemp("wtft-consumer-");
 	const consumerDir = path.join(consumerParent, "consumer");
 	fs.mkdirSync(consumerDir);
+	check("the consumer directory, the installed runs' cwd, is outside the checkout", () => {
+		assert.ok(path.relative(fs.realpathSync(REPO_ROOT), fs.realpathSync(consumerDir)).startsWith(".."), `${consumerDir} is under ${REPO_ROOT}`);
+	});
 	fs.writeFileSync(
 		path.join(consumerDir, "package.json"),
 		JSON.stringify({ name: "pack-and-smoke-consumer", version: "0.0.0", private: true }),

@@ -1561,7 +1561,8 @@ Environment:
   A *_MS value that is not all digits is ignored, and the default used.
   WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).
   XDG_STATE_HOME: where wtft/daemon.log, wtft/reap.log and the daemon roster wtft/roster/<pid>.json live
-                               (default ~/.local/state).`);
+                               (unset or empty: ~/.local/state).
+  TMPDIR: where leases and harness root pid files live (os.tmpdir()).`);
   const usage = (why: string): never => {
     process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
     process.exit(2);

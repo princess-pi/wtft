@@ -166,10 +166,11 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "-W" || arg === "--watch") {
 			showWatch = true;
 		} else if (arg === "--pad") {
-			const val = parseInt(argv[++i], 10);
+			const val = parseInt(argv[i + 1], 10);
 			if (!isNaN(val) && val >= 0) {
 				pad = val;
 				hasPad = true;
+				i++;
 			}
 		} else if (arg === "--json") {
 			json = true;
@@ -182,9 +183,10 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--stop") {
 			daemonStop = argv[++i];
 		} else if (arg === "--thinking-budget") {
-			const val = parseInt(argv[++i], 10);
+			const val = parseInt(argv[i + 1], 10);
 			if (!isNaN(val) && val > 0) {
 				thinkingBudget = val;
+				i++;
 			}
 
 		} else if (arg === "-i" || arg === "--interval") {

@@ -237,7 +237,7 @@
     },
     {
       "flags": "--tz, --timezone <zone>",
-      "desc": "Display timezone, an IANA name (e.g. America/New_York, Europe/London, Asia/Tokyo). Default: the wtft config's timezone; else system local in the CLI, and America/Los_Angeles in the Pi widget. A separate value starting with - is ignored; --tz=<value> and --timezone=<value> take the text after the =."
+      "desc": "Display timezone, an IANA name (e.g. America/New_York, Europe/London, Asia/Tokyo). Default: the wtft config's timezone; else system local in the CLI, and America/Los_Angeles in the Pi widget. A separate value starting with - is ignored; --tz=<value> and --timezone=<value> take the text after the =. A zone the runtime does not know renders in system local time, in the widget too."
     },
     {
       "flags": "-c, --cumulative, -b, --bucket",
@@ -289,7 +289,7 @@
     },
     {
       "flags": "--thinking-budget <n>",
-      "desc": "Thinking token budget, a positive whole number, for utilization percentage display in --tokens output; any other value is ignored. CLI only; /wtft --tokens takes the budget from the thinking level last selected while Pi has been running, and shows no utilization while that level is off or before one is selected."
+      "desc": "Thinking token budget, a positive whole number, for utilization percentage display in --tokens output; any other value is ignored, and read as an argument of its own. CLI only; /wtft --tokens takes the budget from the thinking level last selected while Pi has been running, and shows no utilization while that level is off or before one is selected."
     },
     {
       "flags": "--json",
@@ -313,7 +313,7 @@
     },
     {
       "flags": "--pad <N>",
-      "desc": "Pad output with N spaces on each side (default: 1, max: floor(term/2)-1); a negative value or no number is ignored. The default makes CLI output width match the Pi widget. CLI only; the Pi widget ignores it."
+      "desc": "Pad output with N spaces on each side (default: 1, max: floor(term/2)-1); a negative value or no number is ignored, and the argument after --pad is then read as a flag of its own. The default makes CLI output width match the Pi widget. CLI only; the Pi widget ignores it."
     },
     {
       "flags": "--help, -h",

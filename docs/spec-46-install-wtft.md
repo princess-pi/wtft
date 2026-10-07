@@ -371,7 +371,7 @@ probe.
 | # | Seam | Verified by |
 |---|---|---|
 | **V1** | `--check --json` on an empty dir | exit `1`, `status: "drift"`, all **four** artifacts `missing`, and the directory still empty afterwards |
-| **V2** | install into an empty dir | exit `0`, two copies byte-identical to `bin/*.mjs` at mode `0755`, two symlinks with the right **relative** targets; `--check` then exits `0`, spawning fewer commands than half the host's processes (V2i) |
+| **V2** | install into an empty dir | exit `0`, two copies byte-identical to `bin/*.mjs` at mode `0755`, two symlinks with the right **relative** targets; `--check` then exits `0`, making fewer calls to the text utilities the walk once forked (`basename`, `dirname`, `sed`, `awk` and the like, shimmed and counted) than half the host's processes with a command line (V2i) |
 | **V3** | the installed command runs **when you type its name** | `<dir>/wtft --version` through its own shebang, on **every** `node` on the host, exits 0 and prints the version; `<dir>/wtft-daemon.mjs` sits beside it |
 | **V4** | shadow detection | a decoy `wtft` earlier on `PATH` → exit `2`, `shadow.found` names it, the decoy is **still there**, the install still happened, and our own copy winning is exit `0` / `shadow: null` / `onPath: true` |
 | **V5** | staleness | append a byte to the installed `wtft.mjs` → `--check` exits `1`, that payload `stale`, the untouched one still `ok`; `chmod 0644` → `not-executable`; a command symlink repointed at the other payload → `wrong-target` |

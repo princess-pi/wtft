@@ -1074,9 +1074,12 @@ const olderOnCloneBin = (): string[] => {
 	return fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
 		try {
 			const cwd = fs.readlinkSync(`/proc/${p}/cwd`);
-			const script = fs.readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0").map(a => path.resolve(cwd, a)).find(a =>
-				path.basename(a).startsWith("wtft-daemon") && fs.realpathSync(path.dirname(a)) === binReal);
-			if (!script) return false;
+			const argv = fs.readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0").filter(Boolean);
+			const runtime = ["node", "nodejs", "bun", "bun.exe"].includes(path.basename(argv[0] ?? ""));
+			const named = runtime ? argv.slice(1).find(a => !a.startsWith("-")) : argv[0];
+			if (!named || !path.basename(named).startsWith("wtft-daemon")) return false;
+			const script = path.resolve(cwd, named);
+			if (fs.realpathSync(path.dirname(script)) !== binReal) return false;
 			const ticks = Number(fs.readFileSync(`/proc/${p}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[19]);
 			return btime + Math.floor(ticks / hz) <= Math.floor(fs.statSync(script).mtimeMs / 1000);
 		} catch { return false; }

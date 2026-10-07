@@ -280,8 +280,8 @@ minutes before billing drops to 1. That instant follows windows that touch or
 overlap, including one that starts at 0 on the next UTC day when this one ends
 at 1440, and a weekend cutoff that falls inside the run. A lead that wraps past midnight asks whether the
 next UTC day bills that window. A user card whose `surge` cannot be walked
-keeps its rates and drops the schedule; `loadUserPricing` prints the key and
-the reason on stderr. A rate that is not a finite number stores nothing, and
+keeps its rates and drops the schedule; `loadUserPricing` reports the key and
+the reason: on stderr in the CLI and the daemon, as a Pi notification in the widget. A rate that is not a finite number stores nothing, and
 the same line names the key. Omitting `surge` keeps the built-in schedule.
 A new DeepSeek id that omits `surge` borrows its sibling's schedule after the
 whole file is applied, so key order does not choose the schedule. `surge: null`

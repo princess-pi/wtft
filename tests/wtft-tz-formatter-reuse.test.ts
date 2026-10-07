@@ -32,7 +32,7 @@ try {
 check(parts[0]!.hour === 1 && parts[0]!.day === 8, `fixture precondition: 08:30Z is 01:30 MST in Denver on Mar 8 (${JSON.stringify(parts[0])})`);
 check(parts[60]!.hour === 3, `the DST jump still lands: an hour later is 03:30 MDT (${JSON.stringify(parts[60])})`);
 check(parts[500]!.hour === 8, "a second timezone gets its own formatter");
-check(parts[502]!.minute === 30, "an unknown zone falls back to local time");
+check(parts[502]!.hour === new Date(at).getHours() && parts[502]!.minute === new Date(at).getMinutes(), "an unknown zone falls back to local time");
 check(built === 3, `500 Denver calls, one London and one unknown zone called twice try to build 3 formatters (built ${built})`);
 
 console.log(`\n${passed} passed, ${failed} failed`);

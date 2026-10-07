@@ -204,8 +204,8 @@ retired in `@4`.
   stop, a holder that could not be verified as a daemon, a lease another daemon claimed meanwhile, a lease that could not be read, a rebuild lease that
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within
-  10 s), `--list`/`--cleanup`/`--restart`/`--stop`
-  unable to run `wtft-daemon` within 10 s, a read error other than a missing path in a harness's session
+  10 s), `--list`/`--cleanup`/`--stop`
+  unable to run `wtft-daemon` within 10 s, `--restart` unable to run it at all, a read error other than a missing path in a harness's session
   tree (Claude Code's projects directory today) while `--json` or `--tokens` lists unrecorded spawns (so `unrecorded: []`
   never hides one), or an unhandled exception. The reason is on stderr; under
   `--json`, stdout carries nothing.

@@ -39,7 +39,7 @@ import {
 const TAG_SUFFIX = `.wtft-tag.v${TAGGER_VERSION}.jsonl`;
 const USAGE = `Usage: wtft-daemon --session <path> [--debug]
        wtft-daemon --harness <claude|pi> [--session <path>] [--debug]
-       wtft-daemon --list | --cleanup | --restart | --stop <session>  (one or more)`;
+       wtft-daemon --list | --cleanup | --restart [--pid <pid>]... | --stop <session>  (one or more)`;
 const POLL_MS = 667; // 90bpm throttle
 /** How long one slice of a harness's subagent scan runs before it yields to the event loop. */
 const HARNESS_SCAN_SLICE_MS = envMs("WTFT_HARNESS_SCAN_SLICE_MS", 25);
@@ -1493,6 +1493,7 @@ async function main() {
   let showCleanup = false;
   let showRestart = false;
   let stopSession: string | null = null;
+  const restartPids = new Set<number>();
   let harnessName = "";
   let sessionArg = "";
 
@@ -1521,6 +1522,9 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
                         outlives SIGKILL, or a respawn that neither runs nor hands off within
                         WTFT_RESPAWN_SETTLE_MS (one wait for all), makes it exit 1. Linux only (/proc)
+  --pid <pid>           With --restart, reach only the holder with that pid (repeatable); every other
+                        holder is handled as if --restart were not given. A pid holding no lease or
+                        root pid file here prints Not found and makes it exit 1
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
                         lease here, found by its own --session resolved against its cwd, gets SIGTERM
@@ -1545,10 +1549,11 @@ Exit codes:
   1  --session missing, or a tag file (without --harness); a harness root missing, its pid file unreadable,
      or neither claimable nor handed a session;
      --stop refused (EPERM) or its harness lease changed or could not be removed;
-     --restart left a holder running or a respawn neither ran nor handed off; a tag
+     --restart left a holder running, a respawn neither ran nor handed off, or a --pid
+     held no lease or root pid file here; a tag
      write that failed, or a tag it cannot read or truncate at start; an unhandled error
-  2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, or a --session
-     outside the harness root
+  2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, a --session
+     outside the harness root, or a --pid without --restart or that is not a whole number above 0
 
 Environment:
   WTFT_DAEMON_IDLE_MS          Milliseconds with no activity (a new turn, a subagent record written,
@@ -1588,6 +1593,10 @@ Environment:
       showCleanup = true;
     } else if (arg === "--restart") {
       showRestart = true;
+    } else if (arg === "--pid") {
+      const value = valueOf(arg, ++i);
+      if (!/^[1-9]\d*$/.test(value)) usage(`--pid needs a whole number above 0: ${value}`);
+      restartPids.add(Number(value));
     } else if (arg === "--stop") {
       if (stopSession !== null) usage("--stop takes one session");
       stopSession = valueOf(arg, ++i);
@@ -1600,6 +1609,8 @@ Environment:
       usage(`unknown argument: ${arg}`);
     }
   }
+  if (restartPids.size > 0 && !showRestart) usage("--pid needs --restart");
+  const restarting = (pid: number): boolean => showRestart && (restartPids.size === 0 || restartPids.has(pid));
 
 // --- Management commands (no session required) ---
 
@@ -1732,7 +1743,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       return "?";
     };
 
-    if (showRestart) {
+    if (restarting(pid)) {
       if (restarted.has(pid)) {
         // A holder that refused the stop or outlived it still serves this lease too.
         if (!keptRunning.has(pid)) unlinkIfNames(fullPath, pid);
@@ -1889,7 +1900,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         continue;
       }
       // --restart takes precedence: a harness it is about to stop is not listed.
-      if (showList && !(showRestart && proc.harness && [...harnessHolders.values()].includes(proc.pid))) {
+      if (showList && !(restarting(proc.pid) && proc.harness && [...harnessHolders.values()].includes(proc.pid))) {
         listedN++;
         const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
@@ -1907,7 +1918,8 @@ if (showList || showCleanup || showRestart || stopSession) {
     for (const pidFile of harnessPidFiles) {
       const fullPath = path.join(pidDir, pidFile);
       const pid = harnessHolders.get(pidFile) ?? NaN;
-      if (Number.isNaN(pid)) continue;
+      if (Number.isNaN(pid) || !restarting(pid)) continue;
+      restarted.add(pid);
       if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {
         // A harness left running above still serves its root.
         if (!keptRunning.has(pid)) unlinkIfNames(fullPath, pid);
@@ -1934,6 +1946,11 @@ if (showList || showCleanup || showRestart || stopSession) {
         : classifyPid(pid) === "unverified" ? `Removed root pid file: PID ${pid} — cannot be verified as a daemon here, so it is left running, harness ${pidFile}`
         : `Removed root pid file: PID ${pid} — no live daemon found, harness ${pidFile}`);
       restartedN++;
+    }
+    for (const pid of restartPids) {
+      if (restarted.has(pid)) continue;
+      console.log(`Not found: PID ${pid} — holds no lease or root pid file here`);
+      restartFailed = true;
     }
     console.log(`${restartedN} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);
   }

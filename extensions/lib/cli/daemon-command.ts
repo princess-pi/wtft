@@ -11,7 +11,7 @@ export function runDaemonCommand(opts: WtftCliOptions, daemonDir: string): void 
 		if (opts.daemonRestart) daemonArgs.push("--restart");
 		if (opts.daemonStop) daemonArgs.push("--stop", opts.daemonStop);
 		// An argument array, so a session path is never split by a shell.
-		const result = spawnSync(process.execPath, daemonArgs, { encoding: "utf8", timeout: 10000 });
+		const result = spawnSync(process.execPath, daemonArgs, { encoding: "utf8", timeout: opts.daemonRestart ? undefined : 10000 });
 		if (result.stdout) console.log(result.stdout.trim());
 		if (result.stderr) console.error(result.stderr.trim());
 		if (result.error) console.error(result.error.message);

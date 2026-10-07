@@ -198,6 +198,54 @@ try {
 		check(ms >= SETTLE_MS && ms < n * SETTLE_MS / 4, `one wait, not one per holder (${ms} ms for ${n})`);
 	}
 
+	console.log("--- P1: --restart --pid reaches only the named holder ---");
+	{
+		const holders = ["named", "other"].map(name => {
+			const session = path.join(root, "p1", `${name}.jsonl`);
+			fs.mkdirSync(path.dirname(session), { recursive: true });
+			fs.writeFileSync(session, "");
+			const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
+			const fake = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", env, detached: true });
+			children.push(fake);
+			check(awaitStandIn(fake.pid!), `fixture precondition: the ${name} stand-in reads as a daemon`);
+			const lease = getDaemonPidPath(session);
+			fs.writeFileSync(lease, String(fake.pid));
+			return { pid: fake.pid!, lease };
+		});
+		const [named, other] = holders;
+		const r = spawnSync("node", [DAEMON, "--restart", "--pid", String(named.pid), "--list"], { encoding: "utf8", env, timeout: 30_000 });
+		const respawn = Number(fs.existsSync(named.lease) ? fs.readFileSync(named.lease, "utf8").trim() : 0);
+		if (respawn > 0) try { process.kill(respawn, "SIGTERM"); } catch { /* gone */ }
+		check(!alive(named.pid), "the named holder was stopped");
+		check(new RegExp(`Restarted: PID ${named.pid} → fresh daemon`).test(r.stdout), `the named holder's line says it was restarted:\n${r.stdout}`);
+		check(alive(other.pid), "the other holder keeps running");
+		check(fs.readFileSync(other.lease, "utf8").trim() === String(other.pid), "the other holder keeps its lease");
+		check(new RegExp(`^PID ${other.pid} +RUNNING`, "m").test(r.stdout), "--list lists the other holder");
+		check(!new RegExp(`(Restarted|Stopped|Removed lease): PID ${other.pid}\\b`).test(r.stdout), "no restart line names the other holder");
+		check(r.status === 0, `nothing failed, so exit 0 (got ${r.status}): ${r.stderr}`);
+		try { process.kill(other.pid, "SIGKILL"); } catch { /* gone */ }
+		fs.rmSync(other.lease, { force: true });
+	}
+
+	console.log("--- P2: a --pid holding no lease or root pid file here is reported, and exits 1 ---");
+	{
+		const bystander = spawn("sleep", ["600"], { stdio: "ignore" });
+		children.push(bystander);
+		check(alive(bystander.pid!), "fixture precondition: the pid is live");
+		const r = spawnSync("node", [DAEMON, "--restart", "--pid", String(bystander.pid)], { encoding: "utf8", env, timeout: 30_000 });
+		check(new RegExp(`Not found: PID ${bystander.pid} — holds no lease or root pid file here`).test(r.stdout), `the line says it was not found:\n${r.stdout}`);
+		check(alive(bystander.pid!), "it is left running");
+		check(r.status === 1, `exit 1 (got ${r.status})`);
+	}
+
+	console.log("--- P3: --pid needs --restart and a whole number above 0 ---");
+	{
+		for (const args of [["--pid", "1"], ["--list", "--pid", "1"], ["--restart", "--pid", "0"], ["--restart", "--pid", "12x"], ["--restart", "--pid"]]) {
+			const r = spawnSync("node", [DAEMON, ...args], { encoding: "utf8", env, timeout: 30_000 });
+			check(r.status === 2 && /--pid needs/.test(r.stderr), `${args.join(" ")} is a --pid usage error, exit 2 (got ${r.status}: ${r.stderr.split("\n")[0]})`);
+		}
+	}
+
 	console.log("--- E: a holder that refuses the signal ---");
 	console.log("  ##SKIP## E needs a process of another uid; stopHolder's denied outcome is covered over a fake table in tests/wtft-297-holder.test.ts");
 } finally {

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { wtftStateDir } from "./daemon-log.ts";
-import { classifyPid, type HolderKind } from "./holder.ts";
+import { classifyPid, holdsLease, type HolderKind } from "./holder.ts";
 
 export const ACTIVE_WINDOW_MS = 120_000;
 
@@ -23,7 +23,7 @@ export function rosterDir(env: NodeJS.ProcessEnv = process.env): string {
 
 let published: string | null = null;
 
-/** Writes this process's roster when `tagPaths` differ from the last call; an empty list removes it. */
+/** Writes this process's roster listing `tagPaths`; an empty list removes it. */
 export function publishRoster(tagPaths: string[]): void {
 	const tags = [...new Set(tagPaths.map(p => path.resolve(p)))].sort();
 	const file = path.join(rosterDir(), `${process.pid}.json`);
@@ -46,8 +46,7 @@ export function decideActive(entries: RosterEntry[], now: number): { active: Fil
 	const seen = new Set<string>();
 	for (const entry of entries) {
 		const inWindow = entry.tags.filter((t): t is { path: string; mtimeMs: number } => t.mtimeMs !== null && now - t.mtimeMs < ACTIVE_WINDOW_MS);
-		const stopped = entry.holder === "gone" || entry.holder === "other";
-		if (stopped && inWindow.length === 0) {
+		if (!holdsLease(entry.holder) && inWindow.length === 0) {
 			prune.push(entry.file);
 			continue;
 		}
@@ -68,8 +67,7 @@ function mtimeOrNull(file: string): number | null {
 	}
 }
 
-/** Every roster file, read; one that cannot be read or does not match its name is pruned at once. */
-function readRosters(dir: string, bad: string[]): RosterEntry[] {
+function readRosters(dir: string): RosterEntry[] {
 	let names: string[];
 	try {
 		names = fs.readdirSync(dir);
@@ -89,8 +87,7 @@ function readRosters(dir: string, bad: string[]): RosterEntry[] {
 				if (doc?.v !== 1 || doc.pid !== pid || !Array.isArray(doc.tags)) throw new Error("not a roster");
 				tags = doc.tags.filter((t: unknown): t is string => typeof t === "string");
 			} catch {
-				bad.push(file);
-				continue;
+				tags = [];
 			}
 		}
 		entries.push({ file, holder: classifyPid(pid), tags: tags.map(t => ({ path: t, mtimeMs: mtimeOrNull(t) })) });
@@ -106,9 +103,8 @@ function unlinkAll(files: string[]): void {
 
 /** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster. Prunes as it reads. */
 export function activeTagFiles(now: number): FileInfo[] {
-	const bad: string[] = [];
-	const { active, prune } = decideActive(readRosters(rosterDir(), bad), now);
-	unlinkAll([...bad, ...prune]);
+	const { active, prune } = decideActive(readRosters(rosterDir()), now);
+	unlinkAll(prune);
 	return active;
 }
 

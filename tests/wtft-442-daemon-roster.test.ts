@@ -141,17 +141,20 @@ describe("the roster on disk", () => {
 		fs.writeFileSync(liveTmp, "{");
 		const stray = path.join(rosterDir(), "notes.txt");
 		fs.writeFileSync(stray, "kept");
+		table.daemon(4_000_008, ["--session", "/newer.jsonl"]);
+		const newerBuild = writeRosterText(4_000_008, { v: 2, pid: 4_000_008, tags: [] });
 
 		const found = activeTagFiles(Date.now());
 		assert.deepStrictEqual(found.map(f => f.path).sort(), [live, path.join(tmp, "tags", "last-minute.jsonl")].sort());
 		assert.ok(fs.existsSync(own), "a live daemon's roster stays");
 		assert.ok(fs.existsSync(justStopped), "a stopped daemon's roster stays while its last turns are in the window");
 		assert.ok(!fs.existsSync(longStopped), "a stopped daemon's quiet roster is deleted");
-		assert.ok(!fs.existsSync(garbage), "an unreadable roster is deleted");
-		for (const f of malformed) assert.ok(!fs.existsSync(f), `a roster with the wrong version, pid or tags is deleted: ${path.basename(f)}`);
+		assert.ok(!fs.existsSync(garbage), "a stopped daemon's unreadable roster is deleted");
+		for (const f of malformed) assert.ok(!fs.existsSync(f), `a stopped daemon's roster with the wrong version, pid or tags is deleted: ${path.basename(f)}`);
 		assert.ok(!fs.existsSync(deadTmp), "a stopped daemon's half-written roster is deleted");
 		assert.ok(fs.existsSync(liveTmp), "a live daemon's half-written roster stays");
 		assert.ok(fs.existsSync(stray), "a file that is not a roster is left alone");
+		assert.ok(fs.existsSync(newerBuild), "a live daemon's roster stays even when this reader cannot read it");
 		assert.strictEqual(fs.statSync(rosterDir()).mode & 0o777, 0o700, "the roster directory is private");
 	});
 });

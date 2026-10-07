@@ -83,8 +83,7 @@ changes or the file has gone; an empty list removes it, so a harness serving not
 Token Budget reads the roster directory to find tag files written in the last 2 minutes, instead
 of walking the session trees. A stopped daemon's roster (its pid gone, or reused by another
 program) stays while one of its tags is still in that window; then Token Budget's next read, or the next
-start of any daemon that gets past its own lease or root claim, deletes it. Readers also delete
-rosters they cannot read. Not the **Lease** (per session: who serves
+start of any daemon that gets past its own lease or root claim, deletes it. Not the **Lease** (per session: who serves
 it) and not the harness hand-off `.served` (per harness root: what the next harness adopts).
 _Avoid_: active index, served list
 

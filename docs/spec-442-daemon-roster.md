@@ -81,11 +81,10 @@ export function pruneRoster(now: number): void;                 // daemon start
   alone.
 - It parses each `<pid>.json`, classifies its pid, and stats each listed tag. Entries of `tags`
   that are not strings are ignored. The reader trusts the writer's absolute paths.
-- A `<pid>.json.tmp` left by a write that died mid-way is an entry with no tags, so it is deleted
-  once its pid has stopped (§2c) and kept while any process holds that pid and is not classed
-  `gone` or `other`.
-- It calls `decideActive`, deletes `prune` and every `<pid>.json` it could not read as a roster,
-  and returns `active`. A delete that fails is skipped: the read still answers, and a reader
+- A `<pid>.json` it cannot read as a roster, and a `<pid>.json.tmp` left by a write that died
+  mid-way, are entries with no tags, so they are deleted once their pid has stopped (§2c). A live
+  daemon's own next publish replaces them.
+- It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
 ### 2c. The decision (`decideActive`)
@@ -95,7 +94,6 @@ export function pruneRoster(now: number): void;                 // daemon start
 | holder `daemon`, `harness` or `unverified` | kept; its tags are candidates |
 | holder `gone` or `other` (stopped, or its pid reused by a program whose command line reads as not a daemon), with at least one active tag | kept; its tags are candidates |
 | holder `gone` or `other`, with no active tag | pruned |
-| unreadable, not JSON, `v` not 1, the file name's pid not the content's, or `tags` not a list | deleted by the adapter, never seen by `decideActive` |
 
 A candidate tag is **active** when its `mtimeMs` is not null and `now - mtimeMs < ACTIVE_WINDOW_MS`,
 the rule the deleted walk applied. A path listed by two rosters (a hand-over between daemons) is
@@ -131,7 +129,7 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 - **C. Recursive `fs.watch` in the extension:** near-zero idle cost, but it duplicates the watching
   the daemon already does, at one inotify watch per directory.
 - **Reuse the harness `.served` file:** it is the hand-off to the next harness, rename-claimed at
-  start, lives beside a hashed root file in `$TMPDIR` (whose listing is about 9 MB on this host), and
+  start, lives beside a hashed root file in `$TMPDIR`, and
   per-session daemons have none.
 - **Delete the roster at exit:** loses up to a minute of a just-stopped session's TPM, for example
   across every `bin/install-wtft` restart.
@@ -142,7 +140,7 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | # | Check | How |
 |---|---|---|
 | V1 | `decideActive`'s three rows of §2c, plus duplicate paths, a null mtime and a tag outside the window | `tests/wtft-442-daemon-roster.test.ts`, in memory |
-| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, each unreadable kind of §2c's last row, and a stopped daemon's `.tmp`; keeps a live daemon's `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
+| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, a stopped daemon's unreadable roster of each kind and its `.tmp`; keeps a live daemon's unreadable roster and its `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's `turn_start` handler and its widget text |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |

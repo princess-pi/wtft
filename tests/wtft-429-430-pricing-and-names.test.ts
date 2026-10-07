@@ -63,6 +63,16 @@ check(notes.some((n) => n.level === "warning" && n.text.includes("wtft-test-only
 	`a rejected entry is reported as a Pi notification (${JSON.stringify(notes)})`);
 check(stderr.length === 0, `nothing is written to stderr under the TUI (${JSON.stringify(stderr)})`);
 
+fs.writeFileSync(path.join(xdgRoot, "wtft", "pricing.json"), JSON.stringify({}));
+globalThis.setInterval = (() => 1) as unknown as typeof setInterval;
+try {
+	for (const fn of events.session_start ?? []) await fn({}, ctx);
+} finally {
+	globalThis.setInterval = realSetInterval;
+}
+check(lookupModelPricing(MODEL) === null, "an entry deleted from pricing.json no longer prices the model at the next session_start");
+check(lookupModelPricing("claude-opus-4-5") !== null, "the built-in rates survive the reload");
+
 console.log("\nthe name --help and --version print");
 const bundle = path.join(REPO, "bin", "wtft.mjs");
 check(fs.existsSync(bundle), "fixture precondition: the CLI bundle is built");

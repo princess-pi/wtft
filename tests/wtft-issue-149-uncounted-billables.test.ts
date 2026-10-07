@@ -245,7 +245,6 @@ describe("#149 harness — surveys the newest real logged sessions", () => {
 			try { return [{ id, mtimeMs: fs.statSync(path.join(logDir, `${id}.jsonl`)).mtimeMs }]; } catch { return []; }
 		});
 		const ids = logged.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, SURVEY_SESSIONS).map((log) => log.id);
-		assert.ok(ids.length === Math.min(SURVEY_SESSIONS, logged.length), "the survey takes the newest logs, up to its bound");
 		if (ids.length === 0) {
 			console.log("##SKIP## V1 — no ~/.claude/statusline-logs on this machine: the harness ran against no real session");
 			return;

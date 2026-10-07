@@ -76,13 +76,16 @@ export function pruneRoster(now: number): void;                 // daemon start
 `FileInfo` is Token Budget's existing `{ path, mtime }`, now exported from this module.
 `decideActive` is pure. `activeTagFiles` is the adapter:
 
-- It lists `rosterDir()`; a directory that is missing or cannot be listed yields no tags.
+- It lists `rosterDir()`. A missing directory yields no tags: no daemon has published. Any other
+  listing failure is a **roster error** (§2e).
 - It reads only names of the form `<pid>.json` and `<pid>.json.tmp`. Any other file there is left
   alone.
 - It parses each `<pid>.json`, classifies its pid, and stats each listed tag. Entries of `tags`
   that are not strings are ignored. The reader trusts the writer's absolute paths.
-- A `<pid>.json` it cannot read as a roster, and a `<pid>.json.tmp` left by a write that died
-  mid-way, are entries with no tags, so §2c decides them like any roster with no active tag.
+- A `<pid>.json.tmp` left by a write that died mid-way, and a `<pid>.json` it cannot read as a
+  roster whose pid holds no lease, are entries with no tags, so §2c decides them like any roster
+  with no active tag. A `<pid>.json` it cannot read whose pid holds a lease is a roster error:
+  that daemon's spend would go uncounted.
 - It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
@@ -106,6 +109,13 @@ scan).
 `before_provider_request`, take `activeTagFiles(Date.now())`. `PI_DIR` and the `projectsDir` import
 went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 `aggregateActiveTpm`, the stats cache and the tick are unchanged.
+
+### 2e. Roster errors
+
+A roster error is thrown, never folded into zero spend: TPM read as 0 turns the cooldown off.
+Its message is one line a person or an agent can start debugging from: what failed, the path, the
+error code or reason, and the consequence. Token Budget shows it through its existing error paths:
+the widget's error line, the footer's error mark, and an error notice on each provider request.
 
 ## 3. What does not change
 
@@ -146,6 +156,7 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |
 | V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the #442 repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
 | V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's, recorded on #442 |
+| V8 | A roster directory that exists but cannot be listed, and a live daemon's unreadable roster, are roster errors naming the path and the code or reason; a missing directory is not; Token Budget's widget shows the message | `tests/wtft-453-roster-error.test.ts` |
 
 ## 6. Glossary
 

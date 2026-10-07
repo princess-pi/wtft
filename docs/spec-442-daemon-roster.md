@@ -144,8 +144,8 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's `turn_start` handler and its widget text |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |
-| V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the #442 repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
-| V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's, recorded on #442 |
+| V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the issue's repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
+| V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's: same set and same TPM in every sample on 2026-10-07 |
 
 ## 6. Glossary
 

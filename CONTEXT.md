@@ -76,6 +76,15 @@ identity it observed, on that inode), a replacement is a rename. A harness daemo
 file.
 _Avoid_: lock file, session pid file
 
+**Daemon roster** (#442):
+`$XDG_STATE_HOME/wtft/roster/<pid>.json`, one per daemon process, naming every tag file that
+process writes; rewritten when that list changes (`extensions/lib/daemon-roster.ts`). Token Budget
+reads the roster directory to find tag files written in the last 2 minutes, instead of walking the
+session trees. A stopped daemon's roster stays while one of its tags is still in that window, then
+any reader, or the next daemon to start, deletes it. Not the **Lease** (per session: who serves
+it) and not the harness hand-off `.served` (per harness root: what the next harness adopts).
+_Avoid_: active index, served list
+
 **Root pid file** (harness pid file):
 `$TMPDIR/wtft-harness-<claude|pi>-<hash>.pid`, one per harness root, naming the harness daemon
 that holds that root. Claimed exclusively at start; a harness daemon that finds it removed,

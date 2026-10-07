@@ -40,13 +40,16 @@ writer already held (spec-270 §2's shape).
 | per-session | every poll in `loop` | `[slot.state.tagPath]` |
 | harness | end of every `sweepIdleSlots` (250 ms), beside `persistHandOff` | the `state.tagPath` of every record in `registry.served` |
 
-`publishRoster` keeps the last text it wrote in memory and writes only when the text differs, so
-a steady daemon writes the file once. A harness serving nothing removes its file.
+`publishRoster` keeps the last text it wrote in memory and writes only when the text differs or
+the file is gone, so a steady daemon writes the file once and a roster deleted under it comes back
+on its next publish. A harness serving nothing removes its file. A failed write warns once per
+distinct error on the daemon's stderr and the daemon keeps serving.
 
 **At exit, a daemon leaves its file.** Its turns from the last minute still count toward TPM, and
-the roster is how a reader finds them. Readers keep a dead daemon's file for 2 minutes after its
-last write, then delete it (§2c). A daemon start runs the same prune, so files from crashed daemons
-stay bounded even when no Token Budget runs.
+the roster is how a reader finds them. Readers keep a stopped daemon's file while one of its tags
+was written in the last 2 minutes, then delete it (§2c): a stopped daemon's tags never change
+again, so once all are older than the window none can become active. A daemon start runs the same
+prune, so files from crashed daemons stay bounded even when no Token Budget runs.
 
 ### 2b. Interface (`extensions/lib/daemon-roster.ts`)
 
@@ -57,7 +60,6 @@ export function publishRoster(tagPaths: string[]): void;         // this process
 export interface RosterEntry {
   file: string;                       // the roster file
   holder: HolderKind;                 // classifyPid(pid), extensions/lib/holder.ts
-  writtenMs: number;                  // the roster file's mtime
   tags: { path: string; mtimeMs: number | null }[];  // null: stat failed
 }
 export function decideActive(entries: RosterEntry[], now: number): { active: FileInfo[]; prune: string[] };
@@ -65,18 +67,20 @@ export function activeTagFiles(now: number): FileInfo[];        // read, decide,
 export function pruneRoster(now: number): void;                 // daemon start
 ```
 
-`FileInfo` is Token Budget's existing `{ path, mtime }`. `decideActive` is pure. `activeTagFiles`
-is the adapter: it lists `rosterDir()`, reads and parses each file, classifies its pid, stats each
-listed tag, calls `decideActive`, unlinks `prune`, and returns `active`.
+`FileInfo` is Token Budget's existing `{ path, mtime }`, now exported from this module.
+`decideActive` is pure. `activeTagFiles` is the adapter: it lists `rosterDir()`, reads and parses
+each `<pid>.json`, classifies its pid, stats each listed tag, calls `decideActive`, unlinks `prune`
+and every file it could not read as a roster, and returns `active`. A `<pid>.json.tmp` left by a
+write that died mid-way is an entry with no tags, so it is deleted once its pid has stopped.
 
 ### 2c. The decision (`decideActive`)
 
 | Roster file | Outcome |
 |---|---|
 | holder `daemon`, `harness` or `unverified` | kept; its tags are candidates |
-| holder `gone` or `other`, written less than `ACTIVE_WINDOW_MS` ago | kept; its tags are candidates |
-| holder `gone` or `other`, written `ACTIVE_WINDOW_MS` ago or more | pruned |
-| unreadable, not JSON, `v` not 1, or the file name's pid not the content's | pruned |
+| holder `gone` or `other`, with at least one active tag | kept; its tags are candidates |
+| holder `gone` or `other`, with no active tag | pruned |
+| unreadable, not JSON, `v` not 1, or the file name's pid not the content's | pruned by the adapter before the decision |
 
 A candidate tag is **active** when its `mtimeMs` is not null and `now - mtimeMs < ACTIVE_WINDOW_MS`,
 the same rule `findActiveSessionFiles` applies today. A path listed by two rosters (a hand-over
@@ -117,7 +121,7 @@ uses them. `aggregateActiveTpm`, the stats cache and the tick are unchanged.
 | # | Check | How |
 |---|---|---|
 | V1 | `decideActive` rules of §2c, each row, plus duplicate paths, a null mtime and a tag outside the window | `tests/wtft-442-daemon-roster.test.ts`, in memory |
-| V2 | `publishRoster` writes once for unchanged input, rewrites on change, removes on an empty harness list; `activeTagFiles` prunes a dead, old roster from disk | same suite, temp `XDG_STATE_HOME` |
+| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster and an unreadable one | same suite, temp `XDG_STATE_HOME` |
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's exported reader |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |

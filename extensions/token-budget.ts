@@ -5,11 +5,10 @@ import { loadConfig, writeConfig } from "@princess-pi/libs/config";
 import { createTagReadCache } from "./lib/tag-read-cache.ts";
 import { WTFT_CONFIG_DIR } from "./lib/wtft-config-dir.ts";
 import { activeTagFiles, type FileInfo } from "./lib/daemon-roster.ts";
+import { wtftStateDir } from "./lib/daemon-log.ts";
 
 
 // ---
-
-const COFFEE_FILE = "/tmp/pi-rate-limit-coffee.json";
 
 // Safe model-specific limit ceilings (80% of actual subscription quota)
 const MODEL_QUOTA_REGISTRY: Record<string, number> = {
@@ -39,7 +38,6 @@ const MODEL_QUOTA_REGISTRY: Record<string, number> = {
 const DEFAULT_CEILING = 1000000;
 const BAR_WIDTH = 5;
 const COOLDOWN_DURATION_MS = 40000; // 40 seconds flat "coffee break"
-const STATS_CACHE_FILE = "/tmp/pi-rate-limit-stats.json";
 
 const tagReadCache = createTagReadCache();
 
@@ -236,14 +234,35 @@ export function getHostingSessionTpm(hostingSessionId: string, activeFiles: File
   return sessionTpms;
 }
 
-function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | null, tickMs: number): Record<string, ModelStats> {
+function stateFile(name: string): string {
+  return path.join(wtftStateDir(), name);
+}
+
+export function writeCooldownLockfile(now: number): void {
+  const file = stateFile("token-budget-cooldown.json");
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
+  } catch (e) {
+  }
+}
+
+export function removeCooldownLockfile(): void {
+  try {
+    fs.unlinkSync(stateFile("token-budget-cooldown.json"));
+  } catch (e) {
+  }
+}
+
+export function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | null, tickMs: number): Record<string, ModelStats> {
   const now = Date.now();
   tagReadCache.retain(activeFiles.map(f => f.path));
+  const statsFile = stateFile("token-budget-stats.json");
   let cached: CacheSchema | null = null;
 
-  if (fs.existsSync(STATS_CACHE_FILE)) {
+  if (fs.existsSync(statsFile)) {
     try {
-      const content = fs.readFileSync(STATS_CACHE_FILE, "utf8");
+      const content = fs.readFileSync(statsFile, "utf8");
       const data = JSON.parse(content) as CacheSchema;
       const freshWindow = Math.max(1000, tickMs);
       if (now - data.timestamp < freshWindow) {
@@ -267,7 +286,8 @@ function getOrUpdateStats(activeFiles: FileInfo[], hostingSessionId: string | nu
         timestamp: now,
         stats: baseStats
       };
-      fs.writeFileSync(STATS_CACHE_FILE, JSON.stringify(cacheData), "utf8");
+      fs.mkdirSync(path.dirname(statsFile), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(statsFile, JSON.stringify(cacheData), "utf8");
     } catch (e) {
     }
   }
@@ -553,11 +573,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
           "warning"
         );
 
-        // Write the lockfile for external (tmux) status bar integration
-        try {
-          fs.writeFileSync(COFFEE_FILE, JSON.stringify({ startTime: now, endTime: now + COOLDOWN_DURATION_MS }), "utf8");
-        } catch (e) {
-        }
+        writeCooldownLockfile(now);
 
         // Sleep blocks the turn synchronously in the harness while live-refreshing the widget
         const endTime = Date.now() + COOLDOWN_DURATION_MS;
@@ -571,12 +587,7 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
         cooldownRemainingSecs = null;
         updateTokenBudgetWidget(ctx);
 
-        try {
-          if (fs.existsSync(COFFEE_FILE)) {
-            fs.unlinkSync(COFFEE_FILE);
-          }
-        } catch (e) {
-        }
+        removeCooldownLockfile();
 
         ctx.ui.notify("☕ [Token Budget] Cooldown complete. Resuming turn execution.", "success");
         updateTokenBudgetWidget(ctx);

@@ -85,7 +85,7 @@ export function pruneRoster(now: number): void;                 // daemon start
 - A `<pid>.json.tmp` left by a write that died mid-way, and a `<pid>.json` it cannot read as a
   roster, are entries with no tags, so §2c decides them like any roster with no active tag; the
   latter is also a roster error when its pid is a daemon (§2e).
-- It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
+- It calls `decideActive`, deletes `prune`, and returns `active` with the roster errors. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
 ### 2c. The decision (`decideActive`)
@@ -111,14 +111,14 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 
 ### 2e. Roster errors
 
-`activeTagFiles` returns the tags it could read **and** a list of roster errors; one error never
+`activeTagFiles` returns the active tags **and** a list of roster errors; one error never
 hides another daemon's spend, and pruning still runs. A roster error is:
 
 - a roster directory that exists but cannot be listed (a missing one is not: no daemon has
   published yet);
 - a `<pid>.json` that cannot be read as a roster while its pid is classed `daemon` or `harness`;
 - a tag a `daemon` or `harness` roster lists that cannot be stat'd for a reason other than its
-  being gone, or, while written in the last 2 minutes, cannot be read.
+  being gone, or, while written in the last 2 minutes, is not readable by this user.
 
 A pid classed `unverified` raises none: off Linux every pid is, and a reused pid would raise an
 error that never clears. Each error is one line a person or an agent can start debugging from:

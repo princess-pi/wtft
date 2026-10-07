@@ -65,6 +65,13 @@ describe("createTagReadCache", () => {
 		assert.deepStrictEqual(ids(cache, "/t/a"), ["m9"]);
 	});
 
+	it("returns nothing when the read fails after a good stat", () => {
+		const io = new FakeIo();
+		io.put("/t/a", 7, turnLine("m1", 100));
+		io.read = () => null;
+		assert.deepStrictEqual(ids(createTagReadCache(io), "/t/a"), []);
+	});
+
 	it("retain drops every other tag file", () => {
 		const io = new FakeIo();
 		io.put("/t/a", 7, turnLine("m1", 100));

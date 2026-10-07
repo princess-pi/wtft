@@ -311,6 +311,12 @@ function isEmojiDisabled(): boolean {
   return cfg.emojiDisabled === true;
 }
 
+function rosterErrorSummary(errors: string[], emojiDisabled: boolean): string | null {
+  if (errors.length === 0) return null;
+  const more = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
+  return `${emojiDisabled ? "[!]" : "⚠️"} ${errors[0]}${more}`;
+}
+
 function updateTokenBudgetWidget(ctx: ExtensionContext) {
   const settings = getBudgetSettings();
 
@@ -329,7 +335,8 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
   const emojiDisabled = isEmojiDisabled();
 
   try {
-    const activeFiles = activeTagFiles(Date.now());
+    const { files: activeFiles, errors: rosterErrors } = activeTagFiles(Date.now());
+    const rosterErrorLine = rosterErrorSummary(rosterErrors, emojiDisabled);
     const hostingSessionId = ctx.sessionManager.getSessionId() || null;
     
     const context = ctx.sessionManager.buildSessionContext();
@@ -366,6 +373,7 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
         const budgetIcon = emojiDisabled ? "[!]" : "🛡️";
         footerParts.push(`\x1b[1m${budgetIcon} [${hColor}${hBar}\x1b[0m\x1b[1m] ${hostingShortCode}: ${hColor}${hGlobalStr}\x1b[0m\x1b[1m/${hLimitStr}\x1b[0m`);
       }
+      if (rosterErrorLine) footerParts.push(`\x1b[31;1m${emojiDisabled ? "[!]" : "⚠️"} roster error\x1b[0m`);
       ctx.ui.setStatus("token-budget", footerParts.join(" | "));
     }
 
@@ -373,6 +381,7 @@ function updateTokenBudgetWidget(ctx: ExtensionContext) {
       const lines: string[] = [];
       const budgetTitle = emojiDisabled ? "[!] Token Budget" : "🛡️  Token Budget";
       lines.push(`\x1b[1;36m${budgetTitle} (TPM Active Monitors) ───────────────────\x1b[0m`);
+      if (rosterErrorLine) lines.push(`\x1b[31;1m  ${rosterErrorLine}\x1b[0m`);
 
       if (cooldownRemainingSecs !== null) {
         const remainingMs = cooldownRemainingSecs * 1000;
@@ -517,7 +526,8 @@ export default function tokenBudgetExtension(pi: ExtensionAPI) {
   pi.on("before_provider_request", async (_event, ctx) => {
     try {
       const now = Date.now();
-      const activeFiles = activeTagFiles(Date.now());
+      const { files: activeFiles, errors: rosterErrors } = activeTagFiles(Date.now());
+      if (rosterErrors.length > 0) ctx.ui.notify(`[Token Budget] ${rosterErrorSummary(rosterErrors, isEmojiDisabled())}`, "error");
       const hostingSessionId = ctx.sessionManager.getSessionId() || null;
       
       const context = ctx.sessionManager.buildSessionContext();

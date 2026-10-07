@@ -141,10 +141,8 @@ describe("the roster on disk", () => {
 		fs.writeFileSync(liveTmp, "{");
 		const stray = path.join(rosterDir(), "notes.txt");
 		fs.writeFileSync(stray, "kept");
-		table.daemon(4_000_008, ["--session", "/newer.jsonl"]);
-		const newerBuild = writeRosterText(4_000_008, { v: 2, pid: 4_000_008, tags: [] });
 
-		const found = activeTagFiles(Date.now());
+		const found = activeTagFiles(Date.now()).files;
 		assert.deepStrictEqual(found.map(f => f.path).sort(), [live, path.join(tmp, "tags", "last-minute.jsonl")].sort());
 		assert.ok(fs.existsSync(own), "a live daemon's roster stays");
 		assert.ok(fs.existsSync(justStopped), "a stopped daemon's roster stays while its last turns are in the window");
@@ -154,7 +152,6 @@ describe("the roster on disk", () => {
 		assert.ok(!fs.existsSync(deadTmp), "a stopped daemon's half-written roster is deleted");
 		assert.ok(fs.existsSync(liveTmp), "a live daemon's half-written roster stays");
 		assert.ok(fs.existsSync(stray), "a file that is not a roster is left alone");
-		assert.ok(fs.existsSync(newerBuild), "a live daemon's roster stays even when this reader cannot read it");
 		assert.strictEqual(fs.statSync(rosterDir()).mode & 0o777, 0o700, "the roster directory is private");
 	});
 });
@@ -181,7 +178,7 @@ describe("a roster that cannot be deleted", () => {
 				skip("this process can unlink inside a read-only directory (root), so a refused delete cannot be staged");
 				return;
 			}
-			assert.deepStrictEqual(activeTagFiles(Date.now()).map(f => f.path), [live]);
+			assert.deepStrictEqual(activeTagFiles(Date.now()).files.map(f => f.path), [live]);
 		} finally {
 			fs.chmodSync(dir, 0o700);
 			restore();

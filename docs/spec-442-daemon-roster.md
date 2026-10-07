@@ -69,21 +69,23 @@ export interface RosterEntry {
   tags: { path: string; mtimeMs: number | null }[];  // null: stat failed
 }
 export function decideActive(entries: RosterEntry[], now: number): { active: FileInfo[]; prune: string[] };
-export function activeTagFiles(now: number): FileInfo[];        // read, decide, prune, return
+export function activeTagFiles(now: number): { files: FileInfo[]; errors: string[] };  // read, decide, prune, return
 export function pruneRoster(now: number): void;                 // daemon start
 ```
 
 `FileInfo` is Token Budget's existing `{ path, mtime }`, now exported from this module.
 `decideActive` is pure. `activeTagFiles` is the adapter:
 
-- It lists `rosterDir()`; a directory that is missing or cannot be listed yields no tags.
+- It lists `rosterDir()`. A missing directory yields no tags: no daemon has published. Any other
+  listing failure is a **roster error** (§2e).
 - It reads only names of the form `<pid>.json` and `<pid>.json.tmp`. Any other file there is left
   alone.
 - It parses each `<pid>.json`, classifies its pid, and stats each listed tag. Entries of `tags`
   that are not strings are ignored. The reader trusts the writer's absolute paths.
-- A `<pid>.json` it cannot read as a roster, and a `<pid>.json.tmp` left by a write that died
-  mid-way, are entries with no tags, so §2c decides them like any roster with no active tag.
-- It calls `decideActive`, deletes `prune`, and returns `active`. A delete that fails is skipped: the read still answers, and a reader
+- A `<pid>.json.tmp` left by a write that died mid-way, and a `<pid>.json` it cannot read as a
+  roster, are entries with no tags, so §2c decides them like any roster with no active tag; the
+  latter is also a roster error when its pid is a daemon (§2e).
+- It calls `decideActive`, deletes `prune`, and returns `active` with the roster errors. A delete that fails is skipped: the read still answers, and a reader
   allowed to delete the file does so later.
 
 ### 2c. The decision (`decideActive`)
@@ -106,6 +108,23 @@ scan).
 `before_provider_request`, take `activeTagFiles(Date.now())`. `PI_DIR` and the `projectsDir` import
 went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 `aggregateActiveTpm`, the stats cache and the tick are unchanged.
+
+### 2e. Roster errors
+
+`activeTagFiles` returns the active tags **and** a list of roster errors; one error never
+hides another daemon's spend, and pruning still runs. A roster error is:
+
+- a roster directory that exists but cannot be listed (a missing one is not: no daemon has
+  published yet);
+- a `<pid>.json` that cannot be read as a roster while its pid is classed `daemon` or `harness`;
+- a tag a `daemon` or `harness` roster lists that cannot be stat'd for a reason other than its
+  being gone, or, while written in the last 2 minutes, is not readable by this user.
+
+A pid classed `unverified` raises none: off Linux every pid is, and a reused pid would raise an
+error that never clears. Each error is one line a person or an agent can start debugging from:
+what failed, the path, the pid, the code or reason, and whose spend goes uncounted. Token Budget
+shows the first one (and how many more) as a line in its widget and a mark in its footer, and as
+an error notice on each provider request; the meters still show the spend it could read.
 
 ## 3. What does not change
 
@@ -140,12 +159,13 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | # | Check | How |
 |---|---|---|
 | V1 | `decideActive`'s three rows of §2c, plus duplicate paths, a null mtime and a tag outside the window | `tests/wtft-442-daemon-roster.test.ts`, in memory |
-| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, a stopped daemon's unreadable roster of each kind and a stopped daemon's `.tmp`; keeps a live daemon's unreadable roster and a live daemon's `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
+| V2 | `publishRoster` writes once for unchanged input, rewrites on change, re-creates a deleted roster, removes on an empty list; `activeTagFiles` keeps a stopped daemon's roster with a recent tag, deletes a stopped daemon's quiet roster, a stopped daemon's unreadable roster of each kind and a stopped daemon's `.tmp`; keeps a live daemon's `.tmp` and a file that is not a roster; creates the directory 0700; still answers when a delete is refused | same suite, temp `XDG_STATE_HOME` |
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's `turn_start` handler and its widget text |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |
 | V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the issue's repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
 | V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's, recorded on the issue |
+| V8 | Each roster error of §2e is reported naming its path and code or reason, beside the spend still read from other rosters, and stopped daemons' rosters are still pruned; a missing directory and an `unverified` pid raise none; Token Budget's widget, footer and provider-request notice show it | `tests/wtft-453-roster-error.test.ts` |
 
 ## 6. Glossary
 

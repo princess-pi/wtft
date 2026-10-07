@@ -1,0 +1,115 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+import { wtftStateDir } from "./daemon-log.ts";
+import { classifyPid, type HolderKind } from "./holder.ts";
+
+export const ACTIVE_WINDOW_MS = 120_000;
+
+export interface FileInfo {
+	path: string;
+	mtime: number;
+}
+
+export interface RosterEntry {
+	file: string;
+	holder: HolderKind;
+	tags: { path: string; mtimeMs: number | null }[];
+}
+
+export function rosterDir(env: NodeJS.ProcessEnv = process.env): string {
+	return path.join(wtftStateDir(env), "roster");
+}
+
+let published: string | null = null;
+
+/** Writes this process's roster when `tagPaths` differ from the last call; an empty list removes it. */
+export function publishRoster(tagPaths: string[]): void {
+	const tags = [...new Set(tagPaths.map(p => path.resolve(p)))].sort();
+	const file = path.join(rosterDir(), `${process.pid}.json`);
+	const text = tags.length === 0 ? "" : JSON.stringify({ v: 1, pid: process.pid, tags });
+	if (text === published && (text === "" || fs.existsSync(file))) return;
+	if (text === "") {
+		fs.rmSync(file, { force: true });
+	} else {
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		const tmp = `${file}.tmp`;
+		fs.writeFileSync(tmp, text + "\n");
+		fs.renameSync(tmp, file);
+	}
+	published = text;
+}
+
+export function decideActive(entries: RosterEntry[], now: number): { active: FileInfo[]; prune: string[] } {
+	const active: FileInfo[] = [];
+	const prune: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		const inWindow = entry.tags.filter((t): t is { path: string; mtimeMs: number } => t.mtimeMs !== null && now - t.mtimeMs < ACTIVE_WINDOW_MS);
+		const stopped = entry.holder === "gone" || entry.holder === "other";
+		if (stopped && inWindow.length === 0) {
+			prune.push(entry.file);
+			continue;
+		}
+		for (const tag of inWindow) {
+			if (seen.has(tag.path)) continue;
+			seen.add(tag.path);
+			active.push({ path: tag.path, mtime: tag.mtimeMs });
+		}
+	}
+	return { active, prune };
+}
+
+function mtimeOrNull(file: string): number | null {
+	try {
+		return fs.statSync(file).mtimeMs;
+	} catch {
+		return null;
+	}
+}
+
+/** Every roster file, read; one that cannot be read or does not match its name is pruned at once. */
+function readRosters(dir: string, bad: string[]): RosterEntry[] {
+	let names: string[];
+	try {
+		names = fs.readdirSync(dir);
+	} catch {
+		return [];
+	}
+	const entries: RosterEntry[] = [];
+	for (const name of names) {
+		const m = /^(\d+)\.json(\.tmp)?$/.exec(name);
+		if (!m) continue;
+		const file = path.join(dir, name);
+		const pid = Number(m[1]);
+		let tags: string[] = [];
+		if (!m[2]) {
+			try {
+				const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+				if (doc?.v !== 1 || doc.pid !== pid || !Array.isArray(doc.tags)) throw new Error("not a roster");
+				tags = doc.tags.filter((t: unknown): t is string => typeof t === "string");
+			} catch {
+				bad.push(file);
+				continue;
+			}
+		}
+		entries.push({ file, holder: classifyPid(pid), tags: tags.map(t => ({ path: t, mtimeMs: mtimeOrNull(t) })) });
+	}
+	return entries;
+}
+
+function unlinkAll(files: string[]): void {
+	for (const f of files) fs.rmSync(f, { force: true });
+}
+
+/** The tag files written in the last `ACTIVE_WINDOW_MS`, by any daemon's roster. Prunes as it reads. */
+export function activeTagFiles(now: number): FileInfo[] {
+	const bad: string[] = [];
+	const { active, prune } = decideActive(readRosters(rosterDir(), bad), now);
+	unlinkAll([...bad, ...prune]);
+	return active;
+}
+
+export function pruneRoster(now: number): void {
+	activeTagFiles(now);
+}

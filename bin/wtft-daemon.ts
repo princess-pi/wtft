@@ -13,6 +13,7 @@ import { classifyPid, holdsLease, isDaemonCmdline, isFixtureDaemon, pidAlive, pr
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
+import { publishRoster, pruneRoster } from "../extensions/lib/daemon-roster.js";
 import { readSession, flushTurns, scanChildren, resumeTagger, fsWorld, MTIME_SETTLE_MS, type LogLine } from "../extensions/lib/session-tagger.js";
 import {
   newRegistry, newSessionRecord, serve, get, move, drop, markIdle, forgetIdle, expiredIdle, beginRetry, retryFired, cancelRetry,
@@ -61,6 +62,23 @@ const SESSION_WAIT_MAX_MS = 60 * 60 * 1000;
 
 let running = true;
 let harnessMode = false;
+
+let rosterWarned = "";
+function publishOwnRoster(tagPaths: string[]) {
+  try {
+    publishRoster(tagPaths);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    if (why !== rosterWarned) {
+      rosterWarned = why;
+      process.stderr.write(`[wtft-daemon] WARNING: could not publish the daemon roster: ${why}\n`);
+    }
+  }
+}
+
+function pruneRosters() {
+  try { pruneRoster(Date.now()); } catch { /* the next reader prunes */ }
+}
 
 
 // ---
@@ -1093,6 +1111,7 @@ function runHarness(which: string, focus: string) {
     stopHolderSync(live);
   }
   harnessMode = true;
+  pruneRosters();
   if (process.env.WTFT_DAEMON_DEBUG) {
     process.stderr.write(`[wtft-daemon] harness pid ${harnessPidFile}\n`);
     process.stderr.write(`[wtft-daemon] harness root ${root}\n`);
@@ -1277,6 +1296,7 @@ function sweepIdleSlots() {
     emptySinceMs = 0;
   }
   persistHandOff();
+  publishOwnRoster([...registry.served.values()].map(record => record.state.tagPath));
 }
 
 let rootStatWarned = false;
@@ -2024,6 +2044,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   resweep.unref();
 
   reapAndWarn();
+  pruneRosters();
 
   initClassified();
 
@@ -2036,6 +2057,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   const loop = () => {
     if (!running) return;
     if (serviceSession() === "stop") return;
+    publishOwnRoster([slot.state.tagPath]);
     setTimeout(loop, POLL_MS);
   };
 

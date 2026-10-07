@@ -36,7 +36,8 @@ function check(label: string, fn: () => void) {
 
 const KNOWN_LIMIT =
 	`${DIM}Known limit: this suite proves the REGISTRY/TARBALL install channel only\n` +
-	`(npm pack -> npm install -> plain node, bun excluded from PATH). It does NOT\n` +
+	`(npm pack, with bun on PATH for prepare -> npm install -> plain node, bun\n` +
+	`excluded from PATH for install and run). It does NOT\n` +
 	`exercise the git-URL channel, which runs \`prepare\` and needs bun on PATH -\n` +
 	`an accepted constraint. Green here != every install channel green.${RESET}`;
 
@@ -76,7 +77,7 @@ function killLingeringDaemons() {
 // pre-existing state and refuse to touch it, rather than clobbering WIP.
 // ---
 
-const REBUILD_TOUCHED = ["bin/"];
+const REBUILD_TOUCHED = ["bin/", "extensions/lib/harness/builtins.generated.ts"];
 
 function gitStatusLines(paths: string[]): string[] {
 	const out = execFileSync("git", ["status", "--porcelain", "--", ...paths], {
@@ -89,8 +90,8 @@ function gitStatusLines(paths: string[]): string[] {
 const preExistingDirt = gitStatusLines(REBUILD_TOUCHED);
 
 if (preExistingDirt.length > 0) {
-	console.log(`${RED}FAIL${RESET} pre-flight: bin/ already has uncommitted changes`);
-	console.log(`       This suite's npm pack step rebuilds that path and would clobber it.`);
+	console.log(`${RED}FAIL${RESET} pre-flight: ${REBUILD_TOUCHED.join(", ")} already has uncommitted changes`);
+	console.log(`       This suite's npm pack step can rewrite those paths and would clobber them.`);
 	for (const l of preExistingDirt) console.log(`       ${l}`);
 	failed++;
 	console.log(`\nResults: ${GREEN}${passed} passed${RESET}, ${RED}${failed} failed${RESET}`);
@@ -123,19 +124,13 @@ try {
 
 	// Restore whatever `prepare` touched — the pre-flight proved this was clean.
 	execFileSync("git", ["checkout", "--", ...REBUILD_TOUCHED], { cwd: REPO_ROOT });
-	check("tree restored after npm pack", () => {
-		assert.deepStrictEqual(gitStatusLines(REBUILD_TOUCHED), [], "bin/ still dirty");
+	check(`tracked files prepare rewrites (${REBUILD_TOUCHED.join(", ")}) are clean after npm pack`, () => {
+		assert.deepStrictEqual(gitStatusLines(REBUILD_TOUCHED), [], "still dirty");
 	});
 
 	if (!tgzPath) {
 		throw new Error("no tarball produced — cannot continue");
 	}
-
-	// ---
-	// 2. `files` allowlist coverage — the tarball carries the two CLI bundles and
-	//    the two Pi-extension bundles (added by #60) plus npm's mandatory
-	//    package.json/LICENSE/README, and nothing else.
-	// ---
 
 	const tarballEntries = new Set(
 		execFileSync("tar", ["-tzf", tgzPath], { encoding: "utf8" })
@@ -143,37 +138,18 @@ try {
 			.map((l) => l.trim())
 			.filter(Boolean)
 			.map((l) => l.replace(/^package\//, ""))
-			.filter((l) => !l.endsWith("/")), // drop directory entries (package/bin/ -> bin/)
+			.filter((l) => !l.endsWith("/")),
 	);
+	const filesEntries: string[] = PKG.files;
+	const mandatory = ["package.json", "LICENSE", "README.md"];
 
-	const expectedBinMjs = fs
-		.readdirSync(path.join(REPO_ROOT, "bin"))
-		.filter((f) => f.endsWith(".mjs"))
-		.map((f) => path.join("bin", f));
-	const expectedPiJs = ["pi/wtft.js", "pi/token-budget.js"];
-
-	check("exactly two CLI bundles ship (the files allowlist)", () => {
-		assert.deepStrictEqual([...expectedBinMjs].sort(), ["bin/wtft.mjs", "bin/wtft-daemon.mjs"].sort());
+	check("the tarball holds exactly package.json's files entries plus package.json, LICENSE and README.md", () => {
+		assert.deepStrictEqual([...tarballEntries].sort(), [...filesEntries, ...mandatory].sort());
 	});
 
-	check(`all ${expectedBinMjs.length} bin/*.mjs files are in the tarball`, () => {
-		const missing = expectedBinMjs.filter((f) => !tarballEntries.has(f));
-		assert.deepStrictEqual(missing, [], `missing from tarball: ${missing.join(", ")}`);
-	});
-
-	check("the two Pi-extension bundles ship too (#60)", () => {
-		const missing = expectedPiJs.filter((f) => !tarballEntries.has(f));
-		assert.deepStrictEqual(missing, [], `missing from tarball: ${missing.join(", ")}`);
-	});
-
-	// npm always adds package.json, LICENSE and README.md regardless of the
-	// `files` allowlist — those are expected. Anything beyond them and the
-	// bundles is a leak (a loose glob pulling source, tests, or node_modules).
-	const alwaysIncluded = ["package.json", "LICENSE", "README.md"];
-	const allowed = new Set([...expectedBinMjs, ...expectedPiJs, ...alwaysIncluded]);
-	check("the tarball carries the bundles plus npm-mandatory files, and nothing else", () => {
-		const extra = [...tarballEntries].filter((f) => !allowed.has(f));
-		assert.deepStrictEqual(extra, [], `unexpected in tarball: ${extra.join(", ")}`);
+	check("every package.json bin target is in the tarball", () => {
+		const missing = Object.values(PKG.bin as Record<string, string>).map((t) => t.replace(/^\.\//, "")).filter((t) => !tarballEntries.has(t));
+		assert.deepStrictEqual(missing, [], `bin targets missing from tarball: ${missing.join(", ")}`);
 	});
 
 	// ---
@@ -181,8 +157,10 @@ try {
 	// ---
 
 	const stockBin = mkTemp("wtft-stockbin-");
-	const nodePath = execFileSync("bash", ["-lc", "command -v node"], { encoding: "utf8" }).trim();
-	const npmPath = execFileSync("bash", ["-lc", "command -v npm"], { encoding: "utf8" }).trim();
+	const nodePath = (process.env.PATH ?? "").split(":").map((d) => path.join(d, "node")).find((f) => {
+		try { return path.basename(fs.realpathSync(f)) === "node"; } catch { return false; }
+	}) ?? "";
+	const npmPath = path.join(path.dirname(nodePath), "npm");
 
 	check("resolved node is a real node binary, not bun", () => {
 		const v = execFileSync(nodePath, ["--version"], { encoding: "utf8" });
@@ -200,7 +178,9 @@ try {
 		assert.notStrictEqual(r.status, 0, `bun resolved on stock PATH: ${r.stdout}`);
 	});
 
-	const consumerDir = mkTemp("wtft-consumer-");
+	const consumerParent = mkTemp("wtft-consumer-");
+	const consumerDir = path.join(consumerParent, "consumer");
+	fs.mkdirSync(consumerDir);
 	fs.writeFileSync(
 		path.join(consumerDir, "package.json"),
 		JSON.stringify({ name: "pack-and-smoke-consumer", version: "0.0.0", private: true }),
@@ -227,17 +207,16 @@ try {
 	// 4. Real commands against the installed package.
 	// ---
 
-	function runInstalled(bin: string, args: string[], xdgHome: string) {
-		return spawnSync(bin, args, {
-			env: { ...stockEnv, XDG_CONFIG_HOME: xdgHome, COLUMNS: "250" },
-			encoding: "utf8",
-		});
+	function runInstalled(bin: string, args: string[], xdgHome: string, walkUp = false) {
+		const env: NodeJS.ProcessEnv = { ...stockEnv, XDG_CONFIG_HOME: xdgHome, COLUMNS: "250" };
+		if (!walkUp) env.PRINCESS_PI_CONFIG_NO_WALKUP = "1";
+		return spawnSync(bin, args, { cwd: consumerDir, env, encoding: "utf8" });
 	}
 
 	const versionResult = runInstalled(wtftBin, ["--version"], mkTemp("wtft-xdg-"));
-	check(`wtft --version exits 0 and reports ${PKG.version}`, () => {
+	check(`wtft --version exits 0 and its first line is exactly "wtft ${PKG.version}"`, () => {
 		assert.strictEqual(versionResult.status, 0, `exit ${versionResult.status}: ${versionResult.stdout}${versionResult.stderr}`);
-		assert.ok(versionResult.stdout.includes(PKG.version), `expected "${PKG.version}" in: ${versionResult.stdout}`);
+		assert.strictEqual(versionResult.stdout.split("\n")[0], `wtft ${PKG.version}`);
 	});
 
 	const daemonResult = runInstalled(daemonBin, ["--help"], mkTemp("wtft-xdg-"));
@@ -245,9 +224,6 @@ try {
 		assert.strictEqual(daemonResult.status, 0, `exit ${daemonResult.status}: ${daemonResult.stdout}${daemonResult.stderr}`);
 	});
 
-	// A minimal, real Claude-Code-shaped session so the render exercises actual
-	// parsing (message usage -> Interaction -> rendered cost), not just CLI arg
-	// handling.
 	const fixtureDir = mkTemp("wtft-fixture-");
 	const fixturePath = path.join(fixtureDir, "pack-and-smoke-fixture.jsonl");
 	// Relative timestamp (a minute ago) so the fixture stays inside the default
@@ -280,13 +256,26 @@ try {
 		mkTemp("wtft-xdg-"),
 	);
 
-	check("wtft -s <fixture> renders the deterministic $4.50 cost (exit 0, no error banner)", () => {
+	check("wtft -s <fixture> renders the deterministic $4.50 cost (exit 0, no error banner on stdout or stderr)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
-		assert.ok(!/❌|System Error/.test(renderResult.stdout), `error banner in output:\n${renderResult.stdout}`);
+		assert.ok(!/❌|System Error/.test(renderResult.stdout + renderResult.stderr), `error banner in output:\n${renderResult.stdout}${renderResult.stderr}`);
 		// $4.50 is the deterministic total (1M in × $3/M + 100K out × $15/M) and is
 		// distinct from the axis labels ($0.00/$1.25/$2.50/$3.75/$5.00), so this
 		// pins parse → interaction → cost, not merely "some non-zero figure".
 		assert.ok(renderResult.stdout.includes("$4.50"), `expected $4.50 rendered cost, got:\n${renderResult.stdout}`);
+	});
+
+	const renderArgs = ["-s", fixturePath, "--cost", "--no-emoji", "--pad", "0"];
+	fs.mkdirSync(path.join(consumerParent, ".wtft"));
+	fs.writeFileSync(path.join(consumerParent, ".wtft", "config.json"), JSON.stringify({ mode: "bucket" }));
+	const walked = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"), true);
+	const planted = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"));
+	check("fixture precondition: with config walk-up on, a .wtft/config.json above the consumer turns the chart to bucket mode", () => {
+		assert.ok(renderResult.stdout.includes("earlier bins"), `cumulative key missing from the plain render:\n${renderResult.stdout}`);
+		assert.ok(!walked.stdout.includes("earlier bins"), `the planted config did not reach a walking-up run:\n${walked.stdout}`);
+	});
+	check("the installed wtft ignores a .wtft/config.json above its cwd (still cumulative, still $4.50)", () => {
+		assert.ok(planted.stdout.includes("earlier bins") && planted.stdout.includes("$4.50"), `planted config reached the run:\n${planted.stdout}`);
 	});
 } catch (err) {
 	console.log(`${RED}Unexpected error:${RESET} ${(err as Error).stack ?? err}`);
@@ -296,7 +285,7 @@ try {
 	killLingeringDaemons();
 	const finalDirt = gitStatusLines(REBUILD_TOUCHED);
 	if (finalDirt.length > 0) {
-		console.log(`${RED}FAIL${RESET} post-flight: bin/ left dirty, restoring`);
+		console.log(`${RED}FAIL${RESET} post-flight: ${REBUILD_TOUCHED.join(", ")} left dirty, restoring`);
 		try { execFileSync("git", ["checkout", "--", ...REBUILD_TOUCHED], { cwd: REPO_ROOT }); } catch {}
 		failed++;
 	}

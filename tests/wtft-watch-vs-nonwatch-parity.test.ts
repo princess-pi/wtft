@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { execSync, spawn } from "node:child_process";
+import { execSync, spawn, spawnSync } from "node:child_process";
 import { trackSandbox } from "./lib/sandbox";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "wtft");
@@ -115,6 +115,19 @@ function extractBarLines(output: string): string[] {
 // ---
 
 const sessionPath = makeFixture();
+
+// A one-shot run reads the tag as it stands: "no data yet" before the daemon's first write, exit 9 before its swept marker.
+console.log("0. Wait for the daemon to settle the tag");
+const FIXTURE_INPUT_TOKENS = 2000 + 500;
+let settled: any = null;
+for (let k = 0; k < 40; k++) {
+	const r = spawnSync(SCRIPT, ["-s", sessionPath, "--json"], { encoding: "utf8", timeout: 10000 });
+	try { settled = JSON.parse(r.stdout); } catch { settled = null; }
+	if (r.status === 0 && settled?.provisional?.provisional === false && settled?.total?.inputTokens === FIXTURE_INPUT_TOKENS) break;
+	spawnSync("sleep", ["0.5"]);
+}
+assert(`fixture precondition: the tag is swept and holds both turns (got provisional ${JSON.stringify(settled?.provisional)}, inputTokens ${settled?.total?.inputTokens})`,
+	settled?.provisional?.provisional === false && settled?.total?.inputTokens === FIXTURE_INPUT_TOKENS);
 
 // 1. Non-watch output
 console.log("1. Capture non-watch output");

@@ -22,7 +22,10 @@ function check(cond: boolean, msg: string) {
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-274-root-")));
 const env = { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: root, WTFT_PI_SESSIONS_DIR: path.join(root, "no-pi") };
 const rootPidFile = path.join(TMP, `wtft-harness-claude-${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 12)}.pid`);
-const restart = () => spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env, timeout: 30_000 });
+const restart = (extra: NodeJS.ProcessEnv = {}) => spawnSync("node", [DAEMON, "--restart"], { encoding: "utf8", env: { ...env, ...extra }, timeout: 30_000 });
+// A respawn that dies at once must die within the settle wait; on a loaded host node's start alone can outlast the 1 s default.
+const SETTLE_MS = 5000;
+const dyingRespawnEnv = { WTFT_RESPAWN_SETTLE_MS: String(SETTLE_MS) };
 const children: ChildProcess[] = [];
 const stopAll = () => { for (const c of children) try { process.kill(c.pid!, "SIGKILL"); } catch { /* gone */ } };
 const alive = (pid: number) => classifyPid(pid) !== "gone";
@@ -144,7 +147,7 @@ try {
 		children.push(fake);
 		check(awaitStandIn(fake.pid!), "fixture precondition: the stand-in reads as a daemon");
 		fs.writeFileSync(getDaemonPidPath(tagSession), String(fake.pid));
-		const r = restart();
+		const r = restart(dyingRespawnEnv);
 		check(/Stopped: PID \d+ — the respawn for .* failed/.test(r.stdout), `the failed respawn is reported:\n${r.stdout}`);
 		check(r.status === 1, `exit 1 (got ${r.status})`);
 	}
@@ -163,10 +166,10 @@ try {
 			fs.writeFileSync(getDaemonPidPath(tagSession), String(fake.pid));
 		}
 		const t0 = Date.now();
-		const r = restart();
+		const r = restart(dyingRespawnEnv);
 		const ms = Date.now() - t0;
 		check((r.stdout.match(/the respawn for .* failed/g) ?? []).length === n, `all ${n} respawns were judged`);
-		check(ms < n * 1000 / 4, `one wait, not one per holder (${ms} ms for ${n})`);
+		check(ms >= SETTLE_MS && ms < n * SETTLE_MS / 4, `one wait, not one per holder (${ms} ms for ${n})`);
 	}
 
 	console.log("--- E: a holder that refuses the signal ---");

@@ -339,6 +339,14 @@ console.log("\nPART L — loud read errors, quiet absences");
 				usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
 		}) + "\n");
 		const cliJson = () => spawnSync("node", [CLI_BIN_L, "-s", session, "--json"], { encoding: "utf8", env: { ...process.env, WTFT_CLAUDE_PROJECTS_DIR: root, XDG_STATE_HOME: path.join(dir, "l-state") } });
+		const listsOk = (run: ReturnType<typeof cliJson>) => {
+			try { return JSON.parse(run.stdout).spawned.unrecorded.some((r: { child: string }) => r.child === "a6000001-0000-4000-8000-0000000000a1"); } catch { return false; }
+		};
+		// Until the daemon's tag holds the turn, the report has no spawn window and never scans,
+		// so L5a would see exit 0 with or without the lock.
+		let warm = cliJson();
+		for (const deadline = Date.now() + 30_000; !listsOk(warm) && Date.now() < deadline;) warm = cliJson();
+		check(listsOk(warm), `L5 fixture precondition: with nothing locked, the report scans this projects root and lists the child (got exit ${warm.status}, stderr ${warm.stderr.trim().slice(0, 200)})`);
 
 		const lockedDir = path.join(root, "-tmp-l-locked");
 		fs.mkdirSync(lockedDir);

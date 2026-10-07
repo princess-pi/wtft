@@ -421,7 +421,7 @@ older_daemons() {
     argv=()
     while IFS= read -r -d '' arg; do argv+=("$arg"); done < "$p/cmdline" 2>/dev/null
     [ "${#argv[@]}" -gt 0 ] || continue
-    case "$(basename -- "${argv[0]}")" in
+    case "${argv[0]##*/}" in
       wtft-daemon|wtft-daemon.mjs|wtft-daemon.js) arg="${argv[0]}" ;;
       node|nodejs|bun|bun.exe)
         # The script is the first argument that is not a runtime option (--inspect).
@@ -429,7 +429,7 @@ older_daemons() {
         for a in "${argv[@]:1}"; do case "$a" in -*) ;; *) arg="$a"; break ;; esac; done ;;
       *) continue ;;
     esac
-    case "$(basename -- "$arg")" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
+    case "${arg##*/}" in wtft-daemon|wtft-daemon.mjs|wtft-daemon.js|wtft-daemon.ts) ;; *) continue ;; esac
     case "$arg" in /*) ;; *) arg="$(readlink "$p/cwd" 2>/dev/null)/$arg" ;; esac
     [ -f "$arg" ] || continue
     dir="$(cd "$(dirname -- "$arg")" 2>/dev/null && pwd -P)" || continue

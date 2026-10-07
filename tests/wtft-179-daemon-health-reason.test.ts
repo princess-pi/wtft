@@ -94,8 +94,6 @@ console.log("V1. No reason sentence is compared as a control token");
 
 console.log("V2. A typo'd health-code comparison fails `tsc --noEmit`");
 {
-	// Not in bin/: pack-and-smoke, running beside this suite, refuses a bin/ with
-	// an untracked file. A config extending the repo's checks the probe alone.
 	const PROBE_DIR = path.join(REPO_ROOT, "tmp", `wtft-179-probe-${process.pid}`);
 	const PROBE = path.join(PROBE_DIR, "__reason_code_probe__.ts");
 	const PROBE_SOURCE = `// Temporary negative control written by tests/wtft-179-daemon-health-reason.test.ts (#179).

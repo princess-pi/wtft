@@ -4,13 +4,13 @@
 
 ## What it proves
 
-The registry/tarball install channel ships a **self-contained artifact**: `npm
+The tarball install channel ships a **self-contained artifact**: `npm
 pack` the repo, install the tarball into a fresh dir with plain node/npm (bun
 excluded from PATH), then run real commands. Green here means the tarball
 carries exactly the four-entry `files` allowlist — the CLI bundles
 `bin/wtft.mjs` and `bin/wtft-daemon.mjs`, and the Pi-extension bundles
 `pi/wtft.js` and `pi/token-budget.js` (#60) — and that the two CLI bundles run
-on stock node with no repo and no bun.
+on stock node outside the repo with no bun.
 
 That is a narrower claim than "every install channel is green". The git-URL
 channel runs `prepare` and therefore needs bun on PATH; bun-on-PATH is permitted
@@ -19,11 +19,8 @@ Standard).
 
 The Pi extension SOURCES (`extensions/wtft.ts`, `extensions/token-budget.ts`)
 are not in the tarball; their BUILT bundles `pi/wtft.js` and
-`pi/token-budget.js` are, since #60, and this suite asserts it (`check("the two
-Pi-extension bundles ship too (#60)")`). An earlier draft of this paragraph
-said the extensions were delivered by no npm channel — written before #60 and
-never corrected, so the spec contradicted its own test (#75). This suite does
-not load the Pi bundles into Pi; it proves they ship. Running the extensions
+`pi/token-budget.js` are, since #60, and the exact-allowlist check asserts it.
+This suite does not load the Pi bundles into Pi; it proves they ship. Running the extensions
 from a source checkout needs `bun install` (dev) to make `@princess-pi/libs`
 and `wcwidth` — both devDependencies — resolvable; the bundles vendor both at
 build time (#36), so a consumer needs neither. The extensions' import
@@ -44,23 +41,35 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 
 ## Shape of the guard
 
-- **Pre-flight** — refuses to run if `bin/` has uncommitted changes, because
-  `npm pack` fires `prepare`, which rebuilds that path and would clobber WIP.
-- **Pack** — `npm pack`, then restore `bin/` and assert it is clean again.
-- **Allowlist** — the tarball carries the four `files` entries (two
-  `bin/*.mjs` CLI bundles, two `pi/*.js` Pi-extension bundles) plus npm's
-  mandatory `package.json`/`LICENSE`/`README`, and nothing else.
-- **Install** — plain node/npm with bun absent from PATH (the real node binary
-  is resolved and verified not to be bun, since this suite itself runs under
-  bun and `process.execPath` would lie).
+- **Pre-flight** — refuses to run if `extensions/lib/harness/builtins.generated.ts`,
+  the tracked file `prepare`'s build can rewrite, has uncommitted changes or is not
+  tracked. The gitignored files it writes are not guarded. `prepare` runs
+  `bun install` only when `node_modules` lacks its dependencies, and the git-URL CI
+  job deletes `bun.lock` on purpose, so `bun.lock` is not guarded.
+- **Pack** — `npm pack`, with bun on PATH for `prepare`; then assert those tracked
+  files are unchanged.
+- **Allowlist** — `files` lists exactly the four bundles above, the tarball holds exactly those entries plus
+  npm's mandatory `package.json`/`LICENSE`/`README.md`, each of those present, and
+  every `bin` target is among them.
+- **Install** — plain node/npm with bun absent from PATH. node is the first
+  `node` on the suite's own PATH whose real path is named `node`, and `npm` must
+  sit beside it. No login shell, so no
+  profile is read.
 - **Environment** — install and run see only `PATH` (a directory holding `node`
   and `npm` links, then `/usr/bin:/bin`), the real `HOME`, the suite's private
   `TMPDIR`, and one fresh `XDG_STATE_HOME` for the whole suite, so the installed
   daemon's log, reap log, spawn ledger and daemon roster stay off the host. Each
-  installed run also gets its own fresh `XDG_CONFIG_HOME` and `COLUMNS=250`.
-- **Run** — `wtft --version`, `wtft-daemon --help`, and a synthesized
-  session rendered through `wtft -s <fixture> --cost --no-emoji --pad 0`
-  (parse → interaction → rendered cost, not just argument handling).
+  installed run also gets its own fresh `XDG_CONFIG_HOME`, `COLUMNS=250`, and the
+  consumer directory, outside the checkout, as its cwd. Every one but the
+  precondition run below also gets `PRINCESS_PI_CONFIG_NO_WALKUP=1`. A check plants
+  a `.wtft/config.json` above the consumer: with walk-up on it changes the render
+  (the precondition), and with walk-up off the render is still cumulative with
+  `$4.50`.
+- **Run** — `wtft --version`'s first line is `wtft <package.json version>`, `wtft-daemon
+  --help` exits 0, and a synthesized session rendered through
+  `wtft -s <fixture> --cost --no-emoji --pad 0` shows the deterministic `$4.50`
+  with no `❌` or `System Error` line on stdout or stderr (parse → interaction → rendered cost,
+  not just argument handling).
 
 ## Disposition of the third decision-3 guard
 

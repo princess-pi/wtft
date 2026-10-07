@@ -15,7 +15,7 @@ at the first step that brings the label area to 25% or less:
 2. **Whole units:** a cost of $1 or more loses its cents (`$487.25` → `$487`). A token count of
    1k or more loses its decimal (`778.8M` → `779M`, `589.5k` → `590k`). Rounding is to the
    nearest whole unit. A cost under $1 and a count under 1k keep their digits, so a real spend
-   never reads `$0`. A negative delta keeps its sign and rounds the same way as a positive one
+   never reads `$0`. A cost column with any such row keeps the cents on every row, `$1.00` included. A negative delta keeps its sign and rounds the same way as a positive one
    (`-589.5k` → `-590k`).
 3. **No `+`** on the cost and token deltas.
 4. **No `$`** on the cost delta.

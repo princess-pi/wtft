@@ -110,6 +110,19 @@ describe("a running-total bar, cost or tokens", () => {
 	});
 });
 
+describe("the key", () => {
+	for (const disabledEmoji of [false, true]) {
+		const glyph = disabledEmoji ? "**" : "✨";
+		it(`draws this bin's ${glyph} on the earlier-bins swatch's hue, as the bars draw it`, () => {
+			const lines = chart([turn(T0, "code", 1, 100_000), turn(T0 + HOUR, "code", 1, 100_000)], "cumulative", "cost", disabledEmoji);
+			const key = lines.find((l) => stripAnsi(l).includes("earlier bins"));
+			assert.ok(key, "fixture precondition: a running-total chart draws the key");
+			assert.ok(key.includes("\x1b[37m█"), "fixture precondition: the earlier-bins swatch is palette entry 7");
+			assert.ok(key.includes(`\x1b[48;2;${sparkleBackground(7).join(";")}m${glyph}\x1b[0m`), JSON.stringify(key));
+		});
+	}
+});
+
 describe("sparkleBackground", () => {
 	const linear = (rgb: number[]) => rgb.map((c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 	const luminance = (rgb: number[]) => { const [r, g, b] = linear(rgb); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };

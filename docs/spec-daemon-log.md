@@ -14,7 +14,7 @@ shared log; stdout stays ignored.
 | Export | What it is |
 |---|---|
 | `DAEMON_LOG_MAX_BYTES` | 1,000,000 |
-| `wtftStateDir(env = process.env)` | `$XDG_STATE_HOME/wtft`, defaulting to `~/.local/state/wtft`: where wtft keeps per-user state, the two logs below among it |
+| `wtftStateDir(env = process.env)` | `$XDG_STATE_HOME/wtft`, defaulting to `~/.local/state/wtft`: the directory wtft's state files live in, the two logs below among them |
 | `daemonLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/daemon.log`, defaulting to `~/.local/state/wtft/daemon.log` |
 | `reapLogPath(env = process.env)` | `$XDG_STATE_HOME/wtft/reap.log`, defaulting to `~/.local/state/wtft/reap.log`: the reap warnings `reapAndWarn` appends and the CLI's `showReapWarnings` prints the last hour's lines of, truncating it when it printed any |
 | `rotateDaemonLog(file, maxBytes)` | When `file` holds `maxBytes` or more: copies it to `file.1` (replacing any earlier one), then truncates `file` to 0. The copy is set to 0600. Otherwise does nothing, and a path that is not a regular file (a symlink included: it is not followed) is never rotated. Rotates only while holding `file.lock` (created exclusively), and checks the size again under it. A lock older than a minute is removed and raced for again; two takers of the same stale lock can still both rotate, the second copying a short file over `.1`, a window accepted as rare. Never throws |

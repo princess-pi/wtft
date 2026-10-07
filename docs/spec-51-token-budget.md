@@ -76,16 +76,16 @@ appears nowhere in this repo). The table records the code, not the misquote.
 
 ## State files
 
-Two files, both in the wtft state directory, `$XDG_STATE_HOME/wtft/`
-(`~/.local/state/wtft/` by default), created on first write:
+Token Budget keeps two files in the wtft state directory (`wtftStateDir`,
+`docs/spec-daemon-log.md`):
 
-| File | Holds | Written | Read |
-|---|---|---|---|
-| `token-budget-stats.json` | the stats cache: `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }` | when a Token Budget recomputes every session's TPM | by Token Budgets using the same state directory, while it is fresh |
-| `token-budget-cooldown.json` | the cooldown file: `{ startTime, endTime }` | at the start of a cooldown, removed at its end | by tmux status-bar scripts outside wtft |
+- `token-budget-stats.json` — the stats cache, `{ timestamp, stats: { <short code>: { tpm, lastActiveAge } } }`,
+  shared by the Token Budgets that use that directory.
+- `token-budget-cooldown.json` — the cooldown file, `{ startTime, endTime }` in epoch ms, written when a
+  cooldown starts, for tmux scripts outside wtft to read.
 
-Both are per user, under that user's own state directory. A file at the former `/tmp`
-names (`pi-rate-limit-stats.json`, `pi-rate-limit-coffee.json`) changes nothing.
+Neither is under `/tmp`. A file at the former `/tmp` names (`pi-rate-limit-stats.json`,
+`pi-rate-limit-coffee.json`) changes nothing.
 
 ## Not this tool
 

@@ -49,7 +49,7 @@ describe("the stats cache", () => {
 });
 
 describe("the cooldown file", () => {
-	it("is written in the wtft state directory for the cooldown's span, and removed at its end", () => {
+	it("is written to and removed from the wtft state directory", () => {
 		const file = path.join(tmp, "state", "wtft", "token-budget-cooldown.json");
 		assert.strictEqual(fs.existsSync(path.join(tmp, "state")), false);
 

@@ -1750,7 +1750,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (wasDaemon) {
         let environReadable = false;
         try { fs.readFileSync(`/proc/${pid}/environ`); environReadable = true; } catch { /* unreadable */ }
-        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]) {
+        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR", "XDG_STATE_HOME"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
           else if (environReadable) delete restartEnv[key];

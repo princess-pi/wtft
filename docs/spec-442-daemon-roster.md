@@ -110,10 +110,10 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 
 ## 3. What does not change
 
-- TPM, session TPM, the cooldown, and the widget's text: the tag files found are read the same way.
-  The files found are the ones daemon rosters list, which is not the walk's set: a daemon that
-  publishes no roster under the reader's `$XDG_STATE_HOME` is not counted, and a listed tag
-  outside the two trees now is.
+- How a tag file found is read and summed into TPM, session TPM, the cooldown and the widget's
+  text. Which files are found does change: the ones daemon rosters list, not the walk's set. A
+  daemon that publishes no roster under the reader's `$XDG_STATE_HOME` is not counted, and a listed
+  tag outside the two trees now is.
 - The tag-file format, leases, the harness hand-off (`.served`) and every `wtft` CLI surface.
   `wtft-daemon --help` gains its `XDG_STATE_HOME` and `TMPDIR` lines, and the daemon's stderr a
   roster-publish warning.
@@ -144,7 +144,8 @@ went with them, so `WTFT_CLAUDE_PROJECTS_DIR` no longer affects Token Budget.
 | V3 | a per-session fixture daemon publishes a roster naming its tag path; a harness fixture daemon's roster lists every served session's tag path | same suite, real daemon under the test runner's isolation |
 | V4 | Token Budget counts a session's TPM from a tag file reachable **only** through the roster: the Pi sessions dir and the projects root are empty | same suite, through the extension's `turn_start` handler and its widget text |
 | V5 | the existing Token Budget suites pass unchanged | `bun run test` |
-| V6 | **Closer:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the #442 repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
+| V6 | **Closer, CPU half:** idle Pi with only `pi/token-budget.js` uses under 1% of one core over 20 s on this host | the #442 repro script, main's bundle against this branch's: 51.3% → 0.3% on 2026-10-06 |
+| V7 | **Closer, TPM half:** an active session's widget TPM matches the pre-fix value | after merge and `bin/install-wtft` (the host's daemons only publish rosters from then): the walk's TPM over the same tags against the roster's, recorded on #442 |
 
 ## 6. Glossary
 

@@ -44,23 +44,31 @@ princess-pi-tools (`docs/manifests/` missing from the `files` allowlist).
 
 ## Shape of the guard
 
-- **Pre-flight** — refuses to run if `bin/` has uncommitted changes, because
-  `npm pack` fires `prepare`, which rebuilds that path and would clobber WIP.
-- **Pack** — `npm pack`, then restore `bin/` and assert it is clean again.
-- **Allowlist** — the tarball carries the four `files` entries (two
-  `bin/*.mjs` CLI bundles, two `pi/*.js` Pi-extension bundles) plus npm's
-  mandatory `package.json`/`LICENSE`/`README`, and nothing else.
-- **Install** — plain node/npm with bun absent from PATH (the real node binary
-  is resolved and verified not to be bun, since this suite itself runs under
-  bun and `process.execPath` would lie).
+- **Pre-flight** — refuses to run if a tracked file `prepare` can rewrite (`bin/`,
+  `extensions/lib/harness/builtins.generated.ts`) has uncommitted changes. The
+  gitignored bundles `prepare` rebuilds are not guarded.
+- **Pack** — `npm pack`, with bun on PATH for `prepare`; then restore those tracked
+  files and assert they are clean again.
+- **Allowlist** — the tarball holds exactly `package.json`'s `files` entries plus
+  npm's mandatory `package.json`/`LICENSE`/`README.md`, each of those present, and
+  every `bin` target is among them.
+- **Install** — plain node/npm with bun absent from PATH. The real node binary is
+  the first `node` on the suite's own PATH whose real path is named `node`
+  (bun puts a `node` shim ahead of it); `npm` is taken from beside it. No login
+  shell, so no profile is read.
 - **Environment** — install and run see only `PATH` (a directory holding `node`
   and `npm` links, then `/usr/bin:/bin`), the real `HOME`, the suite's private
   `TMPDIR`, and one fresh `XDG_STATE_HOME` for the whole suite, so the installed
   daemon's log, reap log, spawn ledger and daemon roster stay off the host. Each
-  installed run also gets its own fresh `XDG_CONFIG_HOME` and `COLUMNS=250`.
-- **Run** — `wtft --version`, `wtft-daemon --help`, and a synthesized
-  session rendered through `wtft -s <fixture> --cost --no-emoji --pad 0`
-  (parse → interaction → rendered cost, not just argument handling).
+  installed run also gets its own fresh `XDG_CONFIG_HOME`, `COLUMNS=250`,
+  `PRINCESS_PI_CONFIG_NO_WALKUP=1`, and the consumer directory as its cwd, so no
+  `.wtft/config.json` above the checkout or the consumer reaches it. A check plants
+  one above the consumer that changes the render and finds the output unchanged.
+- **Run** — `wtft --version` prints exactly `package.json`'s version, `wtft-daemon
+  --help` exits 0, and a synthesized Pi-shaped session rendered through
+  `wtft -s <fixture> --cost --no-emoji --pad 0` shows the deterministic `$4.50`
+  with no error banner on stdout or stderr (parse → interaction → rendered cost,
+  not just argument handling).
 
 ## Disposition of the third decision-3 guard
 

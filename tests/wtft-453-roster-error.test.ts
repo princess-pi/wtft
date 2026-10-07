@@ -13,6 +13,8 @@ import { useProcessTable } from "../extensions/lib/holder.ts";
 import { fakeProcessTable, type FakeProcessTable } from "./lib/fake-process-table.ts";
 import { trackSandbox } from "./lib/sandbox.ts";
 import { skip } from "./lib/skips.ts";
+import { tagForCli } from "./lib/cli-harness.ts";
+import { piHeader, piTurn } from "./lib/golden-corpus.ts";
 
 let tmp = "";
 let saved: string | undefined;
@@ -94,6 +96,19 @@ describe("roster errors", () => {
 		assert.ok(!fs.existsSync(file));
 	});
 
+	it("a daemon's tag that cannot be read is an error", () => {
+		const unreadable = tag("u.jsonl");
+		fs.chmodSync(unreadable, 0o000);
+		let readable = true;
+		try { fs.readFileSync(unreadable); } catch { readable = false; }
+		if (readable) { skip("this process can read a mode-000 file (root), so the failure cannot be staged"); return; }
+		table.daemon(4_530_008, ["--session", "/u.jsonl"]);
+		writeRoster(4_530_008, JSON.stringify({ v: 1, pid: 4_530_008, tags: [unreadable] }));
+		const { errors } = activeTagFiles(Date.now());
+		assert.strictEqual(errors.length, 1, JSON.stringify(errors));
+		assert.ok(errors[0].includes(unreadable) && errors[0].includes("EACCES"), `names the tag and the code: ${errors[0]}`);
+	});
+
 	it("a daemon's tag that cannot be stat'd is an error; a vanished one is not", () => {
 		const locked = path.join(tmp, "locked");
 		fs.mkdirSync(locked);
@@ -118,6 +133,14 @@ describe("roster errors", () => {
 		try {
 			table.daemon(4_530_007, ["--session", "/s.jsonl"]);
 			const file = writeRoster(4_530_007, "{");
+			const id = "01aa0000-0000-4000-8000-000000000453";
+			const sessionFile = path.join(tmp, "elsewhere", `2026-10-07T00-00-00-000Z_${id}.jsonl`);
+			fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+			const now = Date.now();
+			fs.writeFileSync(sessionFile, piHeader(id, now - 50_000, tmp) + piTurn("t1", now - 40_000, 10) + piTurn("t2", now - 20_000, 10));
+			const tagPath = tagForCli(sessionFile).tagPath;
+			table.daemon(4_530_009, ["--session", sessionFile]);
+			writeRoster(4_530_009, JSON.stringify({ v: 1, pid: 4_530_009, tags: [tagPath] }));
 			const { default: tokenBudgetExtension } = await import("../extensions/token-budget.ts");
 			const handlers: Record<string, (event: unknown, ctx: unknown) => Promise<void>> = {};
 			tokenBudgetExtension({
@@ -133,12 +156,12 @@ describe("roster errors", () => {
 					setStatus: (_k: string, text?: string) => { footer = text ?? ""; },
 					notify: (m: string, kind: string) => { notices.push([m, kind]); },
 				},
-				sessionManager: { getSessionId: () => "s", buildSessionContext: () => ({ model: { modelId: "claude-sonnet-4-6" } }) },
+				sessionManager: { getSessionId: () => id, buildSessionContext: () => ({ model: { modelId: "claude-sonnet-4-6" } }) },
 			};
 			await handlers.turn_start({}, ctx);
 			const plain = widget.map(l => l.replace(/\x1b\[[0-9;]*m/g, ""));
 			assert.ok(plain.some(l => l.includes(file)), `the widget names the roster file: ${plain.join(" / ")}`);
-			assert.ok(plain.some(l => l.includes("(Session)")), `the meters still show: ${plain.join(" / ")}`);
+			assert.ok(plain.some(l => l.includes("(Session): 3K ses")), `the readable daemon's spend still shows: ${plain.join(" / ")}`);
 			assert.ok(footer.includes("roster"), `the footer marks it: ${footer}`);
 			await handlers.before_provider_request({}, ctx);
 			assert.ok(notices.some(([m, kind]) => kind === "error" && m.includes(file)), `a provider request raises an error notice: ${JSON.stringify(notices)}`);

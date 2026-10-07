@@ -95,12 +95,21 @@ function readRosters(dir: string, errors: string[]): RosterEntry[] {
 			}
 		}
 		entries.push({ file, holder, tags: tags.map(t => {
+			let mtimeMs: number;
 			try {
-				return { path: t, mtimeMs: fs.statSync(t).mtimeMs };
+				mtimeMs = fs.statSync(t).mtimeMs;
 			} catch (err) {
 				if (daemon && (err as NodeJS.ErrnoException).code !== "ENOENT") errors.push(rosterError(`stat ${t} listed by daemon pid ${pid} (${why(err)})`, "that session's spend"));
 				return { path: t, mtimeMs: null };
 			}
+			if (daemon) {
+				try {
+					fs.accessSync(t, fs.constants.R_OK);
+				} catch (err) {
+					errors.push(rosterError(`read ${t} listed by daemon pid ${pid} (${why(err)})`, "that session's spend"));
+				}
+			}
+			return { path: t, mtimeMs };
 		}) });
 	}
 	return entries;

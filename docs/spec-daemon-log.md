@@ -30,11 +30,12 @@ shared log; stdout stays ignored.
 
 ## 2. Spawn sites
 
-All three spawn a daemon with `daemonStdio()`:
+All three spawn a daemon with `daemonStdio`:
 - `spawnWtftDaemon` (`extensions/lib/wtft-cli-shared.ts`): the CLI and the Pi widget;
 - `restartDaemon` (`extensions/lib/wtft-daemon-lib.ts`), through the process-table port's
   `spawn` (`docs/spec-holder.md` §1): `--watch`'s `r`;
-- `wtft-daemon --restart`'s respawn (`bin/wtft-daemon.ts`).
+- `wtft-daemon --restart`'s respawn (`bin/wtft-daemon.ts`), on the daemon log under the
+  `XDG_STATE_HOME` it gives the respawn (`docs/spec-274-restart.md`).
 
 ## 3. Tests
 

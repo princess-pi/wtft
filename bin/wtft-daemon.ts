@@ -1671,7 +1671,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   let stopRefused = false;
   let restartFailed = false;
   const spawnDetached = (args: string[], env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
-    const log = daemonStdio();
+    const log = daemonStdio(daemonLogPath(env));
     try {
       const child = spawn(process.execPath, args, { detached: true, stdio: log.stdio, env, cwd });
       child.unref();

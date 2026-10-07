@@ -139,6 +139,7 @@ try {
 		let state = "";
 		try { state = fs.readFileSync(`/proc/${holder}/environ`, "utf8").split("\0").find(kv => kv.startsWith("XDG_STATE_HOME=")) ?? ""; } catch { /* unreadable */ }
 		check(state === `XDG_STATE_HOME=${own}`, `the respawn keeps the stopped harness's XDG_STATE_HOME, not the caller's (got ${state || "none"})`);
+		check(fs.existsSync(path.join(own, "wtft", "daemon.log")) && !fs.existsSync(path.join(caller, "wtft", "daemon.log")), "its stderr goes to the daemon.log under that XDG_STATE_HOME, not the caller's");
 		if (holder > 0) { try { process.kill(holder, "SIGTERM"); } catch { /* gone */ } }
 	}
 

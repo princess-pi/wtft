@@ -17,6 +17,7 @@ import {
 	type DaemonHealthReason,
 } from "../extensions/lib/wtft-daemon-lib.ts";
 import { leaseHolder, leasePid } from "../extensions/lib/lease.ts";
+import { stopHolder } from "../extensions/lib/holder.ts";
 import { awaitStandIn } from "./lib/stand-in-daemon.ts";
 import { ensureDaemonRunning, getDaemonStatus } from "../extensions/lib/wtft-cli-shared.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
@@ -44,8 +45,6 @@ function assert(label: string, ok: boolean, detail = ""): void {
 		failed++;
 	}
 }
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // ---
 // V1 — the display sentences appear ONLY in the lookup table, never in a comparison
@@ -149,14 +148,20 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 	const fixture = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-179-")));
 	const fakeDaemonDir = path.join(fixture, "stand-in");
 	fs.mkdirSync(fakeDaemonDir, { recursive: true });
-	// Stand-in daemon: lives 1.5 s, writes no PID file, claims nothing.
-	fs.writeFileSync(path.join(fakeDaemonDir, "wtft-daemon.mjs"), "setTimeout(() => process.exit(0), 1500);\n", "utf8");
+	fs.writeFileSync(path.join(fakeDaemonDir, "wtft-daemon.mjs"), "setTimeout(() => process.exit(0), 30_000);\n", "utf8");
+	const children: number[] = [];
+	const claimed = (session: string): number => {
+		const pid = leasePid(leaseHolder(getDaemonPidPath(session)));
+		if (pid > 0) children.push(pid);
+		return pid;
+	};
 
 	try {
 		// --- 3a. Spawned, session .jsonl does not exist yet → waiting-session
 		const missingSession = path.join(fixture, "never-created.jsonl");
 		ensureDaemonRunning(missingSession, fakeDaemonDir);
-		assert("3a precondition: the claimed child reads as a daemon", awaitStandIn(leasePid(leaseHolder(getDaemonPidPath(missingSession)))), "");
+		const waitingPid = claimed(missingSession);
+		assert("3a precondition: the claimed child reads as a daemon", awaitStandIn(waitingPid), "");
 		const waiting = getDaemonStatus(missingSession);
 		assert(
 			"no session file while the child lives → code `waiting-session`",
@@ -173,7 +178,8 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 		const realSession = path.join(fixture, "session.jsonl");
 		fs.writeFileSync(realSession, "", "utf8");
 		ensureDaemonRunning(realSession, fakeDaemonDir);
-		assert("3b precondition: the claimed child reads as a daemon", awaitStandIn(leasePid(leaseHolder(getDaemonPidPath(realSession)))), "");
+		const upPid = claimed(realSession);
+		assert("3b precondition: the claimed child reads as a daemon", awaitStandIn(upPid), "");
 		const up = getDaemonStatus(realSession);
 		assert(
 			"session file present, child alive → alive with no reason code",
@@ -182,7 +188,8 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 		);
 
 		// --- 3c. The child exits without serving → the truth shows at the next ask
-		await sleep(2000);
+		assert("3c precondition: the child has exited", upPid > 0 && await stopHolder(upPid) === "stopped", "");
+		if (children.includes(upPid)) children.splice(children.indexOf(upPid), 1);
 		const gone = getDaemonStatus(realSession);
 		assert(
 			"after the child exits → code `not-found`",
@@ -190,6 +197,7 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 			`got ${JSON.stringify(gone.reason)}`,
 		);
 	} finally {
+		for (const pid of children) await stopHolder(pid);
 		try { fs.rmSync(fixture, { recursive: true, force: true }); } catch {}
 	}
 }

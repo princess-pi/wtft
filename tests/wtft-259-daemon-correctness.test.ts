@@ -246,10 +246,11 @@ try {
 		fs.writeFileSync(tagLike, "");
 		run(root, ["--harness", "claude", "--session", tagLike]);
 		const lease = getDaemonPidPath(tagLike);
-		check(read(lease).trim() === String(h.pid), "fixture: the request pointed the lease at the harness");
+		check(read(lease).trim() === String(h.pid) && fs.existsSync(`${lease}.display`), "fixture: the request pointed the lease and its .display marker at the harness");
 		const gaveUp = await until(() => read(h.err).includes(`could not adopt ${tagLike}`), 10_000);
 		check(gaveUp !== Infinity, "the harness reports the session it gave up on");
-		check(!fs.existsSync(lease) && !fs.existsSync(`${lease}.display`), "and removes the lease and .display marker naming it");
+		// The harness logs the give-up before it removes them.
+		check(await until(() => !fs.existsSync(lease) && !fs.existsSync(`${lease}.display`), 5_000) !== Infinity, "and removes the lease and .display marker naming it");
 		process.kill(h.pid, "SIGTERM");
 	}
 

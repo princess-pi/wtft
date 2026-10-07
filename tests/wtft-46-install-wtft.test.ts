@@ -155,6 +155,31 @@ console.log("\n2. Installing into an empty dir produces both artifacts, executab
 
 	const re = run(["--check", "--json", "--dir", dir]);
 	check(re.code === 0, "V2h: --check now exits 0", `got ${re.code}`);
+
+	if (fs.existsSync("/proc/self/stat")) {
+		const shims = mkSandbox(path.join(os.tmpdir(), "46-forkcount-"));
+		const tally = path.join(shims, "tally");
+		fs.writeFileSync(tally, "");
+		for (const name of ["basename", "dirname", "sed", "awk", "readlink", "stat", "cat", "grep", "tr", "cut", "head"]) {
+			const real = ["/usr/bin", "/bin"].map(d => path.join(d, name)).find(p => fs.existsSync(p));
+			if (!real) continue;
+			fs.writeFileSync(path.join(shims, name), `#!/bin/sh\necho ${name} >> '${tally}'\nexec '${real}' "$@"\n`);
+			fs.chmodSync(path.join(shims, name), 0o755);
+		}
+		const hostPids = fs.readdirSync("/proc").filter(p => {
+			try { return /^\d+$/.test(p) && fs.readFileSync(`/proc/${p}/cmdline`).length > 0; } catch { return false; }
+		}).length;
+		if (hostPids < 40) {
+			console.log(`  ##SKIP## V2i: ${hostPids} processes with a command line on this host, too few to tell a per-process spawn from a fixed cost`);
+		} else {
+			const counted = run(["--check", "--json", "--dir", dir], [shims]);
+			const forks = fs.readFileSync(tally, "utf8").split("\n").filter(Boolean).length;
+			check(counted.code === 0 && forks > 0, "V2i: fixture precondition: the in-sync --check ran through the counting shims",
+				`exit ${counted.code}, ${forks} shimmed calls`);
+			check(forks < hostPids / 2, "V2i: the /proc scan does not spawn a command per host process",
+				`${forks} shimmed calls for ${hostPids} pids`);
+		}
+	}
 }
 
 // ---
@@ -744,7 +769,12 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		try {
 			out = execFileSync(INSTALLER, ["--json", "--dir", dir], {
 				encoding: "utf8", stdio: "pipe",
-				env: { PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":") },   // no HOME, no XDG_CONFIG_HOME
+				// Without TMPDIR the wtft-daemon --restart this install runs stops every daemon leased in /tmp — the host's own.
+				env: {
+					PATH: [BUN_DIR, "/usr/bin", "/bin"].join(":"),
+					TMPDIR: mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-tmp-")),
+					XDG_STATE_HOME: mkSandbox(path.join(os.tmpdir(), "46-cfgmig-nohome-state-")),
+				},
 			});
 			code = 0;
 		} catch (e: any) { code = e?.status ?? -1; out = e?.stdout ?? ""; }
@@ -753,6 +783,11 @@ console.log("\n9. Config migration off princess-pi-tools and onto wtft (#156)");
 		try { doc = JSON.parse(out); } catch { /* left null */ }
 		check(Array.isArray(doc?.configMigration) && doc.configMigration.length === 0,
 			"V9g: configMigration is [], not a partial or default-filled array", JSON.stringify(doc?.configMigration));
+		const fromDir = !fs.existsSync("/proc/self/stat") ? [] : fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
+			try { return fs.readFileSync(`/proc/${p}/cmdline`, "utf8").includes(dir + "/"); } catch { return false; }
+		});
+		check(fromDir.length === 0, "V9g: no process runs from --dir, so the install's --restart respawned nothing from it",
+			`pids ${fromDir.join(",")}`);
 	}
 
 	// V9h — a coexisting PATH shadow is still reported when config-left wins
@@ -1031,8 +1066,30 @@ console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid
 //     what a changed build does to it.
 // ---
 console.log("\n11. install-wtft restarts a daemon on an older build, and only then");
+const binReal = fs.realpathSync(path.join(REPO, "bin"));
+const olderOnCloneBin = (): string[] => {
+	if (!fs.existsSync("/proc/self/stat")) return [];
+	const btime = Number(/^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1]);
+	const hz = Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).trim());
+	return fs.readdirSync("/proc").filter(p => /^\d+$/.test(p)).filter(p => {
+		try {
+			const cwd = fs.readlinkSync(`/proc/${p}/cwd`);
+			const argv = fs.readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0").filter(Boolean);
+			const runtime = ["node", "nodejs", "bun", "bun.exe"].includes(path.basename(argv[0] ?? ""));
+			const named = runtime ? argv.slice(1).find(a => !a.startsWith("-")) : argv[0];
+			if (!named || !path.basename(named).startsWith("wtft-daemon")) return false;
+			const script = path.resolve(cwd, named);
+			if (fs.realpathSync(path.dirname(script)) !== binReal) return false;
+			const ticks = Number(fs.readFileSync(`/proc/${p}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[19]);
+			return btime + Math.floor(ticks / hz) <= Math.floor(fs.statSync(script).mtimeMs / 1000);
+		} catch { return false; }
+	});
+};
+const othersOnCloneBin = olderOnCloneBin();
 if (!fs.existsSync("/proc/self/stat")) {
 	console.log("  ##SKIP## no /proc on this host");
+} else if (othersOnCloneBin.length > 0) {
+	console.log(`  ##SKIP## V11: pids ${othersOnCloneBin.join(",")} on this host run a wtft-daemon from ${binReal} on an older build, which install-wtft counts too`);
 } else {
 	const dir = mkSandbox(path.join(os.tmpdir(), "46-restart-"));
 	const bundle = path.join(dir, "wtft-daemon.mjs");

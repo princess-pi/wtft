@@ -856,7 +856,7 @@ function retryAdoptionLater(key: string, displayed: boolean) {
   timer.unref();
 }
 
-const RESPAWN_SETTLE_MS = 1000;
+const RESPAWN_SETTLE_MS = envMs("WTFT_RESPAWN_SETTLE_MS", 1000);
 
 function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -1500,7 +1500,7 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         claiming its lease when free; a harness holding no lease is stopped (unless a respawn
                         handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
                         outlives SIGKILL, or a respawn that neither runs nor hands off within
-                        1 s (one wait for all), makes it exit 1. Linux only (/proc)
+                        WTFT_RESPAWN_SETTLE_MS (one wait for all), makes it exit 1. Linux only (/proc)
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
                         lease here, found by its own --session resolved against its cwd, gets SIGTERM
@@ -1538,6 +1538,8 @@ Environment:
   WTFT_DAEMON_STARTUP_GRACE_MS Milliseconds after the daemon starts serving a session (its adoption, in a harness) before that drop can fire (default 60000)
   WTFT_HARNESS_SCAN_SLICE_MS   Milliseconds one slice of a harness's subagent scan runs before it yields (default 25)
   WTFT_HARNESS_SCAN_YIELD_MS   Milliseconds a harness pauses between those slices (default 0)
+  WTFT_RESPAWN_SETTLE_MS       Milliseconds --restart waits before judging its respawns; one still starting
+                               then counts as running (default 1000)
   A *_MS value that is not all digits is ignored, and the default used.
   WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).`);
   const usage = (why: string): never => {

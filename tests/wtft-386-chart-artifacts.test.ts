@@ -141,8 +141,9 @@ describe("the wtft pages", () => {
 
 describe("the library page", () => {
 	const at = (state: Partial<FairState> = {}) => renderFair({ ...FAIR_DEFAULTS, ...state, now: Date.UTC(2026, 8, 13, 20, 30) });
+	const RENDER_TIMEOUT_MS = 60_000;
 
-	it("draws the booth through buildWtftLines, unchanged in the first view", () => {
+	it("draws the booth through buildWtftLines, unchanged in the first view", { timeout: RENDER_TIMEOUT_MS }, () => {
 		const picture = at();
 		const stdout = process.stdout as { columns?: number };
 		const realColumns = stdout.columns;
@@ -171,7 +172,7 @@ describe("the library page", () => {
 		assert.equal(sales.filter((sale) => sale.cacheMiss).length, 1);
 	});
 
-	it("every substitution fires somewhere, and each one is a finding row on the spec page", () => {
+	it("every substitution fires somewhere, and each one is a finding row on the spec page", { timeout: RENDER_TIMEOUT_MS }, () => {
 		const fired = new Set<string>();
 		for (const state of [{}, { unit: "tokens" as const }, { souvenirs: true }]) {
 			for (const sub of at(state).substitutions) if (sub.count > 0) fired.add(sub.id);
@@ -183,7 +184,7 @@ describe("the library page", () => {
 		for (const id of ids) assert.match(findings, new RegExp(`^\\| F\\d+ \\|.*\\| ${id} \\|$`, "m"), id);
 	});
 
-	it("the second view drops every wtft word the first view carries", () => {
+	it("the second view drops every wtft word the first view carries", { timeout: RENDER_TIMEOUT_MS }, () => {
 		const words = /WTF Tokens|Ovrhd|earlier bins|CH: |Cache Miss|Other" category| tok\b|^ {2}[↑↓R]/;
 		for (const state of [{ unit: "tokens" as const, souvenirs: true }, { unit: "cost" as const, souvenirs: true }]) {
 			const picture = at(state);

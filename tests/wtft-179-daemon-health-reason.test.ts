@@ -189,6 +189,7 @@ console.log("V3. #124 startup indicator — the spawner's claim, not a grace win
 
 		// --- 3c. The child exits without serving → the truth shows at the next ask
 		assert("3c precondition: the child has exited", upPid > 0 && await stopHolder(upPid) === "stopped", "");
+		if (children.includes(upPid)) children.splice(children.indexOf(upPid), 1);
 		const gone = getDaemonStatus(realSession);
 		assert(
 			"after the child exits → code `not-found`",

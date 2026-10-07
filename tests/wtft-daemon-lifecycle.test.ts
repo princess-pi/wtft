@@ -2,7 +2,7 @@
 /**
  * Validates #95 daemon lifecycle fixes against the BUILT bins:
  *   1. Idle clamped by classified freshness (dual-daemon heartbeat fixture)
- *   2. Takeover protocol — lost PID lease → exit within 2 beats, no unlink
+ *   2. Takeover protocol — lost PID lease → exit, no unlink
  *   3. Spawn-twice — exactly one surviving daemon, and it owns the PID file
  *   4. Session deleted → daemon exits (#129 Bug A)
  *   5. Reap on spawn kills orphans
@@ -163,7 +163,7 @@ console.log("1. Idle clamped by classified freshness (health)");
 }
 
 // ---
-// 2. Takeover protocol: lost PID lease → exit within 2 beats, no unlink
+// 2. Takeover protocol: lost PID lease → exit, no unlink
 // ---
 console.log("\n2. Takeover protocol (real daemon process)");
 {

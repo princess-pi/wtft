@@ -84,7 +84,8 @@ console.log("\nPART R — chunkBytes must be a positive safe integer");
 // PART M — peak memory does not scale with the file
 // ---
 console.log("\nPART M — a large transcript parses without holding it whole");
-{
+if (process.platform !== "linux") console.log("  ##SKIP## PART M needs /proc/self/clear_refs, which only Linux has");
+else {
 	const FIXTURE_MB = 80;
 	const CEILING_FRACTION_OF_FILE = 1;
 	const big = path.join(dir, "big.jsonl");

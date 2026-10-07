@@ -63,7 +63,8 @@ each tick still filters them against its own `now`.
 - The issue's Closer, measured by hand: an idle Pi with `pi/token-budget.js` and one active tag file
   of at least 2 MB uses under 1% of one core over 20 s, and its TPM matches a fresh full read.
   Measured 2026-10-07: `pi/wtft.js` and `pi/token-budget.js` loaded, one active tag file, a 3.55 MB
-  copy of this host's largest current-version tag, ending in a heartbeat line rewritten in place at
+  copy of the v2.14.0 tag file of Claude session `f610b26b-818e-4292-8c09-64328f9a4e7a` (not the
+  file §1 measured), ending in a heartbeat line rewritten in place at
   the same width every 667 ms, as `upsertHeartbeat` does, plus one future-dated turn of 12,345 input
   tokens. % of one core over 20 s: main 6.30 and 5.80; this branch 0.70, 0.20, 0.15, 0.20 and 0.20.
   Both builds' widgets showed that turn as `12K`. An instrumented branch build read the tag file

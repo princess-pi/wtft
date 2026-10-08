@@ -100,7 +100,7 @@ try {
 		(resolve, reject) => {
 			const s = spawn(
 				"script",
-				["-q", "-c", `${SCRIPT} --watch -s '${sessionPath}' -l1`, "/dev/null"],
+				["-q", "-e", "-c", `${SCRIPT} --watch -s '${sessionPath}' -l 1`, "/dev/null"],
 				{ stdio: ["pipe", "pipe", "pipe"] }
 			);
 

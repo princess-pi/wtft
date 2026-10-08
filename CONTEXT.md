@@ -432,7 +432,7 @@ bare "footer" for the chart's own lines under the bars, which are part of the wt
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
 the widget does not (`--watch`, `--json`). Refuses `-p/--pager`, which is
-the widget's (see **Pager**).
+the widget's (see **Pager**), and exits 2 on a call it cannot read (`docs/spec-91-strict-cli-args.md`).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
 
 **Session picker** (#89):
@@ -467,7 +467,7 @@ carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interact
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
 `total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
 accumulation error.
-Suppresses the rendering flags, but not the commands that run instead of a report
+Suppresses the well-formed rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.
 _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "JSON mode"

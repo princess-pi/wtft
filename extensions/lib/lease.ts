@@ -45,19 +45,37 @@ export function unlinkLeaseIf(file: string, value: string, observed?: LeaseIdent
 	}
 }
 
+const REPLACE_LOCK_WAIT_MS = 5000;
+
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Publish `value` at `file` through a rename, so no reader sees an empty
- * lease. With `expected`, only when the lease still holds it; true when
- * written. Throws when the write itself fails.
+ * lease. With `expected`, only when the lease still holds it, and under
+ * `<file>.lock`, so two conditional replaces of one lease never interleave;
+ * false when it does not hold, or when a live owner keeps the lock past
+ * `REPLACE_LOCK_WAIT_MS`. True when written. Throws when the write itself fails.
  */
 export function replaceLease(file: string, value: string, owner: string, expected?: string): boolean {
+	if (expected === undefined) return publish(file, value, owner);
+	const lock = `${file}.lock`;
+	for (const until = Date.now() + REPLACE_LOCK_WAIT_MS; claimLease(lock, owner, holder => pidAlive(leasePid(holder))) === "busy";) {
+		if (Date.now() >= until) return false;
+		sleepSync(5);
+	}
+	try {
+		return leaseHolder(file) === expected && publish(file, value, owner);
+	} finally {
+		unlinkLeaseIf(lock, owner);
+	}
+}
+
+function publish(file: string, value: string, owner: string): true {
 	const replacement = `${file}.replace-${owner}`;
 	try {
 		fs.writeFileSync(replacement, value);
-		if (expected !== undefined && leaseHolder(file) !== expected) {
-			fs.rmSync(replacement, { force: true });
-			return false;
-		}
 		fs.renameSync(replacement, file);
 		return true;
 	} catch (err) {

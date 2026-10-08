@@ -377,6 +377,71 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 		process.kill(h.pid, "SIGTERM");
 	}
 
+	console.log("\n-F landing inside a harness start's own lease hand-off is not lost");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the -F write is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		const root = makeRoot("force-handoff");
+		const target = session(root, "handoff-target");
+		const other = session(root, "handoff-other");
+		const h = start(root, ["--harness", "claude", "--session", other], "handoff.err");
+		check(await until(() => classified(other, "handoff-other"), 15_000) !== Infinity, "fixture: the harness serves another session");
+		const parser = start(root, ["--harness", "claude", "--session", target], "handoff-first.err");
+		check(await until(() => classified(target, "handoff-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		check(await until(() => !alive(parser.pid), 5_000) !== Infinity, "fixture: the first start handed the target over and exited");
+		run(root, ["--stop", target]);
+		const lease = getDaemonPidPath(target);
+		check(await until(() => !fs.existsSync(lease), 5_000) !== Infinity, "fixture precondition: no daemon holds the target's lease");
+		const tag = getCurrentVersionTagPath(target);
+		const row = read(tag).split("\n").find(l => l.includes('"handoff-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"handoff-target"', '"handoff-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "handoff-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const fired = path.join(root, "force-started");
+		const forceOut = path.join(root, "force.out");
+		const forceExit = path.join(root, "force.exit");
+		// The spawner's claim names the start; -F runs between the start's compare and its rename.
+		const preload = path.join(root, "force-inside-handoff.mjs");
+		fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { spawn } from "node:child_process";
+import { mock } from "bun:test";
+const lease = process.env.WTFT_488_LEASE;
+const originalRename = realFs.renameSync.bind(realFs);
+const originalRead = realFs.readFileSync.bind(realFs);
+realFs.writeFileSync(lease, String(process.pid));
+let done = false;
+function renameSync(from, to) {
+  if (!done && String(to) === lease && String(from) === lease + ".replace-" + process.pid) {
+    done = true;
+    spawn("sh", ["-c", 'node "$WTFT_488_CLI" --json -F -s "$WTFT_488_TARGET" > "$WTFT_488_OUT" 2>&1; echo $? > "$WTFT_488_EXIT"'], { detached: true, stdio: "ignore" }).unref();
+    let landed = false;
+    for (const until = Date.now() + 3000; Date.now() < until && !landed;) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      try { landed = originalRead(lease, "utf8").trim() === "rebuild"; } catch {}
+    }
+    realFs.writeFileSync(process.env.WTFT_488_FIRED, landed ? "landed inside the hand-off" : "held off until the hand-off ended");
+  }
+  return originalRename(from, to);
+}
+mock.module("node:fs", () => ({ ...realFs, renameSync, default: { ...realFs, renameSync } }));
+`);
+		const starter = spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+			encoding: "utf8", timeout: 30_000,
+			env: { ...envFor(root), WTFT_488_LEASE: lease, WTFT_488_CLI: cli, WTFT_488_TARGET: target, WTFT_488_OUT: forceOut, WTFT_488_EXIT: forceExit, WTFT_488_FIRED: fired },
+		});
+		check(fs.existsSync(fired), `fixture precondition: -F ran during the start's lease hand-off (${read(fired)})`);
+		check(starter.status === 0, `fixture precondition: the start handed the target to the harness and exited 0 (exit ${starter.status}${starter.error ? `, ${starter.error.message}` : ""}: ${starter.stderr.trim()})`);
+		check(await until(() => read(forceExit).trim() !== "", 20_000) !== Infinity, "fixture: -F finished");
+		check(read(forceExit).trim() === "0", `-F exits 0 (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);
+		const costOf = (out: string) => { try { return JSON.parse(out.slice(out.indexOf("{")))?.total?.costUsd ?? NaN; } catch { return NaN; } };
+		const oneTurn = costOf(spawnSync("node", [cli, "--json", "-s", other], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		check(oneTurn > 0 && Math.abs(costOf(read(forceOut)) - oneTurn) < 1e-9, `-F reports the transcript's one row and not the row it does not hold ($${costOf(read(forceOut))}, one row $${oneTurn})`);
+		check(classified(target, "handoff-target") && !classified(target, "handoff-bogus"),
+			`the harness rebuilds the target's tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${h.pid})`);
+		process.kill(h.pid, "SIGTERM");
+	}
+
 	console.log("\n-F reports the rebuilt tag even when the harness empties it after taking the lease");
 	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
 		skip("the gap is staged from a bun --preload hook; run the suite under bun");

@@ -336,6 +336,7 @@ mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, r
 		const target = session(root, "gap-target");
 		const tag = getCurrentVersionTagPath(target);
 		const fired = path.join(root, "truncate-delayed");
+		const armed = path.join(root, "truncate-armed");
 		// The harness's truncate of the target's tag waits 1.5 s, after its lease already names it.
 		const preload = path.join(root, "slow-truncate.mjs");
 		fs.writeFileSync(preload, `
@@ -343,7 +344,7 @@ import * as realFs from "node:fs";
 import { mock } from "bun:test";
 const originalTruncate = realFs.truncateSync.bind(realFs);
 function truncateSync(file, ...rest) {
-  if (String(file) === process.env.WTFT_293_TAG) {
+  if (String(file) === process.env.WTFT_293_TAG && realFs.existsSync(process.env.WTFT_293_ARMED)) {
     realFs.writeFileSync(process.env.WTFT_293_FIRED, "");
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
   }
@@ -354,7 +355,7 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		const errFile = path.join(root, "gap.err");
 		const fd = fs.openSync(errFile, "a");
 		const child = spawn(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
-			detached: true, stdio: ["ignore", "ignore", fd], env: { ...envFor(root), WTFT_293_TAG: tag, WTFT_293_FIRED: fired },
+			detached: true, stdio: ["ignore", "ignore", fd], env: { ...envFor(root), WTFT_293_TAG: tag, WTFT_293_FIRED: fired, WTFT_293_ARMED: armed },
 		});
 		child.unref();
 		fs.closeSync(fd);
@@ -366,8 +367,10 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 		const costOf = (out: string) => { try { return JSON.parse(out)?.total?.costUsd ?? NaN; } catch { return NaN; } };
 		const before = costOf(spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		check(!fs.existsSync(fired), "fixture precondition: no truncate was delayed before -F");
+		fs.writeFileSync(armed, "");
 		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
-		check(fs.existsSync(fired), "fixture precondition: the harness's truncate of the tag was delayed");
+		check(fs.existsSync(fired), "fixture precondition: the harness's truncate of the tag after -F was delayed");
 		check(costOf(forced.stdout) < before,
 			`the -F report does not count the row the transcript does not hold ($${costOf(forced.stdout)} against $${before}; exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }

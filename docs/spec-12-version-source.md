@@ -8,7 +8,7 @@ Issue: https://github.com/princess-pi/wtft/issues/12
   the package's own `package.json`, found from the module's location, never one found from the
   working directory.
 - **The name is the command's**, `wtft` on the CLI and `/wtft` in Pi, not the manifest's `name`.
-- **No manifest in `docs/manifests/` carries a `version` key**, so a second source of the version
+- **No `docs/manifests/*.json` carries a top-level `version` key**, so a second source of the version
   cannot come back in a manifest copied from an old one.
 
 ## Verification
@@ -17,4 +17,6 @@ Issue: https://github.com/princess-pi/wtft/issues/12
 
 - **V1** No `docs/manifests/*.json` has a top-level `version` key. Adding one turns it red.
 - **V2** The built CLI, run from the system temp directory, prints `wtft <package.json version>` as
-  its first `--version` line.
+  its first `--version` line. A precondition fails when the bundle is older than its sources.
+- **V3** The unbundled source, as Pi loads it, run from a directory holding a decoy `package.json`:
+  the first line names `/wtft` and `package.json`'s version, not the decoy's.

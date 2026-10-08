@@ -35,7 +35,7 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 │  sharing a message.id to one interaction at max cost    │
 │  (ppt#270 review) — on the initial read AND on every    │
 │  incremental append. Renders full chart                 │
-│  on every new data event + per-minute timeline refresh, │
+│  on every new data event,                               │
 │  and writes only the lines that changed (spec-364).     │
 │  Monitors daemon health via health() (lease, tag tail). │
 │  The spawner claims the lease: no starting window.      │
@@ -448,13 +448,13 @@ This is a narrower, different guarantee than `dedupeClassifiedById` (`dedupeClas
 
 ```
 Row 1:  sessionPath  (dim)
-Row 2:  💸 WTF Tokens?  (◆--orange--green--|--green---orange--◆) ⚡ SURGE 2x  ● live
+Row 2:  💸 WTF Tokens?  🌕──orange──green──☀️──green──orange──🌕 ⚡ SURGE 2x  ● live
 Row 3:  [legend: Spec, Code, Tests, Research, Git, Grep, Prompt, Other]
 Row 4+: ticks line, date dividers, bucket rows
 Footer: 'q' to exit[, using v<tagger version>, 'r' to restart]  (the bracket only with a daemon path; r in red when daemon dead)
 ```
 
-The 24-hour SURGE timeline and daemon status indicator are appended inline to the title line if they fit within terminal width; otherwise they wrap to separate lines between title and legend.
+The 24-hour SURGE timeline is always on the title line. The daemon status indicator is appended to it when it fits within the terminal width, and otherwise gets its own line between title and legend.
 
 ## Daemon Status States
 
@@ -480,15 +480,16 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
   generated manifest: they were hardcoded in four places plus four prose copies, and a
   schedule change had no way to fail when it missed one. The renderer asks `getPeakMultiplier`
   for each minute of a local hour and marks the hour when any minute bills above 1. It paints
-  the schedule for **the day containing `now`**, while the bins below it may be older; on a
-  weekend the DeepSeek bar shows no surge hours even where weekday bins are still flagged.
+  the schedule for one day: today on a live view, else the day of the newest interaction shown
+  (`docs/spec-19-timeline-session-day.md`).
 - **Green segments**: All other hours (normal pricing)
-- **Clock-face marker**: The current local hour renders as a clock-face emoji
+- **Clock-face marker**: The current local hour on a live view, else the newest interaction's
+  hour, renders as a clock-face emoji
   (<code>🕐</code>–<code>🕛</code>, including <code>🕛</code> at the noon hour), and is
   additionally bold — which starts its own colour segment. Solar noon is a separate
   `☀️` glyph between hour 11 and hour 12, never a replacement for the noon hour's slot
   (#7). There is no `◆` and has not been for some time; this line said there was (#503).
-- **Surge badges**: Appended when the card has a schedule and the instant is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
+- **Surge badges**: Appended on a live view when the card has a schedule and now is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
   - `⚡ SURGE 2x` — inside a window that still bills, before the surge stops (DeepSeek's multiplier is 2)
   - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
   - `⚡ SURGE ENDING` — within `SURGE_ENDING_MINUTES` before billing drops to 1 (blinking green). That instant follows windows that touch or overlap, including one that starts at 0 on the next UTC day when this one ends at 1440, and a weekend cutoff that falls inside the run

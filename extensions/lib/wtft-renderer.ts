@@ -807,6 +807,8 @@ export function buildWtftLines(
 		/** Placeholder rows fill the chart out to this many interval rows. */
 		padRowsTo?: number;
 		words?: ChartWords;
+		/** The view follows the session as it is written (the Pi widget, `--watch`). */
+		live?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -1000,6 +1002,8 @@ export function buildWtftLines(
 		showTokenColumns: opts?.showTokenColumns !== false,
 		padRowsTo: opts?.padRowsTo,
 		words: opts?.words,
+		live: opts?.live,
+		newestAt: interactions.reduce((newest, i) => Math.max(newest, i.timestamp || 0), 0) || undefined,
 	});
 }
 

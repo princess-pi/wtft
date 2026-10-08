@@ -58,6 +58,12 @@ session or a harness root is under `tmpDir`, the caller's `os.tmpdir()`. A test 
 suite its own `TMPDIR`, so a suite's `--cleanup` reaches only its own fixtures
 (`tests/wtft-96-fixture-daemons.test.ts`).
 
+`decideUnleased(proc, { tmpDir, cleanup, stopSession })` is what `--cleanup` and `--stop` do with
+a daemon from the process table that holds no lease in `tmpDir`: `clean` under `--cleanup` for a
+per-session fixture (`isFixtureDaemon`) or a sandboxed harness, else `stop` for a per-session
+daemon whose resolved `--session` is `stopSession`, else `keep`. "Sandboxed" and the daemon's own
+tmp dir are defined in `docs/spec-387-private-tmpdir.md`.
+
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
 

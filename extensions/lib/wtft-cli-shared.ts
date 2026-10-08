@@ -57,9 +57,20 @@ export interface WtftCliOptions {
 	 *  rendering. CLI-only: the Pi extension parses it and ignores it, because a
 	 *  TUI widget has no stdout to write an object to. */
 	json: boolean;
+	/** The first argument the parser could not read, named in one sentence; `undefined` when it read them all. */
+	usageError: string | undefined;
 }
 
 // ---
+
+function isKnownTimezone(tz: string): boolean {
+	try {
+		new Intl.DateTimeFormat("en-US", { timeZone: tz });
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Breaking: `-t` and `-T` shortcuts are intentionally NOT supported.
@@ -105,9 +116,29 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let daemonStop: string | undefined = undefined;
 	let thinkingBudget: number | undefined = undefined;
 	let json = false;
+	let usageError: string | undefined = undefined;
+	const refuse = (why: string) => { usageError ??= why; };
 
 	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
+		const inline = /^(--session|--dir|--cwd|--harness|--pad|--stop|--thinking-budget|--interval|--limit|--width|--tz|--timezone)=/.exec(argv[i]);
+		const arg = inline ? inline[1] : argv[i];
+		const value = (): string | undefined => {
+			const next = inline ? argv[i].slice(inline[0].length) : argv[i + 1];
+			if (next === undefined || next === "" || (!inline && next.startsWith("-"))) {
+				refuse(`${arg} needs a value`);
+				return undefined;
+			}
+			if (!inline) i++;
+			return next;
+		};
+		const cannotUse = (val: string, takes: string) => refuse(`${arg} takes ${takes}, not ${JSON.stringify(val)}`);
+		const count = (min: number): number | undefined => {
+			const val = value();
+			if (val === undefined) return undefined;
+			if (/^\d+$/.test(val) && Number(val) >= min) return Number(val);
+			cannotUse(val, `a whole number of ${min} or more`);
+			return undefined;
+		};
 
 		if (arg === "--help" || arg === "-h") {
 			showHelp = true;
@@ -155,22 +186,23 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			pager = true;
 
 		} else if (arg === "-s" || arg === "--session") {
-			targetSession = argv[++i];
+			targetSession = value();
 		} else if (arg === "--dir" || arg === "--cwd") {
-			cwdOverride = argv[++i];
+			cwdOverride = value();
 		} else if (arg === "--harness") {
-			const val = argv[++i];
+			const val = value();
 			if (val === "pi" || val === "claude-code" || val === "auto") {
 				harnessOption = val;
+			} else if (val !== undefined) {
+				cannotUse(val, "pi, claude-code or auto");
 			}
 		} else if (arg === "-W" || arg === "--watch") {
 			showWatch = true;
 		} else if (arg === "--pad") {
-			const val = parseInt(argv[i + 1], 10);
-			if (!isNaN(val) && val >= 0) {
+			const val = count(0);
+			if (val !== undefined) {
 				pad = val;
 				hasPad = true;
-				i++;
 			}
 		} else if (arg === "--json") {
 			json = true;
@@ -181,67 +213,43 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		} else if (arg === "--restart") {
 			daemonRestart = true;
 		} else if (arg === "--stop") {
-			daemonStop = argv[++i];
+			daemonStop = value();
 		} else if (arg === "--thinking-budget") {
-			const val = parseInt(argv[i + 1], 10);
-			if (!isNaN(val) && val > 0) {
-				thinkingBudget = val;
-				i++;
-			}
+			thinkingBudget = count(1);
 
 		} else if (arg === "-i" || arg === "--interval") {
-			const val = argv[i + 1];
-			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
-				interval = val;
+			const val = value();
+			const parts = val === undefined ? null : /^(\d+)([mhdw]|t(?:urns?)?)$/.exec(val);
+			if (parts && Number(parts[1]) >= 1) {
+				interval = val!;
 				hasInterval = true;
-				i++;
+			} else if (val !== undefined) {
+				cannotUse(val, "a whole count of 1 or more and a unit: m, h, d, w, t, turn or turns");
 			}
 		} else if (arg === "-l" || arg === "--limit") {
-			const val = argv[i + 1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				limit = num;
+			const val = count(1);
+			if (val !== undefined) {
+				limit = val;
 				hasLimit = true;
-				i++;
 			}
 		} else if (arg === "-w" || arg === "--width") {
-			const val = argv[i + 1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				width = num;
+			const val = count(1);
+			if (val !== undefined) {
+				width = val;
 				hasWidth = true;
-				i++;
 			}
 		} else if (arg === "--tz" || arg === "--timezone") {
-			const val = argv[i + 1];
-			if (val && !val.startsWith("-")) {
+			const val = value();
+			if (val !== undefined && isKnownTimezone(val)) {
 				timezone = val;
 				hasTimezone = true;
-				i++;
+			} else if (val !== undefined) {
+				cannotUse(val, "a time zone name the runtime knows");
 			}
-		} else if (arg.startsWith("--interval=")) {
-			const val = arg.split("=")[1];
-			if (val && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
-				interval = val;
-				hasInterval = true;
-			}
-		} else if (arg.startsWith("--limit=")) {
-			const val = arg.split("=")[1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				limit = num;
-				hasLimit = true;
-			}
-		} else if (arg.startsWith("--width=")) {
-			const val = arg.split("=")[1];
-			const num = parseInt(val, 10);
-			if (!isNaN(num) && num > 0) {
-				width = num;
-				hasWidth = true;
-			}
-		} else if (arg.startsWith("--tz=") || arg.startsWith("--timezone=")) {
-			timezone = arg.split("=")[1];
-			hasTimezone = true;
+		} else if (arg.startsWith("-")) {
+			refuse(`unknown flag ${arg}`);
+		} else {
+			refuse(`unexpected argument ${JSON.stringify(arg)}`);
 		}
 	}
 
@@ -266,6 +274,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		daemonList, daemonCleanup, daemonRestart, daemonStop,
 		thinkingBudget,
 		json,
+		usageError,
 	};
 }
 

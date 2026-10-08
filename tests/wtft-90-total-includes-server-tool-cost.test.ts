@@ -85,11 +85,6 @@ function cli(source: string, args: string[]): string {
 /** The chart's running total: the newest cumulative bin row, which is the
  *  rightmost number a reader's eye lands on. Rows are newest-first. */
 function chartTotal(session: string): number {
-	// DOCUMENTED SPELLINGS ONLY `-m cumulative` is not a flag:
-
-	// `--cumulative`/`-c` and `--bucket`/`-b` are, and `parseWtftCliArgs` ignores
-	// an unknown flag silently (#91) — so the first cut of this passed without
-	// the mode ever having been honoured, on a default that happened to match.
 	const out = cli(session, ["--interval", "1h", "--cumulative"]);
 	const row = out.split("\n").find(l => /^\s*\d\d:\d\d\s+\+\$/.test(l));
 	if (!row) throw new Error(`no cumulative bin row in:\n${out}`);

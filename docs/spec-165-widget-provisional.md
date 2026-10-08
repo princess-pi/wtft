@@ -12,7 +12,7 @@ short by that file's whole cost with nothing said. The parser's warning goes to 
 TUI never shows.
 
 The repro in the issue named a corrupt transcript. That is wrong and stays wrong: `parseSessionFile`
-skips unparseable lines one at a time and never throws, which is [#94](https://github.com/princess-pi/wtft/issues/94).
+skips unparseable lines one at a time and never throws.
 Only a READ failure reaches this path.
 
 ## The fix

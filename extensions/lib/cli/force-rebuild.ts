@@ -1,27 +1,27 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getDaemonPidPath, forceRebuildSession, describeForceRebuildFailure } from "../wtft-shared.js";
+import { getDaemonPidPath, getCurrentVersionTagPath, forceRebuildSession, describeForceRebuildFailure } from "../wtft-shared.js";
+import { parseTagLine } from "../tag-log.js";
 import { spawnWtftDaemon } from "../wtft-cli-shared.js";
 
 /** `-F`: rebuild the session's tag, and wait for a harness to adopt it. Exits 1 when nothing was rebuilt. */
 export async function runForceRebuild(finalSessionPath: string, daemonDir: string): Promise<void> {
+	const requestedAt = Date.now();
 	const how = forceRebuildSession(finalSessionPath);
 	let adopted = true;
 	if (how === "rebuild") {
-		// Wait until the harness has
-		// adopted the session; it truncates the tag in the same step as it
-		// claims the lease, and the pause after covers that step.
 		if (!spawnWtftDaemon(finalSessionPath, daemonDir)) {
 			console.error(`❌ Force re-parse: the log parser daemon for ${path.basename(finalSessionPath)} could not be started, so the harness was not asked for it. Its lease reads "rebuild"; run -F again.`);
 			process.exit(1);
 		}
 		const lease = getDaemonPidPath(finalSessionPath);
+		const tag = getCurrentVersionTagPath(finalSessionPath);
 		adopted = false;
 		for (const until = Date.now() + 10_000; Date.now() < until && !adopted;) {
 			let held = "";
 			try { held = fs.readFileSync(lease, "utf8").trim(); } catch { /* not claimed yet */ }
-			adopted = held !== "rebuild" && held !== "";
-			await new Promise(resolve => setTimeout(resolve, 100));
+			adopted = held !== "rebuild" && held !== "" && tagStartedSince(tag, requestedAt);
+			if (!adopted) await new Promise(resolve => setTimeout(resolve, 100));
 		}
 	}
 	const what = {
@@ -44,4 +44,15 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 		process.exit(1);
 	}
 	console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
+}
+
+function tagStartedSince(tag: string, since: number): boolean {
+	const head = Buffer.alloc(256);
+	let read = 0;
+	try {
+		const fd = fs.openSync(tag, "r");
+		try { read = fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+	} catch { return false; }
+	const first = parseTagLine(head.subarray(0, read).toString("utf8").split("\n", 1)[0]);
+	return first?.kind === "heartbeat" && first.first >= since;
 }

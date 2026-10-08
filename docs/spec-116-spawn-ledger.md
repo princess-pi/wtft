@@ -178,8 +178,8 @@ descendant folds on a model-tagged turn or prices as a subagent
   cannot be read, has complete (newline-ended) non-blank lines and not one that parses, or cannot be stat-ed — the child's
   own transcript, any subagent transcript discovery lists for it, or that discovery itself; or a
   `claude -p` transcript one of those parses folds could not be read or stat-ed, or its discovery
-  failed — one discovery cannot read is skipped, not folded; the only
-  skip class that is a bug rather than a fact). **One entry per session, not per edge**: two edges
+  failed; the only skip class that is a bug rather than a fact). A `claude -p` transcript discovery
+  cannot read is skipped, not folded. **One entry per session, not per edge**: two edges
   onto the same unresolved child are one gap. An entry is removed when a later descendant folds that
   session on a model-tagged turn or lists it as a subagent, because its money has then landed (a
   subagent session's untagged turns in `descendantUntagged`; a folded session's whole share,

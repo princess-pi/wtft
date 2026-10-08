@@ -51,7 +51,7 @@ to start the scan, so `unrecorded` is `[]` without a look.
   instead of "no spawn record names".
 - **One id in two project directories** is a moved session; only its newest copy by mtime is
   classified — the copy every other reader prices. When the newest copy cannot be read, an older
-  copy may be listed in its place.
+  copy may be listed in its place, priced from that older copy.
 
 ### The launch span
 

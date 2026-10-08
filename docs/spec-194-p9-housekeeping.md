@@ -65,17 +65,15 @@ child's edge total is `$0`.
 field, and it skips wherever `~/.claude` is absent, including CI.
 
 **Decision (#194, A):** commit a small corpus of real harness `.meta.json` files at
-`tests/fixtures/meta-corpus/`: seven files whose keys together cover every key in the 16
-key sets seen on this host. Two are Dynamic Workflow children (no `description`, no
-`toolUseId`); the others are a depth-2 child carrying `parentAgentId`, a fork, a named agent
-type, a named dispatch, and one carrying `cwd`. The reader itself branches on none of these. A `README.md` beside
-them records where they came from, when, and how to refresh them.
+`tests/fixtures/meta-corpus/`, whose keys together cover every key seen on this host. The
+reader itself branches on none of these. A `README.md` beside them lists each file and the shape
+it stands for, and records where they came from, when, and how to refresh them.
 
 - **`M7c`** runs everywhere. For every corpus file, the two required names are present,
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
   `readSubagentMeta` accepts the file with every optional field it carries (`description`,
   `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. It also checks that the corpus is
-  exactly the seven files the test's `CORPUS` list and the README table name, and that every
+  exactly the files the test's `CORPUS` list names, and that every
   key in it is one the reader carries or
   one the test lists as knowingly ignored, so a renamed key brought in by a refresh fails
   instead of going unread. The presence checks guard the committed data;

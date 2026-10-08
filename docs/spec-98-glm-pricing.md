@@ -28,10 +28,10 @@ Four flat cards, USD per 1M tokens, no `surge`, no `dateTiers`:
 
 - **Longest key wins.** `z-ai/glm-5.3` is a substring of the other three, and `z-ai/glm-5.3-flash` of `-flashx`. A registry holding only the flagship key would price Flash, FlashX and Prime at the flagship card and report `isModelPriced` true, which hides the `?`. All four keys are required.
 - **Prime has its own key.** OpenRouter lists `z-ai/glm-5.3-prime` at $2.80 / $8.80 / $0.56 from one host, Alibaba Cloud Int. Z.ai's page has no Prime row. The OpenRouter model page and its models API are the only published source; the card is registered from them.
-- **`cacheWrite: 0`.** The Z.ai page publishes a cached-input rate and no cache-creation rate. Every one of 363 real `claude-glm` turns reported `cache_creation_input_tokens: 0`. A non-zero value would have no published rate to price at, so 0 stays.
+- **`cacheWrite: 0`.** The Z.ai page publishes a cached-input rate and no cache-creation rate. All 363 real `claude-glm` turns read, flagship and Flash only, reported `cache_creation_input_tokens: 0`; no FlashX or Prime turn was available. A non-zero value on any of the four would have no published rate to price at, so 0 stays.
 - **No surge.** Z.ai publishes no peak window. Reasoning tokens already bill at the output rate in `calculateClaudeCost`.
-- **`:batch` ids** (`z-ai/glm-5.3:batch`, `z-ai/glm-5.3-flash:batch`) stay on the substring rule and inherit the non-batch card. OpenRouter lists them at lower rates; no key of their own until a turn carries one.
-- **Z.ai list, not a cheap host.** Matches the DeepSeek rows, which are the first-party card.
+- **`:batch` ids** (`z-ai/glm-5.3:batch`, `z-ai/glm-5.3-flash:batch`) stay on the substring rule and inherit the non-batch card. OpenRouter's models API lists them at lower rates (recorded in the evidence file), but `claude-glm` never sends one and Z.ai publishes no batch rate, so they get no key until a turn carries one.
+- **Z.ai list, not a cheap host.** Matches the DeepSeek rows, which are the first-party card. Prime is the one exception: Z.ai publishes no Prime row, and its only OpenRouter host lists it at the rate registered.
 - **`WTFT_TAGGER_VERSION` bumps 2.14.0 to 2.15.0**, so tags written with GLM turns at the fallback re-parse.
 - **Out of scope:** the DeepSeek rows and Claude's own `/cost`.
 
@@ -42,7 +42,7 @@ Four flat cards, USD per 1M tokens, no `surge`, no `dateTiers`:
 - 1,000,000 each of `input_tokens`, `cache_read_input_tokens` and `output_tokens` costs 6.06 for `z-ai/glm-5.3`, 0.68 for `-flash`, 1.695 for `-flashx`, 12.16 for `-prime`. `z-ai/glm-5.3[1m]` costs 6.06.
 - `lookupModelPricing` returns the Flash, FlashX and Prime cards for their ids, not the flagship card.
 - `isModelPriced` is true for all four, and for `z-ai/glm-5.3:batch`.
-- `getPeakMultiplier` is 1 for all four ids, inside and outside the DeepSeek peak window.
+- `getPeakMultiplier` is 1 for all four ids, at an instant inside the DeepSeek peak window and one outside it.
 - `cache_creation_input_tokens` of 1,000,000 costs 0 for each.
 
 `tests/wtft-pricing-manifest.test.ts` closes the manifest: `docs/manifests/wtft-pricing.json` equals `renderPricingManifest()`.

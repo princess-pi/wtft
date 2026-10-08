@@ -18,4 +18,6 @@ OpenRouter model pages, fetched 2026-10-08:
 - https://openrouter.ai/z-ai/glm-5.3-prime, "This model is hosted by one provider", Alibaba Cloud Int.: $2.80 input, $8.80 output, $0.56 cache read. Released Sep 23, 2026. Described as the high-speed variant of GLM-5.3.
 - https://openrouter.ai/api/v1/models lists `z-ai/glm-5.3-prime` at prompt 0.0000028, completion 0.0000088, input_cache_read 0.00000056 per token.
 
+The same models API lists `z-ai/glm-5.3:batch` at prompt 0.00000045, completion 0.000002, input_cache_read 0.0000001 and `z-ai/glm-5.3-flash:batch` at prompt 0.00000006, completion 0.0000002, input_cache_read 0.000000012 per token. `claude-glm` never sends a `:batch` id.
+
 `cache_creation_input_tokens` in this host's Claude Code transcripts (`~/.claude/projects/-home-*`, assistant messages whose `message.model` starts `z-ai/glm`): 0 on all 363 turns read, 247 `z-ai/glm-5.3` and 116 `z-ai/glm-5.3-flash`. No Prime or FlashX turn was present.

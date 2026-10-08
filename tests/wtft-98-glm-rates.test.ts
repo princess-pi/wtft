@@ -58,6 +58,7 @@ describe("z-ai/glm-5.3-prime card", () => {
 describe("what the four ids share", () => {
 	const IDS = ["z-ai/glm-5.3", "z-ai/glm-5.3-flash", "z-ai/glm-5.3-flashx", "z-ai/glm-5.3-prime"];
 	const MON_INSIDE_DEEPSEEK_PEAK = Date.UTC(2026, 7, 24, 2, 0, 0);
+	const MON_OUTSIDE_DEEPSEEK_PEAK = Date.UTC(2026, 7, 24, 12, 0, 0);
 
 	it("reports each as priced, so no ? marker, and the :batch ids inherit that", () => {
 		for (const id of [...IDS, "z-ai/glm-5.3:batch", "z-ai/glm-5.3-flash:batch"]) {
@@ -68,6 +69,7 @@ describe("what the four ids share", () => {
 	it("has no peak window", () => {
 		for (const id of IDS) {
 			assert.strictEqual(getPeakMultiplier(id, MON_INSIDE_DEEPSEEK_PEAK), 1, id);
+			assert.strictEqual(getPeakMultiplier(id, MON_OUTSIDE_DEEPSEEK_PEAK), 1, id);
 		}
 	});
 

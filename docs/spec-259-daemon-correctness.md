@@ -120,9 +120,9 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   reading `rebuild`, with no daemon behind it, is treated as no holder. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
 - **A harness start keeps a `rebuild` token written after its read.** A start that finds a live harness
-  leaves a lease that already names that harness as it is, so a `-F` landing at any point of that
-  start keeps its token. Any other lease it points at the harness only if the lease still reads
-  what the start read, so a `-F` that lands after that read keeps its token. The check compares,
+  does not rewrite a lease that already names that harness. When it does point a lease at the
+  harness, it does so only if the lease still reads what the start read, so a `-F` that lands
+  after that read keeps its token. The check compares,
   then renames: a write in the gap between those two calls is not caught.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The

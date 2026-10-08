@@ -80,7 +80,7 @@
   after its watch of the directory fails); a
   one-shot `wtft` on a session handed to a running harness finds its turns in the tag. A request that cannot be
   posted is reported on stderr. Unless the harness still holds the root and already held this
-  session's lease, the lease and `.display` the call pointed at it are removed, so the reader is
+  session's lease, its `.display` and a lease naming that harness are removed, so the reader is
   not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
   that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
 - **A focus request never overwrites a `rebuild` lease**, so a session handed to a live harness

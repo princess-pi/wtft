@@ -22,7 +22,7 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 		for (const until = Date.now() + 10_000; Date.now() < until;) {
 			let held = "";
 			try { held = fs.readFileSync(lease, "utf8").trim(); } catch { /* not claimed yet */ }
-			adopted = held !== "rebuild" && held !== "";
+			adopted ||= held !== "rebuild" && held !== "";
 			if (adopted && anyTagStartedSince(tagDirs, path.basename(finalSessionPath), requestedAt)) break;
 			await new Promise(resolve => setTimeout(resolve, 100));
 		}

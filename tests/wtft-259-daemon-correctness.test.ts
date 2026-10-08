@@ -399,12 +399,14 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 		const requested = Date.now();
 		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const tookMs = Date.now() - requested;
 		const head = read(newerTag).split("\n", 1)[0];
 		let first = 0;
 		try { first = JSON.parse(head)?._hb?.first ?? 0; } catch { /* not a heartbeat */ }
 		check(first >= requested, `fixture precondition: the newer harness started its tag over after -F (first line ${head.slice(0, 80)})`);
 		check(forced.status !== 1 && !forced.stderr.includes("has not taken"),
 			`-F does not say the harness never took the session up (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		check(tookMs < 8_000, `-F finds the newer build's started-over tag without waiting out its 10 s (${tookMs} ms)`);
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 

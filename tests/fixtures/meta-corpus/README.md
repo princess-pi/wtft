@@ -7,8 +7,8 @@ the reader is checked against the harness's field names as they were at capture.
 harness still writes those names is § M7b's job, on a host that has sidecars. Why they are here rather than hand-written:
 `docs/spec-194-p9-housekeeping.md` § H2.
 
-**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294.** File mtimes on the source host ran from 2026-08-10 to
-2026-09-23.
+**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294 (the `version` in its session's transcript).** File mtimes on the source host ran from 2026-08-10 to
+2026-10-08.
 
 | File | Shape it stands for |
 |---|---|

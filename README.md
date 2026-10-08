@@ -47,7 +47,7 @@ see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
 it is scriptable: **0** in sync, **1** drift or `stale-build` (a source of the
-CLI bundles changed after the clone's last build, as after a `git pull`), **2** shadowed on PATH, **4** a
+CLI bundles changed after the clone's last build, as after a `git pull`, or no build is recorded), **2** shadowed on PATH, **4** a
 config file still at the old path, **5** the `claude-nsp-guard` shim is on PATH
 but another `claude` comes first and nothing else is wrong, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot

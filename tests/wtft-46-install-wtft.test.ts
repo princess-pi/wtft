@@ -1207,7 +1207,7 @@ console.log("\n12. --check reports a stale build: a source changed after the clo
 	let installDoc: any = null;
 	try { installDoc = JSON.parse(installRun.out); } catch { /* asserted below */ }
 	check(installRun.code === 0 && installDoc?.mode === "install" && installDoc?.status === "ok" && installDoc?.build === "stale",
-		"V12e: install mode reports build stale in the document but never status stale-build (a source dated after the build it just ran)",
+		"V12e: install mode with a source newer than tmp/last-build reports build stale in the document, with status ok, not stale-build",
 		`exit ${installRun.code}: ${installRun.out.slice(0, 300)} ${installRun.err.slice(0, 300)}`);
 	fs.utimesSync(path.join(clone, "bin", "wtft.ts"), now - 100, now - 100);
 

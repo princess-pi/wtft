@@ -28,7 +28,7 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 	});
 
 	it("P1b flag spellings the parser does not take, named", () => {
-		for (const tok of ["--session=x", "--pad=3", "-i=7m", "-hW", "--", "-"]) {
+		for (const tok of ["--sessions=x", "--json=1", "-i=7m", "-s=x", "-hW", "--", "-"]) {
 			assert.match(refusal([tok]) ?? "", new RegExp(` ${tok.replace(/[-=]/g, "\\$&")}$`), tok);
 		}
 	});
@@ -84,9 +84,14 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 			["--pad", "0"], ["--pad", "3"], ["--stop", "~/s.jsonl"], ["--thinking-budget", "800"],
 			["-i", "7m"], ["--interval", "4h"], ["-i", "1d"], ["-i", "1w"], ["-i", "5t"], ["-i", "2turns"], ["-i", "1turn"],
 			["-l", "3"], ["--limit", "08"], ["-w", "120"], ["--width", "80"], ["--tz", "UTC"], ["--timezone", "America/New_York"],
+			["--session=-home-dupp-git-projects-wtft"], ["--dir=-odd"], ["--cwd=/tmp"], ["--stop=/s.jsonl"],
+			["--harness=pi"], ["--pad=3"], ["--thinking-budget=800"],
 			["--tz=-05:00"], ["--interval=5m"], ["--limit=3"], ["--width=90"], ["--tz=Europe/London"], ["--timezone=Asia/Tokyo"],
 		];
 		for (const argv of good) assert.equal(refusal(argv), undefined, argv.join(" "));
+		assert.equal(parseWtftCliArgs(["--session=-home-x"]).targetSession, "-home-x");
+		assert.equal(parseWtftCliArgs(["--stop=-x.jsonl"]).daemonStop, "-x.jsonl");
+		assert.match(refusal(["--session="]) ?? "", /--session/);
 		const read = parseWtftCliArgs(["--limit", "08", "--pad", "0", "--tz=Europe/London", "-i", "2turns"]);
 		assert.deepEqual([read.limit, read.pad, read.timezone, read.interval], [8, 0, "Europe/London", "2turns"]);
 	});

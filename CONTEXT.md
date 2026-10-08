@@ -467,7 +467,7 @@ carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interact
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
 `total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
 accumulation error.
-Suppresses the rendering flags, but not the commands that run instead of a report
+Suppresses the well-formed rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
 `docs/spec-26-json.md`. CLI only — the widget has no stdout to write an object to.
 _Avoid_: Porcelain mode, machine mode, structured mode (the flag is `--json`; "JSON mode"

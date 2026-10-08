@@ -179,7 +179,7 @@ no model id. As of `@4` a consumer can size that divergence itself:
 `total.costUsd + total.untaggedCostUsd` equals the chart's total
 ([#119](https://github.com/princess-pi/wtft/issues/119)).
 
-`--json` suppresses the rendering flags. It does **not** apply to the commands
+`--json` suppresses the well-formed rendering flags. It does **not** apply to the commands
 that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
 `--list`/`--cleanup`/`--restart`/`--stop` keep their own output, and `-p` is
 still refused with exit 1. With an interactive terminal, `--json` no longer

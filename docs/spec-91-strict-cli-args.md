@@ -21,13 +21,13 @@ it. Each caller decides what a refusal does.
 **Refused** (`usageError` set):
 
 - **An unknown flag:** any argument starting with `-` that is not a flag wtft takes. That includes
-  the `--flag=value` spelling of a flag that takes its value only as the next argument
-  (`--session=x`, `--pad=3`), a short flag with `=` (`-i=7m`), short flags run together (`-hW`),
+  `--flag=value` for a flag that takes no value (`--json=1`), a short flag with `=` (`-i=7m`,
+  `-s=x`), short flags run together (`-hW`),
   `--`, and a lone `-`.
 - **A valued flag with no value:** the last argument (`wtft --stop`), followed by an empty argument,
   or followed by an argument starting with `-` (`wtft --stop --json`, `--pad -2`, `--tz -05:00`).
   That next argument is not consumed; it is read as an argument of its own. A value that starts
-  with `-` is given with `=` where the flag has that spelling (`--tz=-05:00`).
+  with `-` is given with `=` (`--tz=-05:00`, `--session=-home-dupp-git-projects-wtft`).
 - **A value the flag cannot use:**
   - `-i`/`--interval`: anything but a whole count of 1 or more and a unit (`7m`, `4h`, `1d`, `1w`,
     `5t`, `5turns`).
@@ -36,12 +36,12 @@ it. Each caller decides what a refusal does.
   - `--pad`: anything but a whole number of 0 or more.
   - `--harness`: anything but `pi`, `claude-code` or `auto`.
   - `--tz`/`--timezone`: a zone the runtime's `Intl` does not know.
-  - The `=` spellings, `--interval=`, `--limit=`, `--width=`, `--tz=` and `--timezone=`, take the
-    same values; an empty one is refused.
+  - Every long flag that takes a value also takes it as `--flag=value`, with the same values; an
+    empty one is refused.
 - **A bare word:** any argument that is neither a flag nor a flag's value.
 
-`-s`/`--session`, `--dir`/`--cwd` and `--stop` take any non-empty value that does not start with
-`-`; what that value names is checked where it is used, as before.
+`-s`/`--session`, `--dir`/`--cwd` and `--stop` take any non-empty value, one starting with `-` only
+in the `=` spelling; what that value names is checked where it is used, as before.
 
 **Bare words.** One gives a word meaning today: `spawn-record`, and only as the CLI's first
 argument, where `bin/wtft.ts` dispatches it to its own parser instead of the report path. No

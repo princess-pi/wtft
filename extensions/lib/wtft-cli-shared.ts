@@ -120,7 +120,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	const refuse = (why: string) => { usageError ??= why; };
 
 	for (let i = 0; i < argv.length; i++) {
-		const inline = /^(--interval|--limit|--width|--tz|--timezone)=/.exec(argv[i]);
+		const inline = /^(--session|--dir|--cwd|--harness|--pad|--stop|--thinking-budget|--interval|--limit|--width|--tz|--timezone)=/.exec(argv[i]);
 		const arg = inline ? inline[1] : argv[i];
 		const value = (): string | undefined => {
 			const next = inline ? argv[i].slice(inline[0].length) : argv[i + 1];

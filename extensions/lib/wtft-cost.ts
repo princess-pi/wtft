@@ -185,6 +185,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 		surge: peakSchedule,
 		input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0,
 	},
+	"z-ai/glm-5.3": { input: 1.40, output: 4.40, cacheRead: 0.26, cacheWrite: 0 },
+	"z-ai/glm-5.3-prime": { input: 2.80, output: 8.80, cacheRead: 0.56, cacheWrite: 0 },
+	"z-ai/glm-5.3-flashx": { input: 0.37, output: 1.25, cacheRead: 0.075, cacheWrite: 0 },
+	"z-ai/glm-5.3-flash": { input: 0.15, output: 0.50, cacheRead: 0.03, cacheWrite: 0 },
 	// GPT-5.x — tiered pricing (short-context ≤272K, long-context >272K total input)
 	"gpt-5.4": {
 		input: 2.50, output: 15.00, cacheRead: 0.25, cacheWrite: 0,

@@ -58,7 +58,7 @@ loudly. Its Closer accepts either outcome — resolve everything, or report a bo
 With resolution now one scan per walk (about 40–65 ms for 10,000 edges), a bound on resolution
 would buy nothing. It would also add a fifth "tree is a floor" condition that every surface
 describing `tree` would have to carry. What remains is a resolved child's parse, which is money
-being counted, and `--tokens` rendering one row per edge, which is #216.
+being counted, and `--tokens` rendering one row per edge.
 
 ## Verification
 
@@ -70,7 +70,7 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
   at this host's pre-change per-id cost it would have been about 11 minutes. End to end the CLI run
   takes about 1.2–1.4 s against about 0.2–0.3 s over an empty ledger (measured 2026-09-22): most of
   that second is rendering one SPAWNED row per edge. The issue's "renders in under a second" is
-  therefore not met end to end; that half is #216. C2 and E2 hold loose 5 s bounds so a loaded host
+  therefore not met end to end, and that is accepted: no real ledger comes near 10,000 edges. C2 and E2 hold loose 5 s bounds so a loaded host
   cannot make them flaky; the fix itself is pinned by W2's walk count, not by the clock.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
   same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.
@@ -146,7 +146,7 @@ being counted, and `--tokens` rendering one row per edge, which is #216.
 |---|---|---|
 | A first-seen copy that cannot be stat-ed kept its dead path over a live one (both indexes) | Verified — reproduced as D1 and by S1's agreement check; introduced by round 4's stat-avoidance | **Code fixed**: an un-stat-able copy never wins; ✅ D1, S1 |
 | E3's 1 s bound is flaky by the spec's own numbers | Verified | E3 removed; W2 pins the fix |
-| The spec declared the Closer met after restating it | Verified | Stated as met for resolution, not end to end; the rendering half filed as #216 |
+| The spec declared the Closer met after restating it | Verified | Stated as met for resolution, not end to end |
 | An index failure reached only stderr, once per walk, and repeated on every widget refresh | Verified | **Code changed**: an index failure fails the walk (exit 1 in the CLI, no spawn block in the widget); no stderr printing from the library; ✅ Q2 |
 | `--json` could not tell a failed index from not-found | Verified | Resolved by the same change: the walk no longer reports not-found for a harness it could not search |
 | `existsSync` hid a permission failure above the root | Verified | **Code fixed**: the root is read directly; only ENOENT is empty |

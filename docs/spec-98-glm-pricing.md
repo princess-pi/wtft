@@ -10,8 +10,8 @@ Evidence: `research/98-glm-pricing/pricing-pages-2026-10-08.md`.
 
 ## 1. Today
 
-`claude-glm` sends `z-ai/glm-5.3` (omit, opus, sonnet) and `z-ai/glm-5.3-flash` (haiku, fable, subagents) to OpenRouter.
-A Claude transcript's `message.model` is that served id.
+`claude-glm` sends `z-ai/glm-5.3[1m]` (omit, opus, sonnet) and `z-ai/glm-5.3-flash` (haiku, fable, subagents) to OpenRouter.
+A Claude transcript's `message.model` is the id OpenRouter serves back: `z-ai/glm-5.3` and `z-ai/glm-5.3-flash`.
 `MODEL_PRICING` has no GLM key, so `lookupModelPricing` returns null, `isModelPriced` is false, and the turn prices at the $3 / $15 / $0.30 / $3.75 fallback with a `?` cost cell.
 That overstates output about 3.4x for the flagship and 30x for Flash.
 

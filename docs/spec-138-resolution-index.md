@@ -70,7 +70,7 @@ being counted, and `--tokens` rendering one row per edge.
   at this host's pre-change per-id cost it would have been about 11 minutes. End to end the CLI run
   takes about 1.2–1.4 s against about 0.2–0.3 s over an empty ledger (measured 2026-09-22): most of
   that second is rendering one SPAWNED row per edge. The issue's "renders in under a second" is
-  therefore not met end to end. C2 and E2 hold loose 5 s bounds so a loaded host
+  therefore not met end to end, and that is accepted: no real ledger comes near 10,000 edges. C2 and E2 hold loose 5 s bounds so a loaded host
   cannot make them flaky; the fix itself is pinned by W2's walk count, not by the clock.
 - **One walk, not one per child:** the directory-walk counter (`getDirWalkCount`) moves by the
   same amount for a 1-edge tree and a 10,000-edge tree. This, not the clock, is what pins the fix.

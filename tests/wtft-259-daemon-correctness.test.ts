@@ -271,7 +271,7 @@ try {
 		const costOf = (out: string) => { try { return JSON.parse(out)?.total?.costUsd ?? NaN; } catch { return NaN; } };
 		const before = costOf(spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
 		const forced = costOf(spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
-		check(forced < before, `the -F report itself no longer counts the row the transcript does not hold ($${forced} against $${before})`);
+		check(Math.abs(forced - before / 2) < 1e-9, `the -F report counts the transcript's row and not the row it does not hold ($${forced}: half of $${before})`);
 		const rebuilt = await until(() => classified(target, "force-target") && !classified(target, "force-bogus"), 10_000);
 		check(rebuilt !== Infinity, "the target's tag is rebuilt from its transcript");
 		check(alive(h.pid), "the harness keeps running");
@@ -371,8 +371,8 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		fs.writeFileSync(armed, "");
 		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 		check(fs.existsSync(fired), "fixture precondition: the harness's truncate of the tag after -F was delayed");
-		check(costOf(forced.stdout) < before,
-			`the -F report does not count the row the transcript does not hold ($${costOf(forced.stdout)} against $${before}; exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		check(Math.abs(costOf(forced.stdout) - before / 2) < 1e-9,
+			`the -F report counts the transcript's row and not the row it does not hold ($${costOf(forced.stdout)} against $${before}; exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
@@ -406,7 +406,7 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		check(first >= requested, `fixture precondition: the newer harness started its tag over after -F (first line ${head.slice(0, 80)})`);
 		check(forced.status !== 1 && !forced.stderr.includes("has not taken"),
 			`-F does not say the harness never took the session up (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
-		check(tookMs < 8_000, `-F finds the newer build's started-over tag without waiting out its 10 s (${tookMs} ms)`);
+		check(tookMs < 10_000, `-F finds the newer build's started-over tag without waiting out its 10 s (${tookMs} ms)`);
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 

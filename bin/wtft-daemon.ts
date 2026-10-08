@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
-import { classifyPid, holdsLease, isDaemonCmdline, isFixtureDaemon, pidAlive, processTable, stopHolderSync } from "../extensions/lib/holder.js";
+import { classifyPid, decideUnleased, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync, type DaemonProc } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
 import { decideHealth, readHealthFacts } from "../extensions/lib/daemon-health.js";
@@ -1449,8 +1449,27 @@ function stopHarness(reason: string, exitCode = 0) {
   process.exit(exitCode);
 }
 
-function daemonProcs(): { pid: number; session: string | null; harness: boolean; roots: string[] }[] {
-  const out: { pid: number; session: string | null; harness: boolean; roots: string[] }[] = [];
+function procCwd(pid: number): string {
+  try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return "/"; }
+}
+
+function procEnv(pid: number): Map<string, string> | null {
+  try {
+    return new Map(fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0")
+      .filter(row => row.includes("="))
+      .map(row => [row.slice(0, row.indexOf("=")), row.slice(row.indexOf("=") + 1)] as const));
+  } catch {
+    return null;
+  }
+}
+
+/** os.tmpdir() as that process would compute it: where its leases and root pid file live. */
+function procTmpDir(env: Map<string, string>, cwd: string): string {
+  return path.resolve(cwd, env.get("TMPDIR") || env.get("TMP") || env.get("TEMP") || "/tmp");
+}
+
+function daemonProcs(): DaemonProc[] {
+  const out: DaemonProc[] = [];
   let entries: string[];
   try {
     entries = fs.readdirSync("/proc");
@@ -1468,16 +1487,13 @@ function daemonProcs(): { pid: number; session: string | null; harness: boolean;
     }
     const args = cmd.split("\0").filter(arg => arg.length > 0);
     if (!isDaemonCmdline(args)) continue;
+    const cwd = procCwd(pid);
     const sessIdx = args.indexOf("--session");
-    const session = sessIdx >= 0 && sessIdx + 1 < args.length ? args[sessIdx + 1] : null;
-    let roots: string[] = [];
-    try {
-      roots = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0")
-        .filter(row => row.startsWith("WTFT_CLAUDE_PROJECTS_DIR=") || row.startsWith("WTFT_PI_SESSIONS_DIR="))
-        .map(row => row.slice(row.indexOf("=") + 1))
-        .filter(row => row.length > 0);
-    } catch { /* environ unreadable */ }
-    out.push({ pid, session, harness: args.includes("--harness"), roots });
+    const session = sessIdx >= 0 && sessIdx + 1 < args.length ? path.resolve(cwd, args[sessIdx + 1]) : null;
+    const env = procEnv(pid);
+    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0);
+    const tmpDir = env ? procTmpDir(env, cwd) : null;
+    out.push({ pid, session, harness: args.includes("--harness"), roots, tmpDir });
   }
   return out;
 }
@@ -1514,21 +1530,24 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         per-session daemons whose session is gone (no file, not moved, and a tag that
                         holds a turn or a _meta record), and fixture ones, whose --session or root environment
                         (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir (os.tmpdir()),
-                        that hold no lease here; never a harness daemon, which stops once it has nothing
-                        to serve or watch
+                        that hold no lease here; a harness daemon only when its own tmp dir (TMPDIR, TMP or
+                        TEMP in its environment) is inside the tmp dir, and so are its root environment, of which
+                        it sets one at least, and any --session
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped lease holder with its own --session or --harness, root
-                        environment and XDG_STATE_HOME, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
+                        environment, XDG_STATE_HOME, TMPDIR, TMP and TEMP, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
                         handed its session to it) and starts again on the next wtft. A holder that refuses the stop or
                         outlives SIGKILL, or a respawn that neither runs nor hands off within
                         WTFT_RESPAWN_SETTLE_MS (one wait for all), makes it exit 1. Linux only (/proc)
   --pid <pid>           With --restart, reach only the holder with that pid (repeatable); every other
-                        holder is handled as if --restart were not given. A pid holding no lease or
-                        root pid file here prints Not found and makes it exit 1
+                        holder is handled as if --restart were not given. Its lease and root pid file are
+                        also found in its own tmp dir. A pid holding neither here nor there prints Not found
+                        and makes it exit 1
   --stop <session>      Drop that session; ~ and relative paths are resolved. A harness serving it (found
                         through the session's lease) keeps running. A per-session process holding a
                         lease here, found by its own --session resolved against its cwd, gets SIGTERM
-                        and no wait: one that followed a moved session is found by its old path.
+                        and no wait: one that followed a moved session is found by its old path. So does a
+                        per-session daemon holding no lease here, whatever its tmp dir.
                         Linux only (/proc): off Linux it finds no daemon and exits 0
 
 Daemon mode:
@@ -1649,29 +1668,43 @@ function resolvedSessionArg(pid: number, session: string): string {
 
 if (showList || showCleanup || showRestart || stopSession) {
   const pidDir = os.tmpdir();
-  let pidFiles: string[] = [];
-  try {
-    pidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-daemon-") && f.endsWith(".pid"));
-  } catch (_) {}
   // Read before anything is stopped: a process that claims a lease or the root
   // after this point started after the command, and is not one it stops.
   const readPid = (file: string): number => {
-    try { return leasePid(fs.readFileSync(path.join(pidDir, file), "utf8").trim()); } catch { return NaN; }
+    try { return leasePid(fs.readFileSync(file, "utf8").trim()); } catch { return NaN; }
   };
-  const leaseHolders = new Map(pidFiles.map(f => [f, readPid(f)] as const));
-  let harnessPidFiles: string[] = [];
-  if (showRestart) {
-    try {
-      harnessPidFiles = fs.readdirSync(pidDir).filter(f => f.startsWith("wtft-harness-") && f.endsWith(".pid"));
-    } catch { /* tmp dir unreadable */ }
+  const holdersIn = (dir: string, prefix: string, only: Set<number> | null): Map<string, number> => {
+    const out = new Map<string, number>();
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir).filter(f => f.startsWith(prefix) && f.endsWith(".pid")); } catch { /* tmp dir unreadable */ }
+    for (const f of names) {
+      const pid = readPid(path.join(dir, f));
+      if (only === null || only.has(pid)) out.set(path.join(dir, f), pid);
+    }
+    return out;
+  };
+  const foreignDirs = new Map<string, Set<number>>();
+  for (const pid of showRestart ? restartPids : []) {
+    const env = procEnv(pid);
+    const dir = env ? procTmpDir(env, procCwd(pid)) : null;
+    if (dir === null || dir === path.resolve(pidDir)) continue;
+    foreignDirs.set(dir, (foreignDirs.get(dir) ?? new Set<number>()).add(pid));
   }
-  const harnessHolders = new Map(harnessPidFiles.map(f => [f, readPid(f)] as const));
+  const holdersHereAndForeign = (prefix: string): Map<string, number> => {
+    const out = holdersIn(pidDir, prefix, null);
+    for (const [dir, only] of foreignDirs) for (const [file, pid] of holdersIn(dir, prefix, only)) out.set(file, pid);
+    return out;
+  };
+  const leaseHolders = holdersHereAndForeign("wtft-daemon-");
+  const pidFiles = [...leaseHolders.keys()];
+  const harnessHolders = showRestart ? holdersHereAndForeign("wtft-harness-") : new Map<string, number>();
+  const harnessPidFiles = [...harnessHolders.keys()];
   const leaseSessionsByHarness = new Map<number, Map<string, string>>();
   if (showList) {
     try {
       for (const f of fs.readdirSync(pidDir)) {
         if (!f.startsWith("wtft-harness-") || !f.endsWith(".pid")) continue;
-        const holder = readPid(f);
+        const holder = readPid(path.join(pidDir, f));
         let text: string;
         try { text = fs.readFileSync(path.join(pidDir, `${f}.served`), "utf8"); } catch { continue; }
         leaseSessionsByHarness.set(holder, sessionsByLease([text], s => path.basename(getDaemonPidPath(s))));
@@ -1702,18 +1735,18 @@ if (showList || showCleanup || showRestart || stopSession) {
     } catch { return 0; }
   };
   const handedTo = new Set<number>();
-  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined): number => {
+  const liveHarnessFor = (which: string, env: NodeJS.ProcessEnv, cwd: string | undefined, dir: string): number => {
     const key = which === "claude-code" ? "claude" : which;
     if (key !== "claude" && key !== "pi") return 0;
-    return liveHolderIn(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))));
+    return liveHolderIn(path.join(dir, path.basename(harnessPidFileFor(key, path.resolve(cwd ?? process.cwd(), harnessRoot(key, env))))));
   };
   const seenPids = new Set<number>();
   const restarted = new Set<number>();
   const keptRunning = new Set<number>();
   const unlinkIfNames = (file: string, pid: number) => { unlinkLeaseIf(file, String(pid)); };
-  for (const pidFile of pidFiles) {
-    const fullPath = path.join(pidDir, pidFile);
-    const pid = leaseHolders.get(pidFile) ?? NaN;
+  for (const fullPath of pidFiles) {
+    const pidFile = path.basename(fullPath);
+    const pid = leaseHolders.get(fullPath) ?? NaN;
     if (!(pid > 0)) continue;
     seenPids.add(pid);
 
@@ -1762,7 +1795,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (wasDaemon) {
         let environReadable = false;
         try { fs.readFileSync(`/proc/${pid}/environ`); environReadable = true; } catch { /* unreadable */ }
-        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR", "XDG_STATE_HOME"]) {
+        for (const key of ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR", "XDG_STATE_HOME", "TMPDIR", "TMP", "TEMP"]) {
           const value = procEnvValue(pid, key);
           if (value) restartEnv[key] = value;
           else if (environReadable) delete restartEnv[key];
@@ -1778,7 +1811,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         if (survived) stopRefused = true;
       }
       if (survived) { keptRunning.add(pid); restartFailed = true; }
-      const respawnLease = wasDaemon && sessionFound && !survived ? getDaemonPidPath(sessionFound) : "";
+      const respawnLease = wasDaemon && sessionFound && !survived ? path.join(path.dirname(fullPath), path.basename(getDaemonPidPath(sessionFound))) : "";
       // The respawn's own lease is left for its claim, which takes a dead holder's.
       if (fullPath !== respawnLease && !survived) unlinkIfNames(fullPath, pid);
       let respawned: "claimed" | "busy" | "failed" = "failed";
@@ -1812,7 +1845,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       } else if (harnessOnly) {
         const childPid = spawnDetached([process.argv[1], "--harness", harnessFound!], restartEnv, holderCwd);
         if (childPid) {
-          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv, holderCwd), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
+          pendingRespawns.push({ childPid, served: () => liveHarnessFor(harnessFound!, restartEnv, holderCwd, path.dirname(fullPath)), settle: ok => { harnessBack = ok; if (!ok) restartFailed = true; report(); } });
           continue;
         }
         restartFailed = true;
@@ -1885,19 +1918,25 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
   }
 
-  if (showList || showCleanup) {
+  if (showList || showCleanup || stopSession) {
     for (const proc of daemonProcs()) {
       if (seenPids.has(proc.pid) || proc.pid === process.pid) continue;
-      const fixture = isFixtureDaemon(proc, os.tmpdir());
-      // A harness stops itself once it serves nothing.
-      if (showCleanup && fixture && !proc.harness) {
+      const action = decideUnleased(proc, { tmpDir: os.tmpdir(), cleanup: showCleanup, stopSession });
+      if (action !== "keep") {
         const where = proc.session || proc.roots.join(",");
+        const named = stopSession !== null && proc.session === stopSession;
+        if (named) stoppedN++;
         if (processTable().signal(proc.pid, "SIGTERM") === "denied") {
-          console.log(`Not stopped: PID ${proc.pid} refused the signal (EPERM) — fixture daemon: ${where}`);
+          console.log(`Not stopped: PID ${proc.pid} refused the signal (EPERM) — ${action === "clean" ? "fixture daemon: " : ""}${where}`);
+          if (named) stopRefused = true;
           continue;
         }
-        console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
-        cleanedN++;
+        if (action === "clean") {
+          console.log(`Cleaned up: PID ${proc.pid} — fixture daemon: ${where}`);
+          cleanedN++;
+        } else {
+          console.log(`Stopped: PID ${proc.pid} — ${where}`);
+        }
         continue;
       }
       // --restart takes precedence: a harness it is about to stop is not listed.
@@ -1916,9 +1955,9 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (servedBy > 0 && servedBy !== r.childPid) handedTo.add(servedBy);
       r.settle(pidAlive(r.childPid) || servedBy > 0);
     }
-    for (const pidFile of harnessPidFiles) {
-      const fullPath = path.join(pidDir, pidFile);
-      const pid = harnessHolders.get(pidFile) ?? NaN;
+    for (const fullPath of harnessPidFiles) {
+      const pidFile = path.basename(fullPath);
+      const pid = harnessHolders.get(fullPath) ?? NaN;
       if (Number.isNaN(pid) || !restarting(pid)) continue;
       restarted.add(pid);
       if (pid <= 0 || seenPids.has(pid) || pid === process.pid) {

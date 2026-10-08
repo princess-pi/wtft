@@ -11,7 +11,8 @@ Tests: `tests/wtft-274-restart.test.ts` (P1–P3), `tests/wtft-46-install-wtft.t
   pid is named. Every other holder is handled as if `--restart` were not given: listed under
   `--list`, cleaned under `--cleanup`, and otherwise left as it was, lease and root pid file
   included. Without `--pid`, `--restart` reaches every holder, as before.
-- **P2. A named pid that holds no lease and no root pid file here** prints
+- **P2. A named pid that holds no lease and no root pid file here, nor in its own tmp dir**
+  (`docs/spec-387-private-tmpdir.md`, S3), prints
   `Not found: PID n — holds no lease or root pid file here` and makes the command exit 1.
 - **P3. `--pid` without `--restart`, or a value that is not a whole number above 0,** is a usage
   error: exit 2.

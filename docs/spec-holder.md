@@ -111,6 +111,8 @@ Both return:
   `restartDaemon`, `-F`) with the fake table swapped in.
 - `tests/wtft-297-daemon-holders.test.ts` runs the real daemon for the per-session child's claim
   and `--list`, and checks that no product code outside this module calls `process.kill(`.
+- `tests/wtft-387-private-tmpdir.test.ts`: `decideUnleased` in memory, then real daemons in tmp
+  dirs of their own stopped by `--stop` and `--cleanup`.
 
 ## 5. Related
 

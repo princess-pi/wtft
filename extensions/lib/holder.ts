@@ -221,3 +221,20 @@ function isUnder(file: string, tmpDir: string): boolean {
 export function isFixtureDaemon(proc: { session: string | null; roots: string[] }, tmpDir: string): boolean {
 	return (proc.session !== null && isUnder(proc.session, tmpDir)) || proc.roots.some(root => isUnder(root, tmpDir));
 }
+
+/** A daemon from the process table: `session` resolved against its cwd, `tmpDir` null when its
+ *  environment is unreadable. */
+export interface DaemonProc { pid: number; session: string | null; harness: boolean; roots: string[]; tmpDir: string | null }
+
+function isSandboxed(proc: DaemonProc, tmpDir: string): boolean {
+	return proc.tmpDir !== null && isUnder(proc.tmpDir, tmpDir) && path.resolve(proc.tmpDir) !== path.resolve(tmpDir)
+		&& proc.roots.length > 0 && proc.roots.every(root => isUnder(root, tmpDir))
+		&& (proc.session === null || isUnder(proc.session, tmpDir));
+}
+
+/** What `--cleanup` and `--stop <stopSession>` do with a daemon holding no lease in `tmpDir`. */
+export function decideUnleased(proc: DaemonProc, opts: { tmpDir: string; cleanup: boolean; stopSession: string | null }): "clean" | "stop" | "keep" {
+	if (opts.cleanup && (proc.harness ? isSandboxed(proc, opts.tmpDir) : isFixtureDaemon(proc, opts.tmpDir))) return "clean";
+	if (opts.stopSession !== null && !proc.harness && proc.session === opts.stopSession) return "stop";
+	return "keep";
+}

@@ -70,6 +70,7 @@ console.log("\nsession_shutdown ends the refresh timer");
 const first = makeCtx();
 await fire("session_start", { type: "session_start", reason: "startup" }, first.ctx);
 check(timers.size === 1, "V1 fixture precondition: session_start arms one refresh timer");
+const firstTick = [...timers.values()][0]!;
 const drawsBefore = first.draws.length;
 tickAll();
 check(first.draws.length > drawsBefore && Array.isArray(first.draws.at(-1)), "V1 fixture precondition: a tick draws the widget on the live ctx");
@@ -79,8 +80,8 @@ check(timers.size === 0 && cleared.length === 1, `V2 session_shutdown clears the
 
 first.retire();
 let thrown: unknown = null;
-try { tickAll(); } catch (err) { thrown = err; }
-check(thrown === null && first.touchedRetired() === 0, `V3 no tick reaches the retired ctx (touched ${first.touchedRetired()}, ${thrown instanceof Error ? thrown.message : "no throw"})`);
+try { firstTick(); } catch (err) { thrown = err; }
+check(thrown === null && first.touchedRetired() === 0, `V3 the first timer's callback, run after shutdown, does not reach the retired ctx (touched ${first.touchedRetired()}, ${thrown instanceof Error ? thrown.message : "no throw"})`);
 
 thrown = null;
 try { await fire("session_shutdown", { type: "session_shutdown", reason: "quit" }, first.ctx); } catch (err) { thrown = err; }

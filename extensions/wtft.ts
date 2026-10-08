@@ -344,6 +344,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		if (_wtftRefreshTimer) clearInterval(_wtftRefreshTimer);
 		_wtftRefreshTimer = null;
+		_wtftCtx = null;
 	});
 
 	pi.on("thinking_level_select", (event) => {

@@ -328,6 +328,51 @@ mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, r
 		process.kill(h.pid, "SIGTERM");
 	}
 
+	console.log("\n-F reports the rebuilt tag even when the harness empties it after taking the lease");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the gap is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		const root = makeRoot("force-gap");
+		const target = session(root, "gap-target");
+		const tag = getCurrentVersionTagPath(target);
+		const fired = path.join(root, "truncate-delayed");
+		// The harness's truncate of the target's tag waits 1.5 s, after its lease already names it.
+		const preload = path.join(root, "slow-truncate.mjs");
+		fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const originalTruncate = realFs.truncateSync.bind(realFs);
+function truncateSync(file, ...rest) {
+  if (String(file) === process.env.WTFT_293_TAG) {
+    realFs.writeFileSync(process.env.WTFT_293_FIRED, "");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+  }
+  return originalTruncate(file, ...rest);
+}
+mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, truncateSync } }));
+`);
+		const errFile = path.join(root, "gap.err");
+		const fd = fs.openSync(errFile, "a");
+		const child = spawn(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+			detached: true, stdio: ["ignore", "ignore", fd], env: { ...envFor(root), WTFT_293_TAG: tag, WTFT_293_FIRED: fired },
+		});
+		child.unref();
+		fs.closeSync(fd);
+		if (child.pid) pids.push(child.pid);
+		check(await until(() => classified(target, "gap-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		const row = read(tag).split("\n").find(l => l.includes('"gap-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"gap-target"', '"gap-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "gap-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const costOf = (out: string) => { try { return JSON.parse(out)?.total?.costUsd ?? NaN; } catch { return NaN; } };
+		const before = costOf(spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(fs.existsSync(fired), "fixture precondition: the harness's truncate of the tag was delayed");
+		check(costOf(forced.stdout) < before,
+			`the -F report does not count the row the transcript does not hold ($${costOf(forced.stdout)} against $${before}; exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nAn older per-session build never takes over from a newer one");
 	{
 		const root = makeRoot("older");

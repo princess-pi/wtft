@@ -100,7 +100,18 @@ function startDaemon(inject: boolean): { child: ChildProcess; stderr: () => stri
 	return { child, stderr: () => output };
 }
 
-async function waitForExit(child: ChildProcess, ceilingMs = 2500): Promise<number | null> {
+const DAEMON_WAIT_MS = 20_000;
+
+/** Whether a daemon started at or after `since` has written its start heartbeat to the tag. */
+function heartbeatSince(tagPath: string, since: number): boolean {
+	let lines: string[] = [];
+	try { lines = fs.readFileSync(tagPath, "utf8").split("\n"); } catch { return false; }
+	return lines.some(line => {
+		try { return (JSON.parse(line)?._hb?.first ?? 0) >= since; } catch { return false; }
+	});
+}
+
+async function waitForExit(child: ChildProcess, ceilingMs = DAEMON_WAIT_MS): Promise<number | null> {
 	if (child.exitCode !== null) return child.exitCode;
 	await Promise.race([
 		new Promise<void>(resolve => child.once("exit", () => resolve())),
@@ -113,7 +124,7 @@ try {
 	const first = startDaemon(true);
 	const tagPath = getCurrentVersionTagPath(sessionPath);
 	const pidPath = getDaemonPidPath(sessionPath);
-	if (!await pollUntil(() => fs.existsSync(tagPath), 5000)) throw new Error("initial tag was not created");
+	if (!await pollUntil(() => fs.existsSync(tagPath), DAEMON_WAIT_MS)) throw new Error("initial tag was not created");
 
 	fs.writeFileSync(triggerPath, "armed");
 	fs.appendFileSync(sessionPath, turn(targetId));
@@ -140,7 +151,7 @@ try {
 	const recovered = startDaemon(false);
 	if (!await pollUntil(
 		() => readClassifiedTagFile(tagPath).some((row: any) => row.messageId === targetId),
-		8000,
+		DAEMON_WAIT_MS,
 	)) throw new Error("replay did not restore the source turn");
 	if (fs.readFileSync(pidPath, "utf8").trim() !== String(recovered.child.pid)) {
 		throw new Error("recovery daemon did not replace the poisoned lease");
@@ -151,14 +162,15 @@ try {
 	fs.writeFileSync(pidPath, "rebuild");
 	const successorExit = await waitForExit(recovered.child);
 	if (successorExit !== 0) throw new Error(`live successor ignored poisoned lease (exit ${successorExit ?? "never"})`);
+	const replayStart = Date.now();
 	const replayed = startDaemon(false);
 	if (!await pollUntil(
 		() => {
 			let ownsLease = false;
 			try { ownsLease = fs.readFileSync(pidPath, "utf8").trim() === String(replayed.child.pid); } catch {}
-			return ownsLease && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === targetId);
+			return ownsLease && heartbeatSince(tagPath, replayStart) && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === targetId);
 		},
-		8000,
+		DAEMON_WAIT_MS,
 	)) throw new Error("second poisoned-lease replay did not restore the source turn");
 
 	// A stale numeric PID is only evidence of an unclean process exit, not an
@@ -169,14 +181,15 @@ try {
 	const replayedExit = new Promise<void>(resolve => replayed.child.once("exit", () => resolve()));
 	replayed.child.kill("SIGKILL");
 	await replayedExit;
+	const staleStart = Date.now();
 	const staleRestart = startDaemon(false);
 	if (!await pollUntil(
 		() => {
 			let ownsLease = false;
 			try { ownsLease = fs.readFileSync(pidPath, "utf8").trim() === String(staleRestart.child.pid); } catch {}
-			return ownsLease && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === sentinelId);
+			return ownsLease && heartbeatSince(tagPath, staleStart) && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === sentinelId);
 		},
-		8000,
+		DAEMON_WAIT_MS,
 	)) throw new Error("stale numeric lease discarded the resumable tag");
 
 	// A contender can replace a stale lease after this daemon reads it but

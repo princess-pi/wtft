@@ -42,12 +42,13 @@ try {
 	const r = spawnSync(process.execPath, [WTFT, "--restart"], { encoding: "utf8", env: { ...env, WTFT_RESPAWN_SETTLE_MS: String(SETTLE_MS) }, timeout: 60_000 });
 	const ms = Date.now() - t0;
 	const respawn = Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
+	const respawnKind = classifyPid(respawn);
 	if (respawn > 0) try { process.kill(respawn, "SIGTERM"); } catch { /* gone */ }
 
 	check(ms >= SETTLE_MS, `fixture precondition: wtft-daemon --restart ran past 10 s (${ms} ms)`);
 	check(r.status === 0, `exit 0 (got ${r.status}): ${r.stderr}`);
 	check(new RegExp(`Restarted: PID ${fake.pid} → fresh daemon`).test(r.stdout), `the holder was respawned:\n${r.stdout}`);
-	check(respawn > 0 && respawn !== fake.pid && classifyPid(respawn) !== "gone", "a new daemon held its lease");
+	check(respawn > 0 && respawn !== fake.pid && respawnKind !== "gone", `a new daemon held its lease (lease names ${respawn || "nobody"}, ${respawnKind})`);
 } finally {
 	for (const c of children) try { process.kill(c.pid!, "SIGKILL"); } catch { /* gone */ }
 }

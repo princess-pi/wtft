@@ -19,7 +19,8 @@
 # Exit codes:
 #   0   installed, or --check found this host in sync; also --version and --help
 #   1   drift: an artifact is missing, stale, not executable, or not built;
-#       also an un-creatable --dir (status "no-dir")
+#       the clone's bundles are older than their sources (status
+#       "stale-build"); also an un-creatable --dir (status "no-dir")
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
@@ -266,8 +267,8 @@ fi
 # exception: no JSON document.
 finish() {
   if [ "$JSON" = 1 ]; then
-    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s},"daemons":{"older":%s,"restart":"%s","left":%s}}\n' \
-      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}" \
+    printf '{"schema":"install-wtft@1","mode":"%s","dir":"%s","status":"%s","build":"%s","onPath":%s,"artifacts":[%s],"shadow":%s,"configMigration":[%s],"nspGuard":{"state":"%s","found":%s,"guard":%s},"daemons":{"older":%s,"restart":"%s","left":%s}}\n' \
+      "$MODE" "$(json_str "$DEST_DIR")" "$STATUS" "${BUILD:-stale}" "${ON_PATH:-false}" "${STATE_JSON:-}" "${SHADOW_JSON:-null}" "${CONFIG_JSON:-}" \
       "${NSP_GUARD_STATE:-absent}" "${NSPGUARD_FOUND_JSON:-null}" "${NSPGUARD_GUARD_JSON:-null}" \
       "${OLDER_DAEMONS:-0}" "${DAEMON_RESTART:-none}" "${DAEMONS_LEFT:-0}"
   else
@@ -278,6 +279,10 @@ finish() {
                     printf '%s' "${STATE_LINES:-}" >&2
                     echo "   Run: $(self_path)" >&2
                     # Report a coexisting shadow even when drift wins the exit code.
+                    [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
+                    [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
+      stale-build)  echo "❌ install-wtft: the bundles in $SRC_DIR are older than their sources ($STALE_SOURCE)" >&2
+                    echo "   Run: $(self_path)" >&2
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
                     [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
       config-left)  if [ "$MODE" = check ]; then
@@ -393,6 +398,22 @@ for spec in "${EVAL_LIST[@]}"; do
 "
 done
 [ "$STATUS" = drift ] && EXIT=1
+
+LAST_BUILD="$REPO/tmp/last-build"
+if [ -f "$LAST_BUILD" ]; then
+  STALE_SOURCE="$({ find "$REPO/bin" -maxdepth 1 -name '*.ts' -newer "$LAST_BUILD" -print
+    find "$REPO/extensions/lib" -name '*.ts' -newer "$LAST_BUILD" -print
+    find "$REPO/build.ts" "$REPO/package.json" "$REPO/bun.lock" -maxdepth 0 -newer "$LAST_BUILD" -print
+  } 2>/dev/null | head -n 1)"
+else
+  STALE_SOURCE="no $LAST_BUILD"
+fi
+if [ -n "$STALE_SOURCE" ]; then
+  BUILD=stale
+  [ "$STATUS" = ok ] && { STATUS=stale-build; EXIT=1; }
+else
+  BUILD=current
+fi
 
 # ---
 # Daemons on an older build: a process running a wtft-daemon bundle from this

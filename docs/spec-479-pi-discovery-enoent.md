@@ -13,18 +13,18 @@ warns that the transcript "could not be read at discovery, so its cost may be mi
 result `unreadable`, and the widget adds its "some transcripts could not be counted — total is
 provisional" line. Every `pi -p` run prints the warning. No cost is missing: none exists yet.
 
-`docs/spec-308-lagging-session.md` is the contract: a session `.jsonl` that is not written *yet*
-is not "not found", and it is not unreadable either.
+The contract is the principle `docs/spec-308-lagging-session.md` states: a session `.jsonl` that
+is not written *yet* is not "not found". Discovery applies it here.
 
 ## 2. Behaviour
 
-- **A session transcript that does not exist is not a read failure.** When the head read of the
+- **A session transcript not written yet is not a read failure.** When the head read of the
   session's own transcript fails with `ENOENT`, `discoverSubagentSessionFiles` writes nothing to
   stderr and returns `unreadable: null` and `sessionUnreadable: null`. With no header there is no
   session id, so no Pi sibling is listed; the session's own `subagents/` walk runs as before.
 - **What follows from that.** The Pi widget shows no provisional line for it, and the log parser
   daemon's tagger neither warns nor fails the poll for it.
-- **Unchanged:** a session transcript that exists and cannot be read is still warned once and
+- **Unchanged:** a session transcript that exists and cannot be read is still warned and
   reported as `unreadable` / `sessionUnreadable` (`docs/spec-369-skip-unreadable-discovery.md`).
 
 ## 3. Test

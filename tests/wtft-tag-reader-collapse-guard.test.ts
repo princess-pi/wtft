@@ -28,6 +28,7 @@ const ALLOWED: Record<string, string> = {
 	// tag-log; never sums a cost from a tag.
 	"bin/wtft-daemon.ts": "tag WRITER; reads its own markers through tag-log, sums nothing",
 	"extensions/lib/wtft-cli-shared.ts": "names .wtft-tag.v only to refuse a tag file as a session path; reads no tag content",
+	"extensions/lib/cli/force-rebuild.ts": "reads only a tag's first line, to see whether a harness has started it over; sums nothing (pinned by wtft-259's -F sections)",
 };
 
 /** Strip line and block comments so a mention of the canonical helper INSIDE a

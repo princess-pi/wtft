@@ -29,7 +29,7 @@ the session's own lease and tag path. These readers use it:
 
 `alive` is the lease fact and nothing else: `holdsLease(classifyPid(pid))` from
 `extensions/lib/holder.ts` (`docs/spec-holder.md`), so a live process that is not a
-daemon holds no lease. A `rebuild` token (`wtft -F` on a harness session) names no pid, so it reads
+daemon holds no lease. A `rebuild` token names no pid, so it reads
 as no live holder until the daemon adopts the session. No clock window sets `alive`; the spawner
 claims the lease for its child at spawn.
 

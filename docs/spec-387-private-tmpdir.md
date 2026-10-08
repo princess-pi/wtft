@@ -53,8 +53,9 @@ root pid files only here.
 - with real daemons, each with its own tmp dir inside the suite's: a per-session daemon gone
   within 5 s of `--stop <its session>` and a harness gone within 5 s of `--cleanup`, then `--list`
   printing no line for either; a per-session daemon restarted by `--restart --pid --list`, exit 0,
-  its respawn holding the lease in that tmp dir, running with it, and not listed; a sandboxed
-  harness under `--restart --pid --cleanup` restarted once and its respawn left running.
+  its respawn holding the lease in that tmp dir, running with it, and not listed; under
+  `--restart --pid --cleanup`, a sandboxed harness holding a lease restarted once with its respawn
+  left running, and one found only through its root pid file stopped once, by `--restart`.
 
 ## Roads not taken
 

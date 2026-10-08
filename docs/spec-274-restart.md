@@ -24,7 +24,7 @@ Issue: https://github.com/princess-pi/wtft/issues/274 · Module: `bin/wtft-daemo
   harness …; a respawn handed its session to it`. Every other harness found only through its
   root pid file is stopped.
 - **A respawn runs with the holder's root environment, `XDG_STATE_HOME`** (where it publishes
-  its daemon roster and its log) **and `TMPDIR`, `TMP` and `TEMP`** (where its lease is): a variable the holder did not have is removed, when its environment is
+  its daemon roster and its log) **and `TMPDIR`, `TMP` and `TEMP`**: a variable the holder did not have is removed, when its environment is
   readable. A cwd that no longer exists falls back to the
   caller's.
 - **E. A holder that refused the signal (EPERM) or outlived SIGKILL is left running with its

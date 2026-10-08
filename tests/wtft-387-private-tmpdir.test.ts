@@ -42,12 +42,12 @@ function perSessionInBox(label: string) {
 	});
 }
 
-function harnessInBox(label: string) {
+function harnessInBox(label: string, withSession = true) {
 	return startInBox(label, box => {
 		fs.mkdirSync(path.join(box, "root", "proj"), { recursive: true });
 		fs.writeFileSync(path.join(box, "root", "proj", "t.jsonl"), "{\"type\":\"session\"}\n");
 		return {
-			args: ["--harness", "claude", "--session", path.join(box, "root", "proj", "t.jsonl")],
+			args: ["--harness", "claude", ...(withSession ? ["--session", path.join(box, "root", "proj", "t.jsonl")] : [])],
 			env: { WTFT_CLAUDE_PROJECTS_DIR: path.join(box, "root"), WTFT_PI_SESSIONS_DIR: path.join(box, "no-pi") },
 		};
 	});
@@ -127,18 +127,35 @@ try {
 		assert("no lease for it was written here", !fs.readdirSync(HERE).some(n => LEASE.test(n)));
 	}
 
-	console.log("--restart --pid with --cleanup handles a sandboxed harness once, as a restart");
+	console.log("--restart --pid with --cleanup: a sandboxed harness holding a lease is restarted once, and its respawn left running");
 	{
 		const d = harnessInBox("both");
-		const up = await until(() => classifyPid(d.pid) === "harness" && filesNaming(d.tmp, ROOT_PID_FILE, d.pid).length > 0, 5000) < Infinity;
-		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
-		assert("fixture precondition: and no lease here", filesNaming(HERE, LEASE, d.pid).length === 0);
+		const up = await until(() => classifyPid(d.pid) === "harness" && filesNaming(d.tmp, LEASE, d.pid).length > 0, 5000) < Infinity;
+		assert("fixture precondition: the harness holds a lease in its own tmp dir", up);
+		assert("fixture precondition: and none here", filesNaming(HERE, LEASE, d.pid).length === 0);
 		const run = daemonCmd("--restart", "--pid", String(d.pid), "--cleanup");
+		const lease = fs.readdirSync(d.tmp).find(n => LEASE.test(n));
+		const respawn = lease ? Number(read(path.join(d.tmp, lease)).trim()) : 0;
+		if (respawn > 0) started.push(respawn);
 		const lines = linesFor(run.stdout, d.pid);
 		assert(`one line names it, a --restart one (${lines.join(" | ")})`, lines.length === 1 && lines[0].startsWith(`Restarted: PID ${d.pid} `));
-		assert("no fixture daemon of this sandbox is cleaned: the respawn is left alone", !run.stdout.includes(`fixture daemon: ${d.box}/`));
 		assert("exit 0", run.status === 0);
-		for (const n of fs.readdirSync(d.tmp)) if (ROOT_PID_FILE.test(n) || LEASE.test(n)) started.push(Number(read(path.join(d.tmp, n)).trim()));
+		const tmpOf = read(`/proc/${respawn}/environ`).split("\0").find(row => row.startsWith("TMPDIR="));
+		assert(`fixture precondition: the respawn is a sandboxed harness, a --cleanup candidate (${tmpOf})`, tmpOf === `TMPDIR=${d.tmp}`);
+		assert(`and it is left running (${respawn})`, respawn !== d.pid && classifyPid(respawn) === "harness");
+	}
+
+	console.log("--restart --pid with --cleanup: a sandboxed harness found only through its root pid file is stopped once, by --restart");
+	{
+		const d = harnessInBox("rootonly", false);
+		const up = await until(() => classifyPid(d.pid) === "harness" && filesNaming(d.tmp, ROOT_PID_FILE, d.pid).length > 0, 5000) < Infinity;
+		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
+		assert("fixture precondition: and no lease anywhere", filesNaming(d.tmp, LEASE, d.pid).length === 0 && filesNaming(HERE, LEASE, d.pid).length === 0);
+		const run = daemonCmd("--restart", "--pid", String(d.pid), "--cleanup");
+		const lines = linesFor(run.stdout, d.pid);
+		assert(`one line names it, a --restart one (${lines.join(" | ")})`, lines.length === 1 && lines[0].startsWith(`Stopped: PID ${d.pid} — harness `));
+		assert("exit 0", run.status === 0);
+		assert("the pid is gone within 5 s", await until(() => gone(d.pid), 5000) < Infinity);
 	}
 } finally {
 	for (const pid of started) if (pid > 0 && !gone(pid)) try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }

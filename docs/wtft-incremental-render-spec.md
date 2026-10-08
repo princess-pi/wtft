@@ -286,7 +286,7 @@ no longer swallows a nested transcript whose read fails after discovery into a s
 propagates to the same handler, so the SUBAGENT transcript's rows are not written that
 poll and the sweep is withheld while any part of the read it depends on is unreadable.
 (The MAIN parent's rows are unaffected: `flushPending()` runs before `scanForSubAgents()`
-in the same poll, and the subagent reader never parses the parent session.) Discovery skips a candidate it cannot read (#369): a `claude -p` candidate in
+in the same poll, and the subagent reader never parses the parent session.) Discovery skips a candidate it cannot read: a `claude -p` candidate in
 `~/.claude/projects/<slug>/` or a Pi sibling whose head read fails is skipped the same as one that
 does not match, with no warning and no report, so the marker is not withheld over it. A sibling
 whose header cannot parse is skipped the same way. The dir-level failures stay loud — an unreadable
@@ -378,7 +378,7 @@ The same exit is earned by a render-side degrade with the same shape (#457, roun
 under `--tokens`, an unreadable subagent transcript — one file (round 6: the failure
 is reported, not thrown, and the readable siblings still scan) or a whole unreadable
 directory of them — drops uncounted billables from the token table. A Pi sibling discovery
-cannot read is not listed, so it sets nothing (#369). The parser's
+cannot read is not listed, so it sets nothing. The parser's
 warning is one-shot and
 latched; a machine reader must not see a complete-looking report, so the CLI sets
 `provisional = { provisional: true, reason: "subagent-unreadable" }` and exits 9 with
@@ -537,7 +537,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (duppypro/princess-pi-tools#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
-| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing, #369); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
+| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |

@@ -163,5 +163,3 @@ behaviour older than this branch:
 - A fold on an untagged or de-duplicated turn is neither marked folded nor queued. Its cost
   sits in `descendantUntagged`, as `CONTEXT.md` § Self / tree already says.
 - "Minimum depth" is the smallest of the assigned queue depths (§2), not a position in the ledger.
-- One unreadable unrelated transcript in a `claude -p` child's project directory fails the fold
-  discovery, and with it the edge. That behaviour predates this branch; it is #369.

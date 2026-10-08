@@ -463,7 +463,7 @@ lookup lands on `$HOME/package.json`. Two outcomes, and the second is the danger
 
 `build.ts` now reads package.json at build time and substitutes the literal into the
 bundle (`define`). package.json stays the single source of truth; the artifact answers
-from itself. Unbundled source — the Pi extension loads it directly — keeps the run-time
+from itself. Unbundled source keeps the run-time
 read, which is correct there because the file is genuinely reachable.
 
 This also closes the last hole in #36's own thesis: "the emitted ESM reaches for nothing

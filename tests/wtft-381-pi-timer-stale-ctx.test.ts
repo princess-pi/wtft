@@ -33,6 +33,7 @@ const STALE = "This extension ctx is stale after session replacement or reload."
 function makeCtx() {
 	const draws: (string[] | undefined)[] = [];
 	let retired = false;
+	let touchedRetired = 0;
 	const live: any = {
 		ui: {
 			setWidget: (_id: string, lines: string[] | undefined) => { draws.push(lines); },
@@ -43,11 +44,11 @@ function makeCtx() {
 	};
 	const ctx = new Proxy(live, {
 		get(target, key) {
-			if (retired) throw new Error(STALE);
+			if (retired) { touchedRetired++; throw new Error(STALE); }
 			return target[key];
 		},
 	});
-	return { ctx, draws, retire: () => { retired = true; } };
+	return { ctx, draws, retire: () => { retired = true; }, touchedRetired: () => touchedRetired };
 }
 
 let nextHandle = 1;
@@ -71,7 +72,7 @@ await fire("session_start", { type: "session_start", reason: "startup" }, first.
 check(timers.size === 1, "V1 fixture precondition: session_start arms one refresh timer");
 const drawsBefore = first.draws.length;
 tickAll();
-check(first.draws.length > drawsBefore, "V1 fixture precondition: a tick draws the widget on the live ctx");
+check(first.draws.length > drawsBefore && Array.isArray(first.draws.at(-1)), "V1 fixture precondition: a tick draws the widget on the live ctx");
 
 await fire("session_shutdown", { type: "session_shutdown", reason: "new" }, first.ctx);
 check(timers.size === 0 && cleared.length === 1, `V2 session_shutdown clears the refresh timer (armed ${timers.size}, cleared ${cleared.length})`);
@@ -79,7 +80,7 @@ check(timers.size === 0 && cleared.length === 1, `V2 session_shutdown clears the
 first.retire();
 let thrown: unknown = null;
 try { tickAll(); } catch (err) { thrown = err; }
-check(thrown === null, `V3 no tick reaches the retired ctx (${thrown instanceof Error ? thrown.message : "no throw"})`);
+check(thrown === null && first.touchedRetired() === 0, `V3 no tick reaches the retired ctx (touched ${first.touchedRetired()}, ${thrown instanceof Error ? thrown.message : "no throw"})`);
 
 thrown = null;
 try { await fire("session_shutdown", { type: "session_shutdown", reason: "quit" }, first.ctx); } catch (err) { thrown = err; }
@@ -92,7 +93,7 @@ check(timers.size === 1, `V5 the new session arms a fresh refresh timer (armed $
 const secondBefore = second.draws.length;
 thrown = null;
 try { tickAll(); } catch (err) { thrown = err; }
-check(thrown === null && second.draws.length > secondBefore, `V5 its tick draws with the new ctx (${thrown instanceof Error ? thrown.message : "no throw"})`);
+check(thrown === null && second.draws.length > secondBefore && Array.isArray(second.draws.at(-1)), `V5 its tick draws with the new ctx (${thrown instanceof Error ? thrown.message : "no throw"})`);
 
 globalThis.setInterval = realSetInterval;
 globalThis.clearInterval = realClearInterval;

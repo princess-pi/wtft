@@ -19,7 +19,7 @@ point `~/.config/wtft/harnesses.json` at an external harness, that file is
 git clone https://github.com/princess-pi/wtft && cd wtft
 bun install
 bin/install-wtft            # builds, then copies into ~/bin
-bin/install-wtft --check    # later: has a rebuild left ~/bin stale?
+bin/install-wtft --check    # later: is ~/bin behind this checkout?
 ```
 
 `install-wtft` puts four entries in `~/bin` (override with `--dir`): the two
@@ -46,7 +46,8 @@ rest. (`wtft` has its own unrelated `--json` — a session summary, and no 64;
 see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
-it is scriptable: **0** in sync, **1** drift, **2** shadowed on PATH, **4** a
+it is scriptable: **0** in sync, **1** drift (including `stale-build`: the
+clone's bundles are older than their sources, as after a `git pull`), **2** shadowed on PATH, **4** a
 config file still at the old path, **5** the `claude-nsp-guard` shim is on PATH
 but another `claude` comes first and nothing else is wrong, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot

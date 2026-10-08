@@ -40,7 +40,7 @@ console.log("\nV2 the built CLI's --version from another directory");
 	check(r.status === 0 && first === `wtft ${pkg.version}`, `first line is "wtft ${pkg.version}" (exit ${r.status}${r.error ? `, ${r.error.message}` : ""}: ${JSON.stringify(first)})`);
 }
 
-console.log("\nV3 unbundled source, as Pi loads it, in a directory with another package.json");
+console.log("\nV3 unbundled source in a directory with another package.json");
 {
 	const decoy = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-12-decoy-"));
 	fs.writeFileSync(path.join(decoy, "package.json"), JSON.stringify({ name: "decoy", version: "9.9.9" }));

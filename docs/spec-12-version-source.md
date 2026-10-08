@@ -18,5 +18,5 @@ Issue: https://github.com/princess-pi/wtft/issues/12
 - **V1** No `docs/manifests/*.json` has a top-level `version` key. Adding one turns it red.
 - **V2** The built CLI, run from the system temp directory, prints `wtft <package.json version>` as
   its first `--version` line. A precondition fails when the bundle is older than its sources.
-- **V3** The unbundled source, as Pi loads it, run from a directory holding a decoy `package.json`:
+- **V3** The unbundled source, run from a directory holding a decoy `package.json`:
   the first line names `/wtft` and `package.json`'s version, not the decoy's.

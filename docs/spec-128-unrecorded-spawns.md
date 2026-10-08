@@ -51,7 +51,7 @@ to start the scan, so `unrecorded` is `[]` without a look.
   instead of "no spawn record names".
 - **One id in two project directories** is a moved session; only its newest copy by mtime is
   classified — the copy every other reader prices. When the newest copy cannot be read, an older
-  copy may be listed in its place (#369).
+  copy may be listed in its place, priced from that older copy.
 
 ### The launch span
 
@@ -117,7 +117,7 @@ so a directory last written before `sinceMs` holds no transcript created after i
 earlier and still being written is skipped only when its directory is that old), keeps each top-level `*.jsonl` whose own
 mtime is at or after `sinceMs` (a symlinked directory or transcript counts, followed to its target), and reads the head of each for `timestamp`, `cwd` and `entrypoint`.
 `entrypoint: "sdk-cli"` is `program`, `"cli"` is `human`, anything else is `null`. **A transcript it cannot read is skipped, like one
-that does not match** (#369). **A directory read error is loud; only a path that is gone is quiet**
+that does not match**. **A directory read error is loud; only a path that is gone is quiet**
 (#212). ENOENT — no projects root on a host without Claude Code, a directory or transcript deleted
 mid-scan, or a dangling symlink — is skipped: nothing is there to list. Any other error at the root
 or a project directory is thrown, and the report fails with exit 1 and the OS error naming the
@@ -168,7 +168,7 @@ interface UnrecordedSpawn {
 - **`--json`:** `spawned.unrecorded[]`. `wtft/spawn-tree@2` → `@3` and `wtft/session@5` → `@6`,
   because a nested key was added. `[]` means looked and found none — or, for a session that ran
   no command (the pending and no-data arms included), that there was no launch span to look in. A directory read error never sits
-  behind a `[]`: it fails the run. A transcript whose head the scan cannot read is skipped (#369),
+  behind a `[]`: it fails the run. A transcript whose head the scan cannot read is skipped,
   so `[]` can hide one. A harness that is disabled, or that does not implement
   `listSpawnCandidates`, is not looked in at all.
 - **`--tokens`, CLI only:** an `UNRECORDED` block, last, after the `UNCOUNTED` line and the
@@ -349,7 +349,7 @@ Macroscope's High on PR #211 asked for a read failure to be caught and skipped. 
 went the other way, and further: `[]` must only ever mean "looked and found none", so every read
 error in the scan fails the run, not only the root's; only ENOENT is quiet. Pinned then by L1–L5b in
 `tests/wtft-128-unrecorded-spawns.test.ts`, including `--json` exiting 1 with no document for an
-unreadable project directory and for an unreadable transcript. #369 (Duppy, 2026-09-28)
+unreadable project directory and for an unreadable transcript. A later decision (Duppy, 2026-09-28)
 superseded the transcript half: a transcript the scan cannot read is skipped, and L4/L5b now pin
 that.
 

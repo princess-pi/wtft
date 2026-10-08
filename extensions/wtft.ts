@@ -310,8 +310,6 @@ function updateWtftWidget(
 
 // ---
 
-// Periodic refresh (1 min) so the 24hr timeline diamond and surge APPROACHING/ENDING
-// badges update in real time even without new session activity.
 let _wtftCtx: any = null;
 let _wtftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 

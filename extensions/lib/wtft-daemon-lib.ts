@@ -535,7 +535,7 @@ export function describeForceRebuildFailure(how: string): string | null {
 		case "unwritable": return "the rebuild lease could not be written";
 		case "unsignalled": return "its log parser daemon could not be signalled";
 		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
-		case "older-harness": return "the harness log parser daemon serving it is an older build than this wtft; run bin/install-wtft, then -F again";
+		case "older-harness": return "the harness log parser daemon serving it is an older build than this wtft, or its version could not be read; run bin/install-wtft, then -F again";
 		default: return null;
 	}
 }

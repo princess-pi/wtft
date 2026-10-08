@@ -53,23 +53,34 @@ function sleepSync(ms: number): void {
 
 /**
  * Publish `value` at `file` through a rename, so no reader sees an empty
- * lease. With `expected`, only when the lease still holds it, and under
- * `<file>.lock`, so two conditional replaces of one lease never interleave;
- * false when it does not hold, or when a live owner keeps the lock past
- * `REPLACE_LOCK_WAIT_MS`. True when written. Throws when the write itself fails.
+ * lease. Replaces of one lease take turns under `<file>.lock`; a lock naming a
+ * dead owner, or older than `REPLACE_LOCK_WAIT_MS`, is taken over. With
+ * `expected`, only when the lease still holds it; false when it does not, or
+ * when the lock could not be taken within `REPLACE_LOCK_WAIT_MS`. True when
+ * written. Throws when the write itself fails.
  */
 export function replaceLease(file: string, value: string, owner: string, expected?: string): boolean {
-	if (expected === undefined) return publish(file, value, owner);
 	const lock = `${file}.lock`;
-	for (const until = Date.now() + REPLACE_LOCK_WAIT_MS; claimLease(lock, owner, holder => pidAlive(leasePid(holder))) === "busy";) {
+	const locked = takeLock(lock, owner);
+	try {
+		if (expected !== undefined && (!locked || leaseHolder(file) !== expected)) return false;
+		return publish(file, value, owner);
+	} finally {
+		if (locked) unlinkLeaseIf(lock, owner);
+	}
+}
+
+function takeLock(lock: string, owner: string): boolean {
+	const held = (holder: string) => pidAlive(leasePid(holder)) && lockAgeMs(lock) < REPLACE_LOCK_WAIT_MS;
+	for (const until = Date.now() + REPLACE_LOCK_WAIT_MS; ;) {
+		if (claimLease(lock, owner, held) === "claimed") return true;
 		if (Date.now() >= until) return false;
 		sleepSync(5);
 	}
-	try {
-		return leaseHolder(file) === expected && publish(file, value, owner);
-	} finally {
-		unlinkLeaseIf(lock, owner);
-	}
+}
+
+function lockAgeMs(lock: string): number {
+	try { return Date.now() - fs.statSync(lock).mtimeMs; } catch { return 0; }
 }
 
 function publish(file: string, value: string, owner: string): true {

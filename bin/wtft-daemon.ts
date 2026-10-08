@@ -1491,7 +1491,7 @@ function daemonProcs(): DaemonProc[] {
     const sessIdx = args.indexOf("--session");
     const session = sessIdx >= 0 && sessIdx + 1 < args.length ? path.resolve(cwd, args[sessIdx + 1]) : null;
     const env = procEnv(pid);
-    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0);
+    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0).map(row => path.resolve(cwd, row));
     const tmpDir = env ? procTmpDir(env, cwd) : null;
     out.push({ pid, session, harness: args.includes("--harness"), roots, tmpDir });
   }
@@ -1531,8 +1531,9 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         holds a turn or a _meta record), and fixture ones, whose --session or root environment
                         (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir (os.tmpdir()),
                         that hold no lease here; a harness daemon only when its own tmp dir (TMPDIR, TMP or
-                        TEMP in its environment) is inside the tmp dir, and so are its root environment, of which
-                        it sets one at least, and any --session
+                        TEMP in its environment) is under the tmp dir, not the tmp dir itself, and its root
+                        environment (one variable at least) and any --session are under it too. A holder
+                        --restart reaches and a respawn it started are not cleaned, stopped or listed
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped lease holder with its own --session or --harness, root
                         environment, XDG_STATE_HOME, TMPDIR, TMP and TEMP, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
@@ -1569,7 +1570,7 @@ Exit codes:
      or neither claimable nor handed a session;
      --stop refused (EPERM) or its harness lease changed or could not be removed;
      --restart left a holder running, a respawn neither ran nor handed off, or a --pid
-     held no lease or root pid file here; a tag
+     held no lease or root pid file here or in its own tmp dir; a tag
      write that failed, or a tag it cannot read or truncate at start; an unhandled error
   2  An unknown argument, a flag with no value, a second --stop, a bad --harness name, a --session
      outside the harness root, or a --pid without --restart or that is not a whole number above 0
@@ -1588,7 +1589,7 @@ Environment:
   WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR: the harness roots (see --harness).
   XDG_STATE_HOME: where wtft/daemon.log, wtft/reap.log and the daemon roster wtft/roster/<pid>.json live
                                (unset or empty: ~/.local/state).
-  TMPDIR: where leases and root pid files live (os.tmpdir()).`);
+  TMPDIR, else TMP, else TEMP, else /tmp: where leases and root pid files live (os.tmpdir()).`);
   const usage = (why: string): never => {
     process.stderr.write(`wtft-daemon: ${why}\n${USAGE}\nRun wtft-daemon --help for more.\n`);
     process.exit(2);
@@ -1919,10 +1920,14 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showList || showCleanup || stopSession) {
+    // --restart takes precedence: a harness it is about to stop, and a respawn it started, are not handled again.
+    const restartReaches = new Set([...pendingRespawns.map(r => r.childPid), ...[...harnessHolders.values()].filter(restarting)]);
     for (const proc of daemonProcs()) {
-      if (seenPids.has(proc.pid) || proc.pid === process.pid) continue;
+      if (seenPids.has(proc.pid) || proc.pid === process.pid || restartReaches.has(proc.pid)) continue;
       const action = decideUnleased(proc, { tmpDir: os.tmpdir(), cleanup: showCleanup, stopSession });
       if (action !== "keep") {
+        const kind = classifyPid(proc.pid);
+        if (kind !== "daemon" && kind !== "harness") continue;
         const where = proc.session || proc.roots.join(",");
         const named = stopSession !== null && proc.session === stopSession;
         if (named) stoppedN++;
@@ -1939,8 +1944,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         }
         continue;
       }
-      // --restart takes precedence: a harness it is about to stop is not listed.
-      if (showList && !(restarting(proc.pid) && proc.harness && [...harnessHolders.values()].includes(proc.pid))) {
+      if (showList) {
         listedN++;
         const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
@@ -1989,7 +1993,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
     for (const pid of restartPids) {
       if (restarted.has(pid)) continue;
-      console.log(`Not found: PID ${pid} — holds no lease or root pid file here`);
+      console.log(`Not found: PID ${pid} — holds no lease or root pid file here or in its own tmp dir`);
       restartFailed = true;
     }
     console.log(`${restartedN} holder(s) handled: restarted, stopped, left in place, or a lease or root pid file removed, as each line says.`);

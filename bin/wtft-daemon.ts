@@ -6,7 +6,6 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
 import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder } from "../extensions/lib/lease.js";
 import { classifyPid, decideUnleased, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync, type DaemonProc } from "../extensions/lib/holder.js";
@@ -31,6 +30,9 @@ import {
 	taggerIsOlder,
 	lastLineStartByte,
 	getTagPath,
+	harnessPidFileFor,
+	harnessRootDir,
+	harnessVersionFile as harnessVersionFileOf,
 } from "../extensions/lib/wtft-shared.js";
 
 
@@ -657,12 +659,7 @@ function claimPidFile(file: string): "claimed" | "busy" {
 }
 
 function harnessRoot(which: string, env: NodeJS.ProcessEnv = process.env): string {
-  if (which === "claude") {
-    return projectsDir(env);
-  }
-  if (which === "pi") {
-    return env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
-  }
+  if (which === "claude" || which === "pi") return harnessRootDir(which, env);
   process.stderr.write("wtft-daemon: --harness must be claude, claude-code or pi\n");
   process.exit(2);
 }
@@ -1056,13 +1053,8 @@ function watchFocusRequests() {
   } catch { /* the sweep still serves requests */ }
 }
 
-function harnessPidFileFor(which: string, root: string): string {
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
-  return path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
-}
-
 function harnessVersionFile(pid: number): string {
-  return `${harnessPidFile}.${pid}.version`;
+  return harnessVersionFileOf(harnessPidFile, pid);
 }
 
 function runHarness(which: string, focus: string) {

@@ -334,16 +334,16 @@ function corpusFiles(): string[] {
 	// Runs on every host, CI included, which M7b cannot.
 	const corpus = corpusFiles();
 	const OPTIONAL_CARRIED = ["description", "toolUseId", "model", "parentAgentId", "isFork"];
-	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
+	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a1a9b0bea81408e23", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
 		"agent-ab7a653fd7de39292", "agent-ace7ef5933e128a87", "agent-aed7cbd64d6f241d1"].map(b => `${b}.meta.json`);
-	assert(`M7c the committed corpus is the seven files CORPUS lists`,
+	assert(`M7c the committed corpus is the files CORPUS lists`,
 		JSON.stringify(corpus.map(f => path.basename(f))) === JSON.stringify(CORPUS),
 		JSON.stringify(corpus.map(f => path.basename(f))));
 	// Every key in the corpus is one the reader carries or one it knowingly
 	// ignores, so a rename brought in by a refresh fails here rather than
 	// leaving a field silently unread.
 	const CARRIED = [...REQUIRED, ...OPTIONAL_CARRIED];
-	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd"];
+	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd", "effort"];
 	for (const file of corpus) {
 		let keys: string[] = [];
 		try { keys = Object.keys(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* M7c parse check owns it */ }

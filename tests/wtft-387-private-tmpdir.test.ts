@@ -101,7 +101,8 @@ try {
 		const up = await until(() => classifyPid(d.pid) === "harness" && filesNaming(d.tmp, ROOT_PID_FILE, d.pid).length > 0, 5000) < Infinity;
 		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
 		assert("fixture precondition: and no lease here", filesNaming(HERE, LEASE, d.pid).length === 0);
-		assert("fixture precondition: --list shows it", listsPid(d.pid) === true);
+		const listed = linesFor(daemonCmd("--list").stdout, d.pid);
+		assert(`fixture precondition: --list shows it, by its root (${listed.join(" | ")})`, listed.length === 1 && listed[0].endsWith(` harness ${path.join(d.box, "root")},${path.join(d.box, "no-pi")}`));
 		const run = daemonCmd("--cleanup");
 		assert(`it reports the harness cleaned up as a fixture daemon (${run.stdout.trim()})`, new RegExp(`^Cleaned up: PID ${d.pid} — fixture daemon: `, "m").test(run.stdout) && run.status === 0);
 		assert("the pid is gone within 5 s", await until(() => gone(d.pid), 5000) < Infinity);

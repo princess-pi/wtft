@@ -1449,8 +1449,8 @@ function stopHarness(reason: string, exitCode = 0) {
   process.exit(exitCode);
 }
 
-function procCwd(pid: number): string {
-  try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return "/"; }
+function procCwd(pid: number): string | null {
+  try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return null; }
 }
 
 function procEnv(pid: number): Map<string, string> | null {
@@ -1468,8 +1468,13 @@ function procTmpDir(env: Map<string, string>, cwd: string): string {
   return path.resolve(cwd, env.get("TMPDIR") || env.get("TMP") || env.get("TEMP") || "/tmp");
 }
 
-function daemonProcs(): DaemonProc[] {
-  const out: DaemonProc[] = [];
+/** A relative path is resolved only when the cwd could be read; otherwise null. */
+function resolvedIn(cwd: string | null, file: string): string | null {
+  return cwd !== null ? path.resolve(cwd, file) : path.isAbsolute(file) ? file : null;
+}
+
+function daemonProcs(): (DaemonProc & { started: string | null })[] {
+  const out: (DaemonProc & { started: string | null })[] = [];
   let entries: string[];
   try {
     entries = fs.readdirSync("/proc");
@@ -1479,6 +1484,7 @@ function daemonProcs(): DaemonProc[] {
   for (const ent of entries) {
     if (!/^[1-9]\d*$/.test(ent)) continue;
     const pid = Number(ent);
+    const started = processTable().startTime(pid);
     let cmd = "";
     try {
       cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
@@ -1489,11 +1495,11 @@ function daemonProcs(): DaemonProc[] {
     if (!isDaemonCmdline(args)) continue;
     const cwd = procCwd(pid);
     const sessIdx = args.indexOf("--session");
-    const session = sessIdx >= 0 && sessIdx + 1 < args.length ? path.resolve(cwd, args[sessIdx + 1]) : null;
-    const env = procEnv(pid);
-    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0).map(row => path.resolve(cwd, row));
-    const tmpDir = env ? procTmpDir(env, cwd) : null;
-    out.push({ pid, session, harness: args.includes("--harness"), roots, tmpDir });
+    const session = sessIdx >= 0 && sessIdx + 1 < args.length ? resolvedIn(cwd, args[sessIdx + 1]) : null;
+    const env = cwd !== null ? procEnv(pid) : null;
+    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0).map(row => path.resolve(cwd!, row));
+    const tmpDir = env ? procTmpDir(env, cwd!) : null;
+    out.push({ pid, session, harness: args.includes("--harness"), roots, tmpDir, started });
   }
   return out;
 }
@@ -1687,7 +1693,8 @@ if (showList || showCleanup || showRestart || stopSession) {
   const foreignDirs = new Map<string, Set<number>>();
   for (const pid of showRestart ? restartPids : []) {
     const env = procEnv(pid);
-    const dir = env ? procTmpDir(env, procCwd(pid)) : null;
+    const cwd = procCwd(pid);
+    const dir = env && cwd !== null ? procTmpDir(env, cwd) : null;
     if (dir === null || dir === path.resolve(pidDir)) continue;
     foreignDirs.set(dir, (foreignDirs.get(dir) ?? new Set<number>()).add(pid));
   }
@@ -1928,10 +1935,14 @@ if (showList || showCleanup || showRestart || stopSession) {
       if (action !== "keep") {
         const kind = classifyPid(proc.pid);
         if (kind !== "daemon" && kind !== "harness") continue;
+        // A pid reused since the scan is not the daemon that was judged.
+        if (proc.started === null || processTable().startTime(proc.pid) !== proc.started) continue;
         const where = proc.session || proc.roots.join(",");
         const named = stopSession !== null && proc.session === stopSession;
+        const sent = processTable().signal(proc.pid, "SIGTERM");
+        if (sent === "gone") continue;
         if (named) stoppedN++;
-        if (processTable().signal(proc.pid, "SIGTERM") === "denied") {
+        if (sent === "denied") {
           console.log(`Not stopped: PID ${proc.pid} refused the signal (EPERM) — ${action === "clean" ? "fixture daemon: " : ""}${where}`);
           if (named) stopRefused = true;
           continue;
@@ -1946,7 +1957,7 @@ if (showList || showCleanup || showRestart || stopSession) {
       }
       if (showList) {
         listedN++;
-        const where = proc.session || (proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : "(no session arg)");
+        const where = proc.harness ? `harness ${proc.roots.join(",") || "(unknown root)"}` : proc.session || "(no session arg)";
         console.log(`PID ${String(proc.pid).padEnd(7)} ${"RUNNING".padEnd(20)} v${"?".padEnd(7)} idle: ${"?".padEnd(5)} ${where}`);
       }
     }

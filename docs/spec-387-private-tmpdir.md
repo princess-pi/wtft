@@ -10,7 +10,8 @@ Module: `extensions/lib/holder.ts` · Seam: `decideUnleased`, tested in
   or `TEMP`, else `/tmp`), read from `/proc/<pid>/environ`. Its leases and root pid file live
   there. **Here** is the caller's own tmp dir. An unreadable environment gives no tmp dir.
 - A daemon's tmp dir, root variables and `--session` are resolved against its working directory.
-  **Inside here** means here or under it.
+  When that cannot be read, only an absolute `--session` is kept, and it has no roots and no tmp
+  dir. **Inside here** means here or under it.
 - **A sandboxed daemon** has a tmp dir inside here that is not here itself, sets at least one root
   variable (`WTFT_CLAUDE_PROJECTS_DIR`, `WTFT_PI_SESSIONS_DIR`) and has every one it sets inside
   here, and has a `--session` inside here or none.
@@ -34,15 +35,16 @@ session it shows, and a sandboxed harness by `--cleanup`:
   lease is claimed, and the settle check reads it, in the dir the old one was found in.
   `Not found: PID <pid> — holds no lease or root pid file here or in its own tmp dir`, which
   makes the command exit 1, is printed for a pid found in neither.
-- **S4. A `--list` row for a daemon holding no lease here names its `--session` resolved against
-  its working directory**, as a lease row already does, so the session `--stop` takes is the one
-  `--list` printed.
+- **S4. A `--list` row for a per-session daemon holding no lease here names its `--session`
+  resolved against its working directory**, as a lease row already does, so the session `--stop`
+  takes is the one `--list` printed. A harness's row names its roots (`harness <roots>`), never its
+  start-up `--session`.
 - **S5. `--restart` takes precedence in the process-table pass too.** A daemon `--restart` reaches
   through a root pid file, and a respawn it started, are not listed by `--list`, cleaned by
   `--cleanup` or stopped by `--stop` in the same command.
 
 The process-table pass signals a pid only when `classifyPid` still reads it as a daemon or a
-harness. `--list`, `--cleanup`, `--stop`, and `--restart` without `--pid` still read leases and
+harness and its start time is the one the scan read; a pid gone by the signal is not reported. `--list`, `--cleanup`, `--stop`, and `--restart` without `--pid` still read leases and
 root pid files only here.
 
 ## Test

@@ -1497,9 +1497,14 @@ function daemonProcs(): (DaemonProc & { started: string | null })[] {
     const sessIdx = args.indexOf("--session");
     const session = sessIdx >= 0 && sessIdx + 1 < args.length ? resolvedIn(cwd, args[sessIdx + 1]) : null;
     const env = cwd !== null ? procEnv(pid) : null;
-    const roots = ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"].map(key => env?.get(key) ?? "").filter(row => row.length > 0).map(row => path.resolve(cwd!, row));
+    const harnessIdx = args.indexOf("--harness");
+    const which = harnessIdx >= 0 ? args[harnessIdx + 1] ?? "" : null;
+    const rootKeys = which === null ? ["WTFT_CLAUDE_PROJECTS_DIR", "WTFT_PI_SESSIONS_DIR"]
+      : which === "claude" || which === "claude-code" ? ["WTFT_CLAUDE_PROJECTS_DIR"]
+      : which === "pi" ? ["WTFT_PI_SESSIONS_DIR"] : [];
+    const roots = rootKeys.map(key => env?.get(key) ?? "").filter(row => row.length > 0).map(row => path.resolve(cwd!, row));
     const tmpDir = env ? procTmpDir(env, cwd!) : null;
-    out.push({ pid, session, harness: args.includes("--harness"), roots, tmpDir, started });
+    out.push({ pid, session, harness: which !== null, roots, tmpDir, started });
   }
   return out;
 }
@@ -1531,14 +1536,15 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         A harness's lease names the session its .served hand-off lists for that lease;
                         any other holder's, its --session resolved against its cwd. The version is the first tag file found beside
                         that session, not the running build's. A lease reading rebuild is not listed; a
-                        lease with no such session shows (hash: <lease hash>). Off Linux (no /proc) every live pid reads RUNNING
+                        lease with no such session shows (hash: <lease hash>), and a harness holding no lease here
+                        shows harness <its root>. Off Linux (no /proc) every live pid reads RUNNING
   --cleanup             Remove every lease whose holder is dead or not a daemon, uncounted. SIGTERM (no wait)
                         per-session daemons whose session is gone (no file, not moved, and a tag that
                         holds a turn or a _meta record), and fixture ones, whose --session or root environment
                         (WTFT_CLAUDE_PROJECTS_DIR, WTFT_PI_SESSIONS_DIR) is under the tmp dir (os.tmpdir()),
                         that hold no lease here; a harness daemon only when its own tmp dir (TMPDIR, TMP or
-                        TEMP in its environment) is under the tmp dir, not the tmp dir itself, and its root
-                        environment (one variable at least) and any --session are under it too. A holder
+                        TEMP in its environment) is under the tmp dir, not the tmp dir itself, and its own
+                        root variable (set) and any --session are under it too. A holder
                         --restart reaches and a respawn it started are not cleaned, stopped or listed
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped lease holder with its own --session or --harness, root
@@ -1667,10 +1673,8 @@ if (stopSession) {
 }
 
 /** A daemon's --session, resolved against that daemon's working directory. */
-function resolvedSessionArg(pid: number, session: string): string {
-  let cwd = "/";
-  try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* resolve against / */ }
-  return path.resolve(cwd, session);
+function resolvedSessionArg(pid: number, session: string): string | null {
+  return resolvedIn(procCwd(pid), session);
 }
 
 if (showList || showCleanup || showRestart || stopSession) {
@@ -1926,16 +1930,21 @@ if (showList || showCleanup || showRestart || stopSession) {
     }
   }
 
+  if (pendingRespawns.length > 0) sleepMs(RESPAWN_SETTLE_MS);
+  for (const r of pendingRespawns) {
+    const servedBy = r.served();
+    if (servedBy > 0 && servedBy !== r.childPid) handedTo.add(servedBy);
+    r.settle(pidAlive(r.childPid) || servedBy > 0);
+  }
+
   if (showList || showCleanup || stopSession) {
-    // --restart takes precedence: a harness it is about to stop, and a respawn it started, are not handled again.
-    const restartReaches = new Set([...pendingRespawns.map(r => r.childPid), ...[...harnessHolders.values()].filter(restarting)]);
+    const restartReaches = new Set([...pendingRespawns.map(r => r.childPid), ...handedTo, ...[...harnessHolders.values()].filter(restarting)]);
     for (const proc of daemonProcs()) {
       if (seenPids.has(proc.pid) || proc.pid === process.pid || restartReaches.has(proc.pid)) continue;
       const action = decideUnleased(proc, { tmpDir: os.tmpdir(), cleanup: showCleanup, stopSession });
       if (action !== "keep") {
         const kind = classifyPid(proc.pid);
         if (kind !== "daemon" && kind !== "harness") continue;
-        // A pid reused since the scan is not the daemon that was judged.
         if (proc.started === null || processTable().startTime(proc.pid) !== proc.started) continue;
         const where = proc.session || proc.roots.join(",");
         const named = stopSession !== null && proc.session === stopSession;
@@ -1964,12 +1973,6 @@ if (showList || showCleanup || showRestart || stopSession) {
   }
 
   if (showRestart) {
-    if (pendingRespawns.length > 0) sleepMs(RESPAWN_SETTLE_MS);
-    for (const r of pendingRespawns) {
-      const servedBy = r.served();
-      if (servedBy > 0 && servedBy !== r.childPid) handedTo.add(servedBy);
-      r.settle(pidAlive(r.childPid) || servedBy > 0);
-    }
     for (const fullPath of harnessPidFiles) {
       const pidFile = path.basename(fullPath);
       const pid = harnessHolders.get(fullPath) ?? NaN;

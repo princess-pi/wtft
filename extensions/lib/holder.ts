@@ -232,7 +232,6 @@ function isSandboxed(proc: DaemonProc, tmpDir: string): boolean {
 		&& (proc.session === null || isUnder(proc.session, tmpDir));
 }
 
-/** What `--cleanup` and `--stop <stopSession>` do with a daemon holding no lease in `tmpDir`. */
 export function decideUnleased(proc: DaemonProc, opts: { tmpDir: string; cleanup: boolean; stopSession: string | null }): "clean" | "stop" | "keep" {
 	if (opts.cleanup && (proc.harness ? isSandboxed(proc, opts.tmpDir) : isFixtureDaemon(proc, opts.tmpDir))) return "clean";
 	if (opts.stopSession !== null && !proc.harness && proc.session === opts.stopSession) return "stop";

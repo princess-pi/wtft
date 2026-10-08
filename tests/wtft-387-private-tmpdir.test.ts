@@ -102,7 +102,7 @@ try {
 		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
 		assert("fixture precondition: and no lease here", filesNaming(HERE, LEASE, d.pid).length === 0);
 		const listed = linesFor(daemonCmd("--list").stdout, d.pid);
-		assert(`fixture precondition: --list shows it, by its root (${listed.join(" | ")})`, listed.length === 1 && listed[0].endsWith(` harness ${path.join(d.box, "root")},${path.join(d.box, "no-pi")}`));
+		assert(`fixture precondition: --list shows it, by its root (${listed.join(" | ")})`, listed.length === 1 && listed[0].endsWith(` harness ${path.join(d.box, "root")}`));
 		const run = daemonCmd("--cleanup");
 		assert(`it reports the harness cleaned up as a fixture daemon (${run.stdout.trim()})`, new RegExp(`^Cleaned up: PID ${d.pid} — fixture daemon: `, "m").test(run.stdout) && run.status === 0);
 		assert("the pid is gone within 5 s", await until(() => gone(d.pid), 5000) < Infinity);
@@ -157,6 +157,28 @@ try {
 		assert(`one line names it, a --restart one (${lines.join(" | ")})`, lines.length === 1 && lines[0].startsWith(`Stopped: PID ${d.pid} — harness `));
 		assert("exit 0", run.status === 0);
 		assert("the pid is gone within 5 s", await until(() => gone(d.pid), 5000) < Infinity);
+	}
+	console.log("--restart --pid with --cleanup leaves alone the sandboxed harness a respawn hands its session to");
+	{
+		const h = harnessInBox("handoff", false);
+		const root = path.join(h.box, "root");
+		const session = path.join(root, "proj", "t.jsonl");
+		const up = await until(() => classifyPid(h.pid) === "harness" && filesNaming(h.tmp, ROOT_PID_FILE, h.pid).length > 0, 5000) < Infinity;
+		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
+		const child = spawn(process.execPath, [DAEMON, "--session", session], {
+			detached: true,
+			stdio: "ignore",
+			env: { ...process.env, XDG_STATE_HOME: path.join(h.box, "state"), TMPDIR: h.tmp, WTFT_CLAUDE_PROJECTS_DIR: root, WTFT_PI_SESSIONS_DIR: path.join(h.box, "no-pi") },
+		});
+		child.unref();
+		const p = child.pid ?? 0;
+		started.push(p);
+		const leased = await until(() => classifyPid(p) === "daemon" && filesNaming(h.tmp, LEASE, p).length > 0, 5000) < Infinity;
+		assert("fixture precondition: a per-session daemon holds that root's session lease in the same tmp dir", leased);
+		const run = daemonCmd("--restart", "--pid", String(p), "--cleanup");
+		assert(`the harness is not cleaned (${run.stdout.trim()})`, linesFor(run.stdout, h.pid).every(l => !l.startsWith("Cleaned up")));
+		assert("it is still running", classifyPid(h.pid) === "harness");
+		assert("the restart did not fail: exit 0", run.status === 0);
 	}
 } finally {
 	for (const pid of started) if (pid > 0 && !gone(pid)) try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }

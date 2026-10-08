@@ -12,9 +12,11 @@ Module: `extensions/lib/holder.ts` · Seam: `decideUnleased`, tested in
 - A daemon's tmp dir, root variables and `--session` are resolved against its working directory.
   When that cannot be read, only an absolute `--session` is kept, and it has no roots and no tmp
   dir. **Inside here** means here or under it.
-- **A sandboxed daemon** has a tmp dir inside here that is not here itself, sets at least one root
-  variable (`WTFT_CLAUDE_PROJECTS_DIR`, `WTFT_PI_SESSIONS_DIR`) and has every one it sets inside
-  here, and has a `--session` inside here or none.
+- **A harness's roots** are its own harness's root variable only (`WTFT_CLAUDE_PROJECTS_DIR` for
+  `claude`, `WTFT_PI_SESSIONS_DIR` for `pi`, none for any other name); a per-session daemon's are
+  both, when set.
+- **A sandboxed harness** has a tmp dir inside here that is not here itself, sets its root
+  variable inside here, and has a `--session` inside here or none.
 
 ## Behaviour
 
@@ -37,10 +39,11 @@ session it shows, and a sandboxed harness by `--cleanup`:
   makes the command exit 1, is printed for a pid found in neither.
 - **S4. A `--list` row for a per-session daemon holding no lease here names its `--session`
   resolved against its working directory**, as a lease row already does, so the session `--stop`
-  takes is the one `--list` printed. A harness's row names its roots (`harness <roots>`), never its
+  takes is the one `--list` printed. A harness's row names its root (`harness <root>`), never its
   start-up `--session`.
-- **S5. `--restart` takes precedence in the process-table pass too.** A daemon `--restart` reaches
-  through a root pid file, and a respawn it started, are not listed by `--list`, cleaned by
+- **S5. `--restart` takes precedence in the process-table pass too.** Its respawns are judged
+  before that pass runs. A daemon `--restart` reaches through a root pid file, a respawn it
+  started, and a harness a respawn handed its session to are not listed by `--list`, cleaned by
   `--cleanup` or stopped by `--stop` in the same command.
 
 The process-table pass signals a pid only when `classifyPid` still reads it as a daemon or a
@@ -57,7 +60,8 @@ root pid files only here.
   printing no line for either; a per-session daemon restarted by `--restart --pid --list`, exit 0,
   its respawn holding the lease in that tmp dir, running with it, and not listed; under
   `--restart --pid --cleanup`, a sandboxed harness holding a lease restarted once with its respawn
-  left running, and one found only through its root pid file stopped once, by `--restart`.
+  left running, one found only through its root pid file stopped once, by `--restart`, and one a
+  respawn hands its session to left running.
 
 ## Roads not taken
 

@@ -343,6 +343,17 @@ export { useProcessTable } from "../extensions/lib/holder.ts";
 
 // ---
 
+const opts = parseWtftCliArgs(process.argv.slice(2));
+
+let cwdGone = false;
+try { process.cwd(); } catch { cwdGone = true; }
+if (cwdGone) {
+	try { process.chdir(opts.cwdOverride ?? os.homedir()); } catch { process.chdir(os.homedir()); }
+	if (opts.cwdOverride === undefined) {
+		console.error(`\x1b[33m⚠ The working directory no longer exists, so wtft runs from ${process.cwd()}. Pass --dir <path> to pick the project.\x1b[0m`);
+	}
+}
+
 const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cumulative" }, WTFT_CONFIG_DIR) as {
 	interval?: string;
 	limit?: number;
@@ -358,8 +369,6 @@ const daemonDir = path.dirname(fileURLToPath(import.meta.url));
 // Positional `spawn-record` skips main() at the entry-point guard (parseWtftCliArgs
 // ignores unknown args, so falling through would quietly run a full report).
 const isSpawnRecord = process.argv[2] === "spawn-record";
-
-const opts = parseWtftCliArgs(process.argv.slice(2));
 
 const unit = chartUnit(opts, cfg.tokens);
 

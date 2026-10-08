@@ -229,7 +229,7 @@
     },
     {
       "flags": "--dir, --cwd <path>",
-      "desc": "CLI only. Anchor directory for Claude Code session discovery (default: current directory). The flag picks the anchor, not the SCOPE: with no -s, the picker's own default scope (#89) folder-matches this ONE directory alone, no fan-out. Ctrl+W widens to every checkout of the anchor's repo (main clone plus every worktree), so sibling-worktree sessions are listed only on that keypress, or under the pre-#89 legacy discovery an explicit -s still searches (see -s's own entry). An anchor outside any git repo means exactly that directory even under Ctrl+W, so '--dir ~' still does not list every session on the machine."
+      "desc": "CLI only. Anchor directory for Claude Code session discovery (default: current directory). The flag picks the anchor, not the SCOPE: with no -s, the picker's own default scope (#89) folder-matches this ONE directory alone, no fan-out. Ctrl+W widens to every checkout of the anchor's repo (main clone plus every worktree), so sibling-worktree sessions are listed only on that keypress, or under the pre-#89 legacy discovery an explicit -s still searches (see -s's own entry). An anchor outside any git repo means exactly that directory even under Ctrl+W, so '--dir ~' still does not list every session on the machine. When the working directory has been deleted, wtft runs from this directory, or from the home directory without --dir, and says so."
     },
     {
       "flags": "-w, --width <number>",

@@ -395,7 +395,7 @@ invisible. The prose line stays the whole surface — it appears on every render
 until the transcripts count again, and the widget has no exit code to set.
 
 The remedy line names **one** action — re-run — and deliberately never mentions `-F`.
-`-F` does not return early: it deletes the tag, kills the daemon, and falls through to the
+A successful `-F` falls through to the
 same read path, so a forced run can reach this branch too, and "use `-F`" would then be a
 loop told to the person who just did it, about the run that is supposed to be the
 authoritative reference. Fixed by deleting the branch rather than by conditioning on

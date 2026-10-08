@@ -341,7 +341,7 @@ covers them:
 Giving those five a machine-readable mode is real work with its own contract —
 `--list` in particular — and is **#92**, filed rather than half-done here.
 
-**`--force` still does its work.** `-F` kills the daemon and deletes the tag files
+**`--force` still does its work.** `-F` starts the re-parse
 before this branch is reached, so `--json -F` re-parses exactly as the rendered
 path would.
 

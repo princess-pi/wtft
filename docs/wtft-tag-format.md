@@ -298,9 +298,8 @@ The canonical implementation is `dedupeClassifiedById()` in `wtft-daemon-lib.ts`
 Readers locate a tag file by the current `WTFT_TAGGER_VERSION`. If no current-version file
 exists, `getTagPath()` falls back as §1 says, and a tag reached by its other-version step is
 reported `stale-version`; the next per-session daemon to serve the session writes a
-current-version tag from the transcript and deletes the older ones. `wtft -F` deletes every
-version and rebuilds for a per-session daemon; for a harness-served session it marks the lease
-`rebuild` and the harness truncates the current tag, leaving older versions on disk. A bump to
+current-version tag from the transcript and deletes the older ones. `wtft -F` rebuilds the tag from
+the transcript (`docs/spec-259-daemon-correctness.md` § `wtft -F`). A bump to
 `WTFT_TAGGER_VERSION` makes every older tag stale.
 
 **Never hardcode the version number.** Always import `WTFT_TAGGER_VERSION` from

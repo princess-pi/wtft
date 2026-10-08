@@ -373,6 +373,38 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
+	console.log("\n-F counts a session adopted by a harness of a newer build");
+	{
+		const root = makeRoot("force-newer");
+		const target = session(root, "newer-target");
+		const newerDir = path.join(root, "newer-build");
+		fs.mkdirSync(newerDir);
+		const bundle = read(DAEMON);
+		const newer = bundle.replace(/var WTFT_TAGGER_VERSION = "[^"]*";/, 'var WTFT_TAGGER_VERSION = "999.0.0";');
+		check(newer !== bundle, "fixture precondition: the copied daemon carries a newer tagger version");
+		fs.writeFileSync(path.join(newerDir, "wtft-daemon.mjs"), newer);
+		const newerTag = path.join(path.dirname(target), "wtft-tags", `${path.basename(target)}.wtft-tag.v999.0.0.jsonl`);
+		const errFile = path.join(root, "newer.err");
+		const fd = fs.openSync(errFile, "a");
+		const child = spawn("node", [path.join(newerDir, "wtft-daemon.mjs"), "--harness", "claude", "--session", target], {
+			detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root),
+		});
+		child.unref();
+		fs.closeSync(fd);
+		if (child.pid) pids.push(child.pid);
+		check(await until(() => read(newerTag).includes('"newer-target"'), 15_000) !== Infinity, "fixture: the newer harness serves the target");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const requested = Date.now();
+		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		const head = read(newerTag).split("\n", 1)[0];
+		let first = 0;
+		try { first = JSON.parse(head)?._hb?.first ?? 0; } catch { /* not a heartbeat */ }
+		check(first >= requested, `fixture precondition: the newer harness started its tag over after -F (first line ${head.slice(0, 80)})`);
+		check(forced.status !== 1 && !forced.stderr.includes("has not taken"),
+			`-F does not say the harness never took the session up (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nAn older per-session build never takes over from a newer one");
 	{
 		const root = makeRoot("older");

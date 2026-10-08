@@ -64,7 +64,7 @@ session parser
 
 **Lease** (#270):
 The per-session file `$TMPDIR/wtft-daemon-<hash>.pid` whose whole content names who serves the
-session, or the daemon just spawned to serve it: a daemon's pid, or the token `rebuild` that `wtft -F` leaves for a harness-served
+session, or the daemon just spawned to serve it: a daemon's pid, or the token `rebuild` that `wtft -F` can leave for a harness-served
 session and that any daemon leaves for a session whose tag it could not write, or could not read or
 truncate at start. Every claim, release and
 replacement goes through `extensions/lib/lease.ts`: a claim is an exclusive hard link, made by the

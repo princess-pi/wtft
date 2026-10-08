@@ -15,13 +15,16 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 			process.exit(1);
 		}
 		const lease = getDaemonPidPath(finalSessionPath);
-		const tag = getCurrentVersionTagPath(finalSessionPath);
+		const tagDirs = [...new Set([path.dirname(getCurrentVersionTagPath(finalSessionPath)), path.join(path.dirname(finalSessionPath), "wtft-tags")])];
 		adopted = false;
-		for (const until = Date.now() + 10_000; Date.now() < until && !adopted;) {
+		// A started-over tag it cannot find (a moved session's tag under another build's
+		// version) must not turn an adopted session into a "not taken up" failure.
+		for (const until = Date.now() + 10_000; Date.now() < until;) {
 			let held = "";
 			try { held = fs.readFileSync(lease, "utf8").trim(); } catch { /* not claimed yet */ }
-			adopted = held !== "rebuild" && held !== "" && tagStartedSince(tag, requestedAt);
-			if (!adopted) await new Promise(resolve => setTimeout(resolve, 100));
+			adopted = held !== "rebuild" && held !== "";
+			if (adopted && anyTagStartedSince(tagDirs, path.basename(finalSessionPath), requestedAt)) break;
+			await new Promise(resolve => setTimeout(resolve, 100));
 		}
 	}
 	const what = {
@@ -44,6 +47,17 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 		process.exit(1);
 	}
 	console.error(`\x1b[33mForce re-parse: ${what} for ${path.basename(finalSessionPath)}\x1b[0m`);
+}
+
+function anyTagStartedSince(dirs: string[], sessionBase: string, since: number): boolean {
+	for (const dir of dirs) {
+		let names: string[] = [];
+		try { names = fs.readdirSync(dir); } catch { continue; }
+		for (const name of names) {
+			if (name.startsWith(`${sessionBase}.wtft-tag.v`) && name.endsWith(".jsonl") && tagStartedSince(path.join(dir, name), since)) return true;
+		}
+	}
+	return false;
 }
 
 function tagStartedSince(tag: string, since: number): boolean {

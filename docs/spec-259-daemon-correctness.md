@@ -110,12 +110,12 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **On a session a harness serves, `-F` rebuilds that one session.** It replaces the lease with
   `rebuild` and asks the harness for the session, which rebuilds the tag from the transcript. The
-  harness and its other sessions are untouched. The CLI waits until the harness has adopted the
-  session and started its tag over before it reads the tag, so its own report is of the rebuild.
-  A lease naming the harness is not enough on its own: the harness claims the lease, then empties
-  the tag, so the CLI also waits for the tag's first line to be a heartbeat started after its
-  request. After 10 s it says the
-  harness has not taken the session up, and exits 1 with no report; the harness rebuilds the tag
+  harness and its other sessions are untouched. The CLI waits, for up to 10 s, until the harness has
+  adopted the session and started its tag over before it reads the tag, so its own report is of
+  the rebuild:
+  the harness claims the lease before it empties the tag, so a lease naming it is not enough.
+  When the harness has not taken the session up within 10 s, the CLI says so and exits 1 with no
+  report; the harness rebuilds the tag
   as soon as it does, with no new request. A lease an earlier `-F` left
   reading `rebuild`, with no daemon behind it, is treated as no holder. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.

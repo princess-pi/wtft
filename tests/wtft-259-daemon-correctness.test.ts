@@ -328,6 +328,55 @@ mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, r
 		process.kill(h.pid, "SIGTERM");
 	}
 
+	console.log("\nA harness start for a session the harness already serves never writes over a rebuild token");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the -F write is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		const root = makeRoot("force-held");
+		const target = session(root, "held-target");
+		const h = start(root, ["--harness", "claude", "--session", target], "held.err");
+		check(await until(() => classified(target, "held-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		const tag = getCurrentVersionTagPath(target);
+		const row = read(tag).split("\n").find(l => l.includes('"held-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"held-target"', '"held-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "held-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const lease = getDaemonPidPath(target);
+		check(read(lease).trim() === String(h.pid), "fixture precondition: the harness holds the target's lease");
+		const fired = path.join(root, "rebuild-written");
+		// -F's write lands just before the start's own write to the lease, or as it exits if it writes none.
+		const preload = path.join(root, "rebuild-before-write.mjs");
+		fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const lease = process.env.WTFT_293_LEASE;
+const originalRename = realFs.renameSync.bind(realFs);
+const originalLink = realFs.linkSync.bind(realFs);
+const originalWrite = realFs.writeFileSync.bind(realFs);
+let done = false;
+function writeRebuild(where) {
+  if (done) return;
+  done = true;
+  originalWrite(lease + ".replace-test", "rebuild");
+  originalRename(lease + ".replace-test", lease);
+  originalWrite(process.env.WTFT_293_FIRED, where);
+}
+function renameSync(from, to) { if (String(to) === lease) writeRebuild("before its rename onto the lease"); return originalRename(from, to); }
+function linkSync(from, to) { if (String(to) === lease) writeRebuild("before its link onto the lease"); return originalLink(from, to); }
+function writeFileSync(file, ...rest) { if (String(file) === lease) writeRebuild("before its write to the lease"); return originalWrite(file, ...rest); }
+process.on("exit", () => writeRebuild("as it exited, having written no lease"));
+const hooked = { renameSync, linkSync, writeFileSync };
+mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...hooked } }));
+`);
+		const starter = spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+			encoding: "utf8", timeout: 30_000, env: { ...envFor(root), WTFT_293_LEASE: lease, WTFT_293_FIRED: fired },
+		});
+		check(fs.existsSync(fired), `fixture precondition: the rebuild token was written during the start (${read(fired)})`);
+		check(starter.status === 0, `fixture precondition: the start handed the session to the harness and exited 0 (exit ${starter.status}${starter.error ? `, ${starter.error.message}` : ""}: ${starter.stderr.trim()})`);
+		const rebuilt = await until(() => classified(target, "held-target") && !classified(target, "held-bogus"), 15_000);
+		check(rebuilt !== Infinity, `the harness rebuilds the tag (rebuild written ${read(fired)}; lease reads ${JSON.stringify(read(lease).trim())}, harness ${h.pid})`);
+		process.kill(h.pid, "SIGTERM");
+	}
+
 	console.log("\n-F reports the rebuilt tag even when the harness empties it after taking the lease");
 	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
 		skip("the gap is staged from a bun --preload hook; run the suite under bun");

@@ -36,8 +36,8 @@
 ## The change
 
 - **The harness daemon serves only the sessions it is asked for.** It adopts a session when a
-  reader names it: its own `--session` at startup, or a focus request from a later `wtft`, Pi
-  widget or `--watch` start (`pointSessionAt`). It also adopts what the previous harness on the
+  reader names it: its own `--session` at startup, or a focus request from a later `--harness`
+  start (`pointSessionAt`). It also adopts what the previous harness on the
   root handed over, and a session it dropped for idling when that session's transcript is written. It no longer walks the root at startup, and a
   session nobody asked for is never adopted, tagged or leased. A subagent session of a
   served session (under `<id>/subagents/`, a `claude -p` session it ran, or a Pi sibling) is read
@@ -82,7 +82,7 @@
   posted is reported on stderr. Unless the harness still holds the root and already held this
   session's lease, its `.display` and a lease naming that harness are removed, so the reader is
   not told a session is served when nothing will adopt it. The spawn then waits up to 2 s for
-  that harness to exit and tries to claim the root itself, exiting 1 after five attempts.
+  that harness to exit and tries again, exiting 1 when its attempts run out.
 - **A focus request never overwrites a `rebuild` lease**, so a session handed to a live harness
   after a failed tag write is rebuilt, not resumed. A failed adoption is retried up to five
   times.

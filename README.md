@@ -363,7 +363,7 @@ parser daemon and claims the session's lease for it at once when the lease is ab
 dead process or one that is not a daemon; a per-session start exits at once when another live daemon holds the session's lease
 for a tag of this version (an older-version tag is taken over; beside a newer-version tag any live
 daemon holder keeps it) and exits 1 on a lease it cannot
-read, and a harness start takes a per-session holder's lease and retries on another harness's
+read, and the harness daemon takes a per-session holder's lease and retries on another harness's
 (on Linux, where the liveness check reads `/proc`; elsewhere it takes either),
 so the daemon revives after an idle timeout when the previous process exited. A session under the Claude
 projects directory or the Pi sessions directory is served by that directory's one

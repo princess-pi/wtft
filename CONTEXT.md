@@ -432,7 +432,7 @@ bare "footer" for the chart's own lines under the bars, which are part of the wt
 Running `wtft` (or `./wtft`, or the npm-global install) directly from the host shell, outside
 Pi — reuses the same classification engine as the widget but prints to stdout. Supports modes
 the widget does not (`--watch`, `--json`). Refuses `-p/--pager`, which is
-the widget's (see **Pager**).
+the widget's (see **Pager**), and exits 2 on a call it cannot read (`docs/spec-91-strict-cli-args.md`).
 _Avoid_: Standalone mode, binary (the binary is `bin/wtft.mjs`; "CLI" names the usage mode)
 
 **Session picker** (#89):

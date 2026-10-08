@@ -44,7 +44,7 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 	it("P4 a value the flag cannot use, naming the flag and the value", () => {
 		const bad: string[][] = [
 			["--limit", "abc"], ["-l", "3.5"], ["-l", "5x"], ["-l", "0"], ["--limit=abc"], ["--limit="],
-			["-i", "9x"], ["--interval", "h"], ["--interval=9x"],
+			["-i", "9x"], ["--interval", "h"], ["--interval=9x"], ["-i", "0h"], ["--interval=0t"],
 			["--harness", "bogus"],
 			["-w", "0"], ["--width", "abc"], ["--width=-3"],
 			["--pad", "x"], ["--pad", "1.5"],
@@ -112,6 +112,22 @@ describe("C the CLI exits 2 on a refused call and runs nothing else", () => {
 			assert.deepEqual(r.left, [], "no daemon log, lease or pid file written");
 		});
 	}
+
+	it("C wtft --dir rel --bogus from a deleted working directory", () => {
+		const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-91-gone-")));
+		const script = [
+			`d=$(mktemp -d -p "${root}")`,
+			`cd "$d" && rmdir "$d" || exit 98`,
+			`node -e 'try { process.cwd(); process.exit(97) } catch { process.exit(0) }' || exit 97`,
+			`exec node "$0" "$@"`,
+		].join("\n");
+		const r = spawnSync("bash", ["-c", script, CLI_BIN, "--dir", "rel", "--bogus"], {
+			encoding: "utf8", timeout: 30_000, env: { ...process.env, HOME: root, XDG_STATE_HOME: root },
+		});
+		assert.equal(r.status, 2, r.stderr);
+		assert.equal(r.stderr.trim().split("\n").length, 1, r.stderr);
+		assert.match(r.stderr, /--bogus/);
+	});
 
 	it("C fixture precondition: a call the parser reads is not refused", () => {
 		const r = run(["--version"]);

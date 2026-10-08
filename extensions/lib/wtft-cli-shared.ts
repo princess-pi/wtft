@@ -219,11 +219,12 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 
 		} else if (arg === "-i" || arg === "--interval") {
 			const val = value();
-			if (val !== undefined && /^(\d+)([mhdw]|t(?:urns?)?)$/.test(val)) {
-				interval = val;
+			const parts = val === undefined ? null : /^(\d+)([mhdw]|t(?:urns?)?)$/.exec(val);
+			if (parts && Number(parts[1]) >= 1) {
+				interval = val!;
 				hasInterval = true;
 			} else if (val !== undefined) {
-				cannotUse(val, "a whole count and a unit: m, h, d, w or t");
+				cannotUse(val, "a whole count of 1 or more and a unit: m, h, d, w, t, turn or turns");
 			}
 		} else if (arg === "-l" || arg === "--limit") {
 			const val = count(1);
@@ -243,7 +244,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 				timezone = val;
 				hasTimezone = true;
 			} else if (val !== undefined) {
-				cannotUse(val, "an IANA time zone name");
+				cannotUse(val, "a time zone name the runtime knows");
 			}
 		} else if (arg.startsWith("-")) {
 			refuse(`unknown flag ${arg}`);

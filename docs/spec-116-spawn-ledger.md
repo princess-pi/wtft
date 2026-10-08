@@ -92,8 +92,8 @@ otherwise surface as "`--mechanism` is required", blaming the flag the caller di
 A positional subcommand: `argv[2]` exactly, dispatched instead of `main()`, so no session is
 loaded, no daemon is started and no session file is read. What sits at module scope still runs
 first, among it the config load and the report's own argument parse. And because the
-test is positional, `wtft --json spawn-record …` is **not** the subcommand — it is a report run
-with some flags the report parser ignores.
+test is positional, `wtft --json spawn-record …` is **not** the subcommand — the report parser
+refuses it, exit 2 (`docs/spec-91-strict-cli-args.md`).
 
 | Exit | Meaning |
 |---|---|

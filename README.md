@@ -221,10 +221,11 @@ retired in `@4`.
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
-- **2** — the call was wrong, and nothing ran: an unknown flag, a bare word, a
+- **2** — the call was wrong, nothing ran, and stdout carries nothing: an unknown flag, a bare word, a
   flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
-  cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr names the
-  argument. `wtft spawn-record` exits 2 on a bad call too (see below).
+  cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr says why.
+  A refused call exits 2 even with `--help`, `--json` or `-p` in it.
+  `wtft spawn-record` exits 2 on a bad call too (see below).
 - **3** — `wtft spawn-record` only (see below): the ledger could not be
   written. `spawn-record` also returns **0** — on a successful append, and on
   `--help`, which appends nothing.
@@ -274,7 +275,7 @@ each records only when the parent is a Claude Code session
 
 | Mechanism | Writer | Child |
 |---|---|---|
-| `shell` | the `~/bin/claude` PATH shim (`claude-nsp-guard`) | any new `claude` session a session's shell starts |
+| `shell` | `claude-nsp-guard`, deployed as `~/bin/claude` | any new `claude` session a session's shell starts |
 | `herdr`, `tmux` | `agent-new start` | a claude child on that backend |
 | `pr-review` | `pr-review` | each lens, cluster and verify child |
 

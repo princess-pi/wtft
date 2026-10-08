@@ -176,6 +176,8 @@ export function renderWtftChart(input: {
 	showTokenColumns?: boolean;
 	padRowsTo?: number;
 	words?: ChartWords;
+	live?: boolean;
+	newestAt?: number;
 }): string[] {
 	const {
 		displayedBins, mode, unit, width, disabledEmoji, tz,
@@ -261,10 +263,15 @@ export function renderWtftChart(input: {
 	const titleLeftFinal = titleLeft + sessionSuffix;
 	
 	const now = Date.now();
-	const surgeHours = getSurgeLocalHours(tz, now, opts?.model);
-	const currentHour = getCurrentLocalHour(tz, now);
-	const proximity = checkSurgeProximity(now, opts?.model);
-	const glyphs = timelineGlyphs(now, tz, disabledEmoji);
+	const newestAt = input.newestAt;
+	const live = input.live === true || newestAt === undefined
+		|| (getCurrentLocalHour(tz, newestAt) === getCurrentLocalHour(tz, now)
+			&& stripMidnights(newestAt, tz).start.getTime() === stripMidnights(now, tz).start.getTime());
+	const anchor = live ? now : newestAt;
+	const surgeHours = getSurgeLocalHours(tz, anchor, opts?.model);
+	const currentHour = getCurrentLocalHour(tz, anchor);
+	const proximity = live ? checkSurgeProximity(now, opts?.model) : { status: undefined, multiplier: 1 };
+	const glyphs = timelineGlyphs(anchor, tz, disabledEmoji);
 	const timelineStr = buildTimelineString(
 		surgeHours, currentHour, glyphs.start, glyphs.end, glyphs.noon,
 		proximity.status, disabledEmoji, proximity.multiplier,

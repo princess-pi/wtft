@@ -249,6 +249,7 @@ function widgetChart(
 		unit: chartUnit({}, settings.tokens),
 		sessionFile,
 		model,
+		live: true,
 	});
 }
 

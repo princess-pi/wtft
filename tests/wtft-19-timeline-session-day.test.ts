@@ -20,7 +20,7 @@ const SATURDAY = Date.UTC(2026, 9, 3);
 const WEDNESDAY = Date.UTC(2026, 8, 30);
 const MONDAY_NOON = Date.UTC(2026, 9, 5, 12);
 const SATURDAY_NOON = Date.UTC(2026, 9, 10, 12);
-const MONDAY_IN_SURGE = Date.UTC(2026, 9, 5, 7);
+const MONDAY_IN_SURGE = Date.UTC(2026, 9, 5, 7, 30);
 
 function turn(at: number, id: string): Interaction {
 	return {
@@ -87,7 +87,7 @@ console.log("\nV3 a live view");
 {
 	const line = title(session(WEDNESDAY), MONDAY_IN_SURGE, { live: true });
 	check(badge(line), "the caller saying live shows the badge during a surge window");
-	const current = title([turn(MONDAY_IN_SURGE - 10 * 60_000, "now")], MONDAY_IN_SURGE);
+	const current = title([turn(MONDAY_IN_SURGE - 20 * 60_000, "now")], MONDAY_IN_SURGE);
 	check(badge(current), "a newest interaction in the current hour is live without the caller saying so");
 }
 

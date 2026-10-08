@@ -885,6 +885,7 @@ export async function watchTagFile(
 				disabledEmoji: sessionDisabledEmoji ?? settings.defaultDisabledEmoji,
 			},
 			unit: settings.unit ?? "cost",
+			live: true,
 			padRows: true,
 			// No more placeholders than the terminal has rows; the fit below trims the rest.
 			padRowsCap: process.stdout.rows || undefined,

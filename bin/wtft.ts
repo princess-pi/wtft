@@ -343,6 +343,32 @@ export { useProcessTable } from "../extensions/lib/holder.ts";
 
 // ---
 
+// Positional `spawn-record` skips main() at the entry-point guard (parseWtftCliArgs
+// ignores unknown args, so falling through would quietly run a full report).
+const isSpawnRecord = process.argv[2] === "spawn-record";
+
+const opts = parseWtftCliArgs(process.argv.slice(2));
+
+let cwdGone = false;
+try { process.cwd(); } catch { cwdGone = true; }
+if (cwdGone) {
+	if (!isSpawnRecord && opts.cwdOverride !== undefined && !path.isAbsolute(opts.cwdOverride)) {
+		console.error(`\x1b[31m❌ The working directory no longer exists, so the relative --dir ${opts.cwdOverride} names nothing. Pass an absolute --dir.\x1b[0m`);
+		process.exit(1);
+	}
+	let movedToDir = false;
+	if (!isSpawnRecord && opts.cwdOverride !== undefined) {
+		try { process.chdir(opts.cwdOverride); movedToDir = true; } catch { /* not enterable: home */ }
+	}
+	if (!movedToDir) {
+		try { process.chdir(os.homedir()); } catch { process.chdir("/"); }
+	}
+	if (!movedToDir && !isSpawnRecord) {
+		const hint = opts.cwdOverride === undefined ? " Pass --dir <path> to pick the project." : "";
+		console.error(`\x1b[33m⚠ The working directory no longer exists, so wtft runs from ${process.cwd()}.${hint}\x1b[0m`);
+	}
+}
+
 const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cumulative" }, WTFT_CONFIG_DIR) as {
 	interval?: string;
 	limit?: number;
@@ -354,12 +380,6 @@ const cfg = loadConfig(WTFT_CONFIG_TOOL, { interval: "1h", limit: 100, mode: "cu
 // Manifest is imported so the bundler inlines it — package `files` ships only bin/*.mjs.
 const manifest = wtftManifest;
 const daemonDir = path.dirname(fileURLToPath(import.meta.url));
-
-// Positional `spawn-record` skips main() at the entry-point guard (parseWtftCliArgs
-// ignores unknown args, so falling through would quietly run a full report).
-const isSpawnRecord = process.argv[2] === "spawn-record";
-
-const opts = parseWtftCliArgs(process.argv.slice(2));
 
 const unit = chartUnit(opts, cfg.tokens);
 

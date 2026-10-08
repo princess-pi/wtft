@@ -519,7 +519,7 @@ trigger `main()`.
 
 ## Settings Persistence (Cross-Harness Config)
 
-All WTFT settings are persisted in harness-agnostic JSON config files via the shared `extensions/lib/config.ts` module. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Config hierarchy: code defaults → `~/.config/princess-pi/wtft.json` → `./.princess-pi/wtft.json` → CLI flags. Widget auto-shows on session start if a config file exists. See `wtft.html` for the full config reference.
+All WTFT settings are persisted in harness-agnostic JSON config files. No `.jsonl` persistence — settings survive across Pi sessions, Claude Code invocations, and machine restarts. Widget auto-shows on session start if a config file exists. See `wtft.html` for the full config reference.
 
 ## SIGINT / 'q'
 

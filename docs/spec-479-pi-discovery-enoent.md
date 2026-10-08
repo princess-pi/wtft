@@ -33,7 +33,10 @@ is not written *yet* is not "not found". Discovery applies it here.
 
 - **The seam:** `discoverSubagentSessionFiles` on a session path that does not exist returns no
   files, `unreadable: null` and `sessionUnreadable: null`, and writes nothing to stderr.
-  Precondition: the path does not exist.
+  Precondition: the path does not exist. With the session's own `subagents/` present, its
+  transcript is still listed.
+- **The tagger:** `stepTagger` on a session whose transcript does not exist logs no warning and
+  does not fail the poll.
 - **The widget (the issue's Closer, in process):** the built `pi/wtft.js`, its daemon a stand-in,
   renders a session whose transcript does not exist; stderr holds no line matching
   `could not be read at discovery`, and the widget no provisional line.

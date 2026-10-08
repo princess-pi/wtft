@@ -352,11 +352,17 @@ const opts = parseWtftCliArgs(process.argv.slice(2));
 let cwdGone = false;
 try { process.cwd(); } catch { cwdGone = true; }
 if (cwdGone) {
+	if (!isSpawnRecord && opts.cwdOverride !== undefined && !path.isAbsolute(opts.cwdOverride)) {
+		console.error(`\x1b[31m❌ The working directory no longer exists, so the relative --dir ${opts.cwdOverride} names nothing. Pass an absolute --dir.\x1b[0m`);
+		process.exit(1);
+	}
 	let movedToDir = false;
 	if (!isSpawnRecord && opts.cwdOverride !== undefined) {
-		try { process.chdir(opts.cwdOverride); process.cwd(); movedToDir = true; } catch { /* not enterable: home */ }
+		try { process.chdir(opts.cwdOverride); movedToDir = true; } catch { /* not enterable: home */ }
 	}
-	if (!movedToDir) process.chdir(os.homedir());
+	if (!movedToDir) {
+		try { process.chdir(os.homedir()); } catch { process.chdir("/"); }
+	}
 	if (!movedToDir && !isSpawnRecord) {
 		const hint = opts.cwdOverride === undefined ? " Pass --dir <path> to pick the project." : "";
 		console.error(`\x1b[33m⚠ The working directory no longer exists, so wtft runs from ${process.cwd()}.${hint}\x1b[0m`);

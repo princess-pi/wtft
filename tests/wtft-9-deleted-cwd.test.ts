@@ -27,19 +27,21 @@ fs.mkdirSync(projects);
 const env = {
 	...process.env,
 	HOME: home,
+	XDG_STATE_HOME: path.join(root, "state"),
+	XDG_CONFIG_HOME: path.join(root, "config"),
 	WTFT_CLAUDE_PROJECTS_DIR: projects,
 	WTFT_PI_SESSIONS_DIR: path.join(root, "no-pi"),
 };
 
 /** Runs the CLI from a shell whose working directory was removed; exit 97 means node could still read it. */
-function inDeletedDir(args: string[]) {
+function inDeletedDir(args: string[], extraEnv: Record<string, string> = {}) {
 	const script = [
 		`d=$(mktemp -d -p "${root}")`,
 		`cd "$d" && rmdir "$d" || exit 98`,
 		`node -e 'try { process.cwd(); process.exit(97) } catch { process.exit(0) }' || exit 97`,
 		`exec node "$0" "$@"`,
 	].join("\n");
-	return spawnSync("bash", ["-c", script, CLI, ...args], { encoding: "utf8", env, timeout: 30_000 });
+	return spawnSync("bash", ["-c", script, CLI, ...args], { encoding: "utf8", env: { ...env, ...extraEnv }, timeout: 30_000 });
 }
 
 try {
@@ -80,16 +82,22 @@ try {
 		check(!r.stderr.includes("uv_cwd"), `no uv_cwd error (${r.stderr.trim().slice(0, 200)})`);
 		check(r.stderr.includes(`runs from ${home}`), `stderr names the home directory it moved to (${r.stderr.trim().slice(0, 300)})`);
 		const dot = inDeletedDir(["--json", "--dir", "."]);
-		check(!dot.stderr.includes("uv_cwd") && dot.stderr.includes(`runs from ${home}`), `--dir . (the deleted directory itself) falls back to home (${dot.stderr.trim().slice(0, 300)})`);
+		check(dot.status === 1 && dot.stderr.includes("absolute --dir") && !dot.stderr.includes("uv_cwd"), `a relative --dir exits 1 and asks for an absolute one (exit ${dot.status}: ${dot.stderr.trim().slice(0, 300)})`);
 	}
 
 	console.log("\nV5 spawn-record prints nothing");
 	{
-		const ids = ["--parent", "9f29d624-531c-47b0-abf6-0790bb65180d", "--child", "d38296d6-aaaa-4bbb-8ccc-ddddeeeeffff", "--mechanism", "test"];
+		const ids = ["--parent", "00000000-0000-4000-8000-000000000009", "--child", "00000000-0000-4000-8000-000000000099", "--mechanism", "test"];
 		const bare = inDeletedDir(["spawn-record", ...ids]);
 		check(bare.status === 0 && bare.stdout === "" && bare.stderr === "", `exits 0 and prints nothing (exit ${bare.status}: ${JSON.stringify(bare.stderr.slice(0, 200))})`);
 		const withCwd = inDeletedDir(["spawn-record", ...ids, "--cwd", path.join(root, "project")]);
 		check(withCwd.status === 0 && withCwd.stdout === "" && withCwd.stderr === "", `with --cwd, exits 0 and prints nothing (exit ${withCwd.status}: ${JSON.stringify(withCwd.stderr.slice(0, 200))})`);
+	}
+
+	console.log("\nV6 a home directory that cannot be entered either");
+	{
+		const r = inDeletedDir(["--json"], { HOME: path.join(root, "no-such-home") });
+		check(!r.stderr.includes("ENOENT") && r.stderr.includes("runs from /."), `falls back to / and says so (${r.stderr.trim().slice(0, 300)})`);
 	}
 } finally {
 	reapFixtureDaemons(root);

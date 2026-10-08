@@ -28,7 +28,8 @@ Discovery folds only files it can read that match its pattern.
   and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
   does not match: no warning, no `unreadable`, no throw.
 - **What a skipped file costs.** A `claude -p` child or Pi sibling discovery cannot read is not
-  folded or listed by that discovery, and discovery does not report it. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
+  folded or listed by that discovery, and discovery does not report it. Nothing retries it: the
+  turn's discovery window closes and the tag reads settled. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
   copy cannot be read.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.

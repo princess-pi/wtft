@@ -1,5 +1,4 @@
 #!/usr/bin/env -S bun
-/** #369: discovery skips a transcript it cannot read, the same as one that does not match. */
 
 import * as fs from "node:fs";
 import * as os from "node:os";

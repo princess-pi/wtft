@@ -343,8 +343,6 @@ export { useProcessTable } from "../extensions/lib/holder.ts";
 
 // ---
 
-// Positional `spawn-record` skips main() at the entry-point guard (parseWtftCliArgs
-// ignores unknown args, so falling through would quietly run a full report).
 const isSpawnRecord = process.argv[2] === "spawn-record";
 
 const opts = parseWtftCliArgs(process.argv.slice(2));
@@ -432,6 +430,9 @@ if (process.argv[1]) {
 			if (result.stdout) process.stdout.write(result.stdout);
 			if (result.stderr) process.stderr.write(result.stderr);
 			process.exitCode = result.exitCode;
+		} else if (opts.usageError !== undefined) {
+			console.error(`❌ Error: ${opts.usageError}. Run wtft --help for usage.`);
+			process.exit(2);
 		} else {
 			main().catch(err => {
 				console.error(`❌ System Error: ${err.message}`);

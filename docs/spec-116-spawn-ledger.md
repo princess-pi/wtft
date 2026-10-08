@@ -86,8 +86,7 @@ wtft spawn-record --parent <uuid> --child <uuid> --mechanism <name>
 wtft spawn-record --help
 ```
 
-`--flag value` and `--flag=value` both work. An **unknown** flag is an error, not a shrug — the
-report path silently ignores what it does not recognise (#91), and a typo'd `--mechansim` would
+`--flag value` and `--flag=value` both work. An **unknown** flag is an error, not a shrug — a typo'd `--mechansim` would
 otherwise surface as "`--mechanism` is required", blaming the flag the caller did pass.
 
 A positional subcommand: `argv[2]` exactly, dispatched instead of `main()`, so no session is

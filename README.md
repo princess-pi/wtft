@@ -221,10 +221,13 @@ retired in `@4`.
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
-- **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
-  the ledger could not be written. The report path never returns either, and
-  `spawn-record` also returns **0** — on a successful append, and on `--help`,
-  which appends nothing.
+- **2** — the call was wrong, and nothing ran: an unknown flag, a bare word, a
+  flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
+  cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr names the
+  argument. `wtft spawn-record` exits 2 on a bad call too (see below).
+- **3** — `wtft spawn-record` only (see below): the ledger could not be
+  written. `spawn-record` also returns **0** — on a successful append, and on
+  `--help`, which appends nothing.
 - **10** — session not specified precisely enough
   ([#89](https://github.com/princess-pi/wtft/issues/89)): no interactive
   terminal, and either `-s <substring>` matched zero or several sessions, or no
@@ -295,7 +298,7 @@ outside the tree rather than unattributed. A spawner is meant to ignore both: th
 then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 
 `spawn-record` is positional: it must be the **first** argument, so
-`wtft --json spawn-record …` is a report run, not a recording.
+`wtft --json spawn-record …` is refused with exit 2, not recorded.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
 provenance, every descendant counted exactly once (with the subagent and

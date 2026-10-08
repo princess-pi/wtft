@@ -69,10 +69,11 @@ accepted there and ignored.
   every accepted spelling (each flag, each `=` form, a valued flag followed by its value) leaves it
   `undefined`.
 - **C** the built CLI: `wtft --jsonn`, `wtft --limit abc`, `wtft --harness bogus`, `wtft -i 9x`,
-  `wtft --stop`, `wtft --stop --json` and `wtft foo` each exit 2 with stdout empty and the offending
-  token on stderr, and spawn no daemon. `wtft --json` with a session still prints one JSON object.
+  `wtft --stop`, `wtft --stop --json`, `wtft foo` and `wtft --help --bogus` each exit 2 with stdout
+  empty and the offending token on stderr, and write no daemon log, lease or pid file.
 - **X** the Pi `/wtft` handler on a recording context: `--jsonn` notifies once at `error` naming
   it, and sets no widget and writes no config.
 
-`tests/wtft-26-json.test.ts` §7 checks that exit 2 is in the manifest's exit-code table, and
+`tests/wtft-26-json.test.ts` §1 checks that `wtft --json` with a session still prints one JSON
+object, §7 that exit 2 is in the manifest's exit-code table, and
 `tests/wtft-75-doc-claims.test.ts` that the README names only flags the parser accepts.

@@ -375,6 +375,10 @@ export default function wtftExtension(pi: ExtensionAPI) {
 		description: "Where The F***ing Tokens?! (WTFT) - Cost Auditing Widget",
 		handler: async (args, ctx) => {
 			const opts = parseWtftCliArgs((args || "").trim().split(/\s+/).filter(Boolean));
+			if (opts.usageError !== undefined) {
+				ctx.ui.notify(`${opts.usageError}. Run /wtft --help for usage.`, "error");
+				return;
+			}
 			const { forceReparse, enableEmoji, showVersion, showHelp, showWhy,
 				other, tokens, cost, hideWidget, hasInterval, interval,
 				hasLimit, limit, hasWidth, width,

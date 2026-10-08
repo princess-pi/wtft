@@ -269,7 +269,7 @@ carries. The table lives in `docs/manifests/wtft-cmd.json`, which is what
 |---|---|---|
 | **0** | A report was produced, including when there is nothing to report yet — a session file not written, or a tag with no classified data. Also the exit for the commands that run *instead* of a report (`--help`/`--why`/`--version` and `spawn-record`); `--list`/`--cleanup`/`--restart`/`--stop` exit with wtft-daemon's code. | one JSON object for a report; the command's own output for the others |
 | **1** | Error: no session found or selected, an invalid path, a daemon that could not be spawned or that died before producing data, a refused flag (`-p`), a harness's session tree, or a directory in it, that could not be read while `--json` or `--tokens` lists unrecorded spawns (#212), or an unhandled exception. The reason is on stderr. | nothing |
-| **2** | `wtft spawn-record` only: the call was wrong — a missing or unknown flag, a flag with no value, a malformed session id, an oversized field. Nothing was appended. The report path never returns 2. | n/a |
+| **2** | The call was wrong, and nothing ran. The report path: an unknown flag, a bare word, a flag with no value, or a value a flag cannot use, named on stderr (`docs/spec-91-strict-cli-args.md`). `wtft spawn-record`: a missing or unknown flag, a flag with no value, a malformed session id, an oversized field; nothing was appended. | nothing |
 | **3** | `wtft spawn-record` only: the record was valid and the ledger could not be written — usually a full disk. The edge is not recorded, so the child is **invisible** to the tree, not `unattributed` (which means an edge we have whose child we could not read). Any partial line left behind is reported as a counted `malformedLedgerLines` on the next read; nothing tries to repair it. | n/a |
 | **9** | Provisional (duppypro/princess-pi-tools#443): a report was produced in full, but a number in it may still change; `provisional.reason` names which of the four reasons applies. `provisional.provisional` is `true` and `provisional.reason` names the condition. | one JSON object |
 | **10** | `EXIT_SESSION_AMBIGUOUS` (#89): no interactive terminal, and either `-s <substring>` matched zero or several sessions, or no `-s` was given at all -- even when the picker's default scope (this worktree, last 20 minutes) holds exactly one session (#89, C2). Zero is included, which replaces the OLD exit 1 "no session found" for this no-`-s`/no-TTY case. Every candidate is named on stderr. | nothing |
@@ -452,9 +452,6 @@ survive. See *The one arithmetic guarantee* above for the rule now in force.
 **Filed rather than fixed** — pre-existing, out of this branch's scope, each with
 a consequence named in its issue:
 
-- **#91** — `parseWtftCliArgs` silently ignores unknown flags and malformed
-  values, so a typo'd `--jsonn` renders a full ANSI chart and exits 0. `--json`
-  is what makes this dangerous rather than untidy.
 - **#92** — the daemon-management commands have no machine-readable mode;
   `--json` does not reach them, and this spec documents that rather than
   half-implementing it.

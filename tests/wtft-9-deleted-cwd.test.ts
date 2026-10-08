@@ -73,6 +73,24 @@ try {
 		check((r.stdout + r.stderr).includes(session), `discovery anchored at --dir finds the project's session (exit ${r.status}: ${r.stderr.trim().slice(0, 300)})`);
 		check(!r.stderr.includes(home), `stderr carries no notice naming the home directory (${r.stderr.trim().slice(0, 200)})`);
 	}
+
+	console.log("\nV4 --dir that cannot be entered");
+	{
+		const r = inDeletedDir(["--json", "--dir", path.join(root, "no-such-dir")]);
+		check(!r.stderr.includes("uv_cwd"), `no uv_cwd error (${r.stderr.trim().slice(0, 200)})`);
+		check(r.stderr.includes(`runs from ${home}`), `stderr names the home directory it moved to (${r.stderr.trim().slice(0, 300)})`);
+		const dot = inDeletedDir(["--json", "--dir", "."]);
+		check(!dot.stderr.includes("uv_cwd") && dot.stderr.includes(`runs from ${home}`), `--dir . (the deleted directory itself) falls back to home (${dot.stderr.trim().slice(0, 300)})`);
+	}
+
+	console.log("\nV5 spawn-record prints nothing");
+	{
+		const ids = ["--parent", "9f29d624-531c-47b0-abf6-0790bb65180d", "--child", "d38296d6-aaaa-4bbb-8ccc-ddddeeeeffff", "--mechanism", "test"];
+		const bare = inDeletedDir(["spawn-record", ...ids]);
+		check(bare.status === 0 && bare.stdout === "" && bare.stderr === "", `exits 0 and prints nothing (exit ${bare.status}: ${JSON.stringify(bare.stderr.slice(0, 200))})`);
+		const withCwd = inDeletedDir(["spawn-record", ...ids, "--cwd", path.join(root, "project")]);
+		check(withCwd.status === 0 && withCwd.stdout === "" && withCwd.stderr === "", `with --cwd, exits 0 and prints nothing (exit ${withCwd.status}: ${JSON.stringify(withCwd.stderr.slice(0, 200))})`);
+	}
 } finally {
 	reapFixtureDaemons(root);
 }

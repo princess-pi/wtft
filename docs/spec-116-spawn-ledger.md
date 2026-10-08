@@ -91,8 +91,8 @@ report path silently ignores what it does not recognise (#91), and a typo'd `--m
 otherwise surface as "`--mechanism` is required", blaming the flag the caller did pass.
 
 A positional subcommand: `argv[2]` exactly, dispatched instead of `main()`, so no session is
-loaded, no daemon is started and no session file is read. Two things do still run first, because
-they sit at module scope: the config load and the report's own argument parse. And because the
+loaded, no daemon is started and no session file is read. What sits at module scope still runs
+first, among it the config load and the report's own argument parse. And because the
 test is positional, `wtft --json spawn-record …` is **not** the subcommand — it is a report run
 with some flags the report parser ignores.
 

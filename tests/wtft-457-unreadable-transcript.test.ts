@@ -837,8 +837,8 @@ try {
 		timeout: 30_000,
 	}));
 
-	assert("a nested transcript whose read fails after discovery makes the parent parse throw (#457)", childOut.firstThrew);
-	assert("a direct attribution pass is loud for it too, not a silent zero", childOut.firstPassThrew);
+	assert("the race fixture's parent parse throws (#457)", childOut.firstThrew);
+	assert("the race fixture's direct attribution pass throws, not a silent zero", childOut.firstPassThrew);
 	assert("the retried pass succeeds once readability returns", !childOut.secondPassThrew);
 	assert("CLI/TUI path warns that the skipped transcript could not be read", childOut.warned);
 	assert("CLI/TUI path names the skipped file in the warning", childOut.warnedNamesFile);

@@ -28,14 +28,13 @@ Discovery folds only files it can read that match its pattern.
   and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
   does not match: no warning, no `unreadable`, no throw.
 - **What a skipped file costs.** A `claude -p` child or Pi sibling discovery cannot read is not
-  folded or listed, and nothing reports it: its cost is not in the total, and the report does not
-  say so. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
+  folded or listed by that discovery, and discovery does not report it. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
   copy cannot be read.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.
 - **Unchanged:**
   - A directory discovery searches that is absent reads as "none here".
-  - A directory it finds but cannot list still throws.
+  - A directory it finds but cannot read is still a failure, not a skip.
   - The walk of a session's own `subagents/` directory is unchanged: every file it lists is this
     session's own cost, not another session's transcript.
   - The session transcript's own read failure is still reported as `unreadable` /

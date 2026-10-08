@@ -58,6 +58,12 @@ session or a harness root is under `tmpDir`, the caller's `os.tmpdir()`. A test 
 suite its own `TMPDIR`, so a suite's `--cleanup` reaches only its own fixtures
 (`tests/wtft-96-fixture-daemons.test.ts`).
 
+`decideUnleased(proc, { tmpDir, cleanup, stopSession })` is what `--cleanup` and `--stop` do with
+a daemon from the process table that the lease pass did not reach: `clean` under `--cleanup` for a
+per-session fixture (`isFixtureDaemon`) or a sandboxed harness, else `stop` for a per-session
+daemon whose resolved `--session` is `stopSession`, else `keep`. "Sandboxed" and the daemon's own
+tmp dir are defined in `docs/spec-387-private-tmpdir.md`.
+
 "Alive" means `signal 0` was sent or denied, and `state` does not say otherwise. EPERM is another
 user's live process. `pidAlive(pid)` is `classifyPid(pid) !== "gone"`.
 
@@ -105,6 +111,8 @@ Both return:
   `restartDaemon`, `-F`) with the fake table swapped in.
 - `tests/wtft-297-daemon-holders.test.ts` runs the real daemon for the per-session child's claim
   and `--list`, and checks that no product code outside this module calls `process.kill(`.
+- `tests/wtft-387-private-tmpdir.test.ts`: real daemons in tmp dirs of their own, stopped by
+  `--stop` and `--cleanup` and restarted by `--restart --pid`, then `decideUnleased` in memory.
 
 ## 5. Related
 

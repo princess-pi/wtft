@@ -81,14 +81,17 @@ console.log("\nV2 a Wednesday session read on a Monday");
 	const line = title(session(WEDNESDAY), MONDAY_IN_SURGE);
 	check(surgeHours(line).join(",") === "1,2,3,6,7,8,9", `surge hours 01-03 and 06-09 UTC (got ${surgeHours(line)})`);
 	check(!badge(line), "no badge, though the clock reads inside a surge window");
+	check(title(session(WEDNESDAY), SATURDAY_NOON) === line, "the same title line read on a Saturday");
 }
 
 console.log("\nV3 a live view");
 {
 	const line = title(session(WEDNESDAY), MONDAY_IN_SURGE, { live: true });
 	check(badge(line), "the caller saying live shows the badge during a surge window");
-	const current = title([turn(MONDAY_IN_SURGE - 20 * 60_000, "now")], MONDAY_IN_SURGE);
-	check(badge(current), "a newest interaction in the current hour is live without the caller saying so");
+	const recent = title([turn(MONDAY_IN_SURGE - 50 * 60_000, "recent")], MONDAY_IN_SURGE);
+	check(badge(recent), "a newest interaction 50 minutes old, in the previous hour, is live without the caller saying so");
+	const old = title([turn(MONDAY_IN_SURGE - 70 * 60_000, "old")], MONDAY_IN_SURGE);
+	check(!badge(old), "one 70 minutes old is not");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

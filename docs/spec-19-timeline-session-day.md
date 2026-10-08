@@ -11,7 +11,7 @@ session from another day was drawn with today's surge hours and today's moon.
 - **The strip is drawn for one instant, the anchor.** The surge hours, the moons at the two local
   midnights and the clock-face marker all come from the anchor's day and hour.
 - **A live view anchors on now.** A view is live when its caller says so — the Pi widget and
-  `--watch` — or when the newest interaction shown falls in the current local hour.
+  `--watch` — or when the newest interaction shown is less than an hour old.
 - **Any other view anchors on the newest interaction shown.** A session that crosses midnight is
   drawn for the day of its newest interaction.
 - **The surge badge appears only on a live view.** On any other view the strip still colours the
@@ -24,7 +24,8 @@ session from another day was drawn with today's surge hours and today's moon.
 - **V1** A DeepSeek fixture whose interactions all fall on a Saturday (after the weekend rule
   began), read on a Monday and on a Saturday: zero surge hours, no badge, the same title line both
   times.
-- **V2** The same fixture moved to a Wednesday, read on a Monday: surge hours exactly 01-03 and
-  06-09 UTC with `--timezone UTC`, no badge.
+- **V2** The same fixture moved to a Wednesday, read on a Monday inside a surge window and on a
+  Saturday: the card's weekday surge hours with `--timezone UTC`, no badge, the same title line
+  both times.
 - **V3** The Wednesday fixture read as live (the caller says so) during a surge window: the badge
-  appears.
+  appears. So does a session whose newest interaction is 50 minutes old, across an hour boundary.

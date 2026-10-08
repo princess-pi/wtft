@@ -264,9 +264,7 @@ export function renderWtftChart(input: {
 	
 	const now = Date.now();
 	const newestAt = input.newestAt;
-	const live = input.live === true || newestAt === undefined
-		|| (getCurrentLocalHour(tz, newestAt) === getCurrentLocalHour(tz, now)
-			&& stripMidnights(newestAt, tz).start.getTime() === stripMidnights(now, tz).start.getTime());
+	const live = input.live === true || newestAt === undefined || now - newestAt < 3_600_000;
 	const anchor = live ? now : newestAt;
 	const surgeHours = getSurgeLocalHours(tz, anchor, opts?.model);
 	const currentHour = getCurrentLocalHour(tz, anchor);

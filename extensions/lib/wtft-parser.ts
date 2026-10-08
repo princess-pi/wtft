@@ -1007,12 +1007,14 @@ export function discoverSubagentSessionFiles(
 	try {
 		mainHeaderRaw = readHeadLines(sessionPath, 1)[0];
 	} catch (err) {
-		if (!opts.quietSession) warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
-		sessionUnreadable = err instanceof Error ? err : new Error(String(err));
-		if (!firstUnreadable) {
-			firstUnreadable = new Error(
-				`session transcript could not be read at discovery (${sessionPath}): ${err instanceof Error ? err.message : String(err)}`,
-			);
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+			if (!opts.quietSession) warnUnreadableTranscript(sessionPath, "at discovery", err, "the session transcript");
+			sessionUnreadable = err instanceof Error ? err : new Error(String(err));
+			if (!firstUnreadable) {
+				firstUnreadable = new Error(
+					`session transcript could not be read at discovery (${sessionPath}): ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 		}
 	}
 	if (mainHeaderRaw !== null) {

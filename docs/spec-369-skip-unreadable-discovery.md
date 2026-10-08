@@ -39,7 +39,8 @@ Discovery folds only files it can read that match its pattern.
   - The walk of a session's own `subagents/` directory is unchanged: every file it lists is this
     session's own cost, not another session's transcript.
   - The session transcript's own read failure is still reported as `unreadable` /
-    `sessionUnreadable`.
+    `sessionUnreadable`, when the transcript exists. One not written yet is no failure:
+    `docs/spec-479-pi-discovery-enoent.md`.
   - A discovered file that then fails to parse is still reported by the parse.
 
 ## 3. Test

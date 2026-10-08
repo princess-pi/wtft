@@ -282,34 +282,14 @@ is weaker than "no failures occurred". #457 is closed — an unreadable subagent
 stat, read, or attribution handler, which sets `pollHadFailure`, and is never mistaken
 for an empty one — which strengthened this marker for free, exactly as the pre-fix note
 here predicted. That holds for the nested attribution read too: `attributeClaudeSubAgentCosts`
-no longer swallows an unreadable nested transcript into a silent zero — the throw
+no longer swallows a nested transcript whose read fails after discovery into a silent zero — the throw
 propagates to the same handler, so the SUBAGENT transcript's rows are not written that
 poll and the sweep is withheld while any part of the read it depends on is unreadable.
 (The MAIN parent's rows are unaffected: `flushPending()` runs before `scanForSubAgents()`
-in the same poll, and the subagent reader never parses the parent session.) There is no silent
-discovery boundary left (round 5): `discoverClaudeSubAgentSessionFiles` reads the
-first ten lines of each candidate for its head scan, warns once per unreadable file per process,
-and REPORTS the failure in its result instead of throwing — an unreadable candidate at
-discovery still withholds the marker and is retried next poll, never dropped from the
-attribution silently, but the readable in-window matches sharing that project dir are
-returned alongside the report instead of being discarded with it. `~/.claude/projects/<slug>/`
-is shared across many sessions, so an unreadable candidate is usually a DIFFERENT
-session's transcript; the old throw stalled every pending claude -p command sharing the
-cwd — their costs permanently missing while the unreadable file stayed, every poll
-re-reading everything. The daemon registers the readable matches (their costs land) and
-still withholds the swept marker for the command whose window held the unreadable
-candidate, because that candidate's timestamp window was never checkable — it might BE
-that command's transcript. The attribution pass (`attributeClaudeSubAgentCosts`) keeps
-the throw: there, the parent turn is this transcript's own command, so its cost must
-land or the report is silently incomplete. The Pi-pattern sibling files follow the same
-warn-and-report rule (round 6): a per-file read failure warns once per file per process
-and REPORTS in the result, with the readable siblings returned alongside it — the same
-partial-progress shape, applied to this half of discovery after the round-5 throw
-proved to starve the whole subtree over one unreadable file. A sibling whose header
-cannot even PARSE (empty file, partial crash header, a non-transcript `.jsonl`) is
-skipped silently, same rule as the claude half's per-line JSON swallow: it can never
-declare `parentSession`, so it can never contribute cost — warning there would hold the
-marker forever over nothing. The dir-level skips went the same way — an unreadable
+in the same poll, and the subagent reader never parses the parent session.) Discovery skips a candidate it cannot read (#369): a `claude -p` candidate in
+`~/.claude/projects/<slug>/` or a Pi sibling whose head read fails is skipped the same as one that
+does not match, with no warning and no report, so the marker is not withheld over it. A sibling
+whose header cannot parse is skipped the same way. The dir-level failures stay loud — an unreadable
 subagents directory (`walkSubagentDir`, top-level OR nested: the recursion sits outside
 the per-entry stat catch since round 5), an unreadable `~/.claude/projects/<slug>/`
 (its existence gate was `existsSync` until round 6, which read a stat error — EACCES on
@@ -335,21 +315,9 @@ size/mtime are unchanged and already settled, and chmod touches ctime, not size/
 the registration read already synced that file in full, so no cost is missing and the
 marker stamps correctly. The cost is recovered the poll the file is readable again.
 
-One case has no recovery, honestly, and it ends with the marker never stamping again
-for the daemon's life. (A vanished REGISTERED claude -p transcript used to be a second
-one: registration is one-shot and never evicted, and its stat failed every poll. Since
-spec-270 S3 a missing file or directory is gone, not a failure: the turn it held is written
-and the marker stamps.) It is a discovery candidate that STAYS unreadable (a permission
-change never undone, an unmounted dir): the failure is reported in every discovery
-result, so every pending claude -p command sharing that project dir retries forever.
-Both are fail-safe (never claim swept while the transcript's cost is missing) but
-unending; eviction on ENOENT is deliberately not taken, because an evicted transcript
-that returns would never be re-registered (princess-pi-tools#270's bug class). Round 5 softened the
-LOSS, not the verdict: in case (b) the readable in-window candidates sharing that dir
-ARE still registered and counted (the unreadable file is usually a different session's
-transcript), but the marker still withholds, because the candidate's timestamp window
-was never checkable. Case (b) recovers automatically when readability returns — the
-candidate is re-read at each retry; case (a) recovers only if the file itself returns.
+A vanished REGISTERED claude -p transcript is gone, not a failure, since spec-270 S3: the turn it
+held is written and the marker stamps. Eviction on ENOENT is deliberately not taken, because an
+evicted transcript that returns would never be re-registered (princess-pi-tools#270's bug class).
 
 One limit on the "tag stays provisional" claim: `readTagProvisional` is purely
 positional over the tag file and cannot see `pollHadFailure`. `pollHadFailure` only
@@ -409,7 +377,8 @@ the number is not final" are different facts.
 The same exit is earned by a render-side degrade with the same shape (#457, round 5):
 under `--tokens`, an unreadable subagent transcript — one file (round 6: the failure
 is reported, not thrown, and the readable siblings still scan) or a whole unreadable
-directory of them — drops uncounted billables from the token table. The parser's
+directory of them — drops uncounted billables from the token table. A Pi sibling discovery
+cannot read is not listed, so it sets nothing (#369). The parser's
 warning is one-shot and
 latched; a machine reader must not see a complete-looking report, so the CLI sets
 `provisional = { provisional: true, reason: "subagent-unreadable" }` and exits 9 with
@@ -568,7 +537,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (duppypro/princess-pi-tools#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
-| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table; the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
+| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing, #369); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |

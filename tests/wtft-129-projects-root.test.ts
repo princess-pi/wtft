@@ -56,8 +56,8 @@ fs.writeFileSync(parent,
 	+ turnLine("parent-turn", T0, 100, `cd ${childCwd} && claude -p "go"`));
 
 const found = discoverClaudeSubAgentSessionFiles(childCwd, T0);
-check(found.unreadable === null && found.files.map(f => path.basename(f, ".jsonl")).join() === CHILD,
-	`A1 discovery reads the seam's root, not the home directory (got ${JSON.stringify(found.files.map(f => path.basename(f)))})`);
+check(found.map(f => path.basename(f, ".jsonl")).join() === CHILD,
+	`A1 discovery reads the seam's root, not the home directory (got ${JSON.stringify(found.map(f => path.basename(f)))})`);
 
 const outputOf = (file: string) => parseSessionFile(file).reduce((sum, i) => sum + i.outputTokens, 0);
 check(outputOf(parent) === 800,
@@ -78,8 +78,8 @@ check(dottedCwd.includes("/.") && !fs.existsSync(path.join(projects, dottedCwd.r
 	"A3 fixture: the cwd holds a dot and no separator-only slug directory exists for it");
 
 const dottedFound = discoverClaudeSubAgentSessionFiles(dottedCwd, T0);
-check(dottedFound.unreadable === null && dottedFound.files.map(f => path.basename(f, ".jsonl")).join() === DOTTED_CHILD,
-	`A4 discovery finds the child filed under the dot-folded slug (got ${JSON.stringify(dottedFound.files.map(f => path.basename(f)))})`);
+check(dottedFound.map(f => path.basename(f, ".jsonl")).join() === DOTTED_CHILD,
+	`A4 discovery finds the child filed under the dot-folded slug (got ${JSON.stringify(dottedFound.map(f => path.basename(f)))})`);
 
 const dottedParent = path.join(dir, "dotted-parent.jsonl");
 fs.writeFileSync(dottedParent,
@@ -93,9 +93,8 @@ const separatorOnlyProjectDir = path.join(projects, dottedCwd.replace(/\//g, "-"
 fs.mkdirSync(separatorOnlyProjectDir, { recursive: true });
 fs.writeFileSync(path.join(separatorOnlyProjectDir, `${SEPARATOR_ONLY_CHILD}.jsonl`), turnLine("separator-only-child-turn", T0 + 3_000, 50));
 const bothFound = discoverClaudeSubAgentSessionFiles(dottedCwd, T0);
-check(bothFound.unreadable === null
-	&& bothFound.files.map(f => path.basename(f, ".jsonl")).sort().join() === [DOTTED_CHILD, SEPARATOR_ONLY_CHILD].sort().join(),
-	`A6 with a child under each slug variant, discovery returns both (got ${JSON.stringify(bothFound.files.map(f => path.basename(f)))})`);
+check(bothFound.map(f => path.basename(f, ".jsonl")).sort().join() === [DOTTED_CHILD, SEPARATOR_ONLY_CHILD].sort().join(),
+	`A6 with a child under each slug variant, discovery returns both (got ${JSON.stringify(bothFound.map(f => path.basename(f)))})`);
 
 // ---
 // PART B — no second reader re-derives the root

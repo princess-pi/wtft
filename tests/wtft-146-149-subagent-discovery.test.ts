@@ -159,10 +159,9 @@ console.log("\n§ 147 — discovery reads line 1, not the whole transcript\n");
 	const r = spawnSync("node", [driver, cwd, stamp], { encoding: "utf8", env: { ...process.env, HOME: home } });
 	let out: any = null;
 	try { out = JSON.parse(r.stdout); } catch { /* asserted below */ }
-	check(out !== null && out.files.length === 1 && out.files[0] === spawned,
+	check(out !== null && out.length === 1 && out[0] === spawned,
 		"a `claude -p` transcript beside a directory named *.jsonl is still discovered", r.stdout + r.stderr);
-	check(out !== null && out.unreadable === null,
-		"…and the directory itself is not reported unreadable", JSON.stringify(out && out.unreadable));
+	check(r.stderr === "", "…and nothing is written about the directory", r.stderr);
 }
 
 // ---

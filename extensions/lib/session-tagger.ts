@@ -977,7 +977,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 			if (discovered.unreadable) {
 				state.pollHadFailure = true;
 				stillPending.push(item);
-				debug(out, `claude -p discovery candidate unreadable, will retry next poll (${sessionBase}): ${discovered.unreadable.message}`);
+				debug(out, `claude -p discovery failed, will retry next poll (${sessionBase}): ${discovered.unreadable.message}`);
 			} else if (inWindow) {
 				// A later child in the same window is not on disk yet.
 				stillPending.push(item);
@@ -1004,7 +1004,7 @@ export function scanChildren(state: TaggerState, world: World, opts: ScanOptions
 		}
 		if (discoveredPi.unreadable) {
 			state.pollHadFailure = true;
-			debug(out, `subagent discovery candidate unreadable, will retry next poll (${path.basename(state.sessionPath)}): ${discoveredPi.unreadable.message}`);
+			debug(out, `subagent discovery failed, will retry next poll (${path.basename(state.sessionPath)}): ${discoveredPi.unreadable.message}`);
 		}
 	} catch (err) {
 		state.pollHadFailure = true;

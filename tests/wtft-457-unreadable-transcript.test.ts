@@ -315,126 +315,6 @@ try {
 }
 
 // ---
-// PART B2 — the DISCOVERY boundary in the live daemon: a claude -p candidate
-// that is unreadable at discovery (EACCES, the COMMON #457 case) must warn,
-// withhold the swept marker, and recover when readability returns — and the
-// parent row must still land that poll (flushPending runs before
-// scanForSubAgents, so the discovery throw does NOT hold the whole parent
-// transcript hostage; the blast radius is the pending claude command's
-// registration, which retries).
-// ---
-try {
-	if (isRoot) {
-		skip("root bypasses file mode bits — the daemon discovery-unreadable scenario cannot run");
-	} else {
-		// Part B's cleanup removed the Part A fixture dir, so B2 uses fresh
-		// fixture dirs of its own. The HOME override points the daemon's
-		// ~/.claude/projects/<slug>/ discovery at the fixture.
-		const b2Dir = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-457b2-")));
-		fixtureDirs.push(b2Dir);
-		const b2Home = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-457b2-home-")));
-		fixtureDirs.push(b2Home);
-
-		const sessionPath = path.join(b2Dir, "session.jsonl");
-		fs.writeFileSync(sessionPath, JSON.stringify({
-			type: "session", version: 3, id: "parent-457b2", timestamp: new Date().toISOString(), cwd: b2Dir,
-		}) + "\n");
-		const tagsDir = path.join(b2Dir, "wtft-tags");
-		fs.mkdirSync(tagsDir, { recursive: true });
-		cleanupPidFiles.push(getDaemonPidPath(sessionPath));
-
-		// The cwd of the parent's `cd <cwd> && claude -p` command; discovery
-		// scans $HOME/.claude/projects/<slug-of-cwd>/.
-		const slug = b2Dir.replace(/\//g, "-");
-		const projectDir = path.join(b2Home, ".claude", "projects", slug);
-		fs.mkdirSync(projectDir, { recursive: true });
-
-		const T0 = Date.now() - 60_000;
-		const PARENT_ID = "msg_457_b2_parent";
-		const CANDIDATE_ID = "msg_457_b2";
-		fs.appendFileSync(sessionPath, claudeBashTurnLine(PARENT_ID, T0, 1000, 50, b2Dir));
-		const candidatePath = path.join(projectDir, "candidate.jsonl");
-		// Timestamp inside the ±15s discovery window of the parent turn — the
-		// match discovery would have made if the read had succeeded.
-		fs.writeFileSync(candidatePath, turnLine(CANDIDATE_ID, T0, 3000, 150));
-		fs.chmodSync(candidatePath, 0o000);
-
-		const tagPath = path.join(tagsDir, currentTagFileName(sessionPath));
-
-		try {
-			const daemon = spawnDaemon(sessionPath, { HOME: b2Home });
-
-			// The parser's discovery warning names the unreadable CANDIDATE,
-			// never the healthy outer transcript.
-
-			let warned = false;
-			for (let i = 0; i < 30 && !warned; i++) {
-				await sleep(250);
-				const stderr = daemon.stderr.join("");
-				warned = stderr.includes("could not be read at discovery") && stderr.includes("candidate.jsonl");
-			}
-			assert("daemon warns that the unreadable discovery candidate could not be read", warned);
-
-			// Daemon-half blast-radius pin: the parent row STILL lands while
-			// discovery fails — flushPending runs before scanForSubAgents, so
-			// the throw only stalls the claude command's registration.
-			let sawParent = false;
-			for (let i = 0; i < 12 && !sawParent; i++) {
-				await sleep(250);
-				sawParent = readClassifiedTagFile(tagPath).some(int => int.messageId === PARENT_ID);
-			}
-			assert("parent row still lands while the discovery candidate is unreadable", sawParent);
-
-			// No nested rows and no swept marker while the candidate is unreadable.
-			let sawCandidate = false;
-			for (let i = 0; i < 8; i++) {
-				await sleep(250);
-				sawCandidate = readClassifiedTagFile(tagPath).some(int => int.messageId === CANDIDATE_ID);
-			}
-			assert("no content from the unreadable candidate reaches the tag file", !sawCandidate);
-			assert("swept marker is withheld while the discovery candidate is unreadable", !rawTagHasSwept(tagPath));
-
-			// Recovery: readability returns, the command is still pending, so
-			// the next poll's discovery registers and syncs the candidate.
-			fs.chmodSync(candidatePath, 0o644);
-			let sawCandidateAfterRestore = false;
-			for (let i = 0; i < 20 && !sawCandidateAfterRestore; i++) {
-				await sleep(250);
-				sawCandidateAfterRestore = readClassifiedTagFile(tagPath).some(int => int.messageId === CANDIDATE_ID);
-			}
-			assert("candidate is registered and counted once readability returns", sawCandidateAfterRestore);
-
-			let sawSwept = false;
-			for (let i = 0; i < 20 && !sawSwept; i++) {
-				await sleep(250);
-				sawSwept = rawTagHasSwept(tagPath);
-			}
-			assert("tag is swept only after the recovered candidate is counted", sawSwept);
-
-			// Convergence with a direct parse of the now-readable candidate.
-			const tagInteractions = readClassifiedTagFile(tagPath).filter(int => int.messageId === CANDIDATE_ID);
-			const reference = parseSessionFile(candidatePath);
-			const referenceCost = reference.reduce((s, i) => s + i.cost, 0);
-			const tagCost = tagInteractions.reduce((s, i) => s + i.cost, 0);
-			assert(
-				`tag-file cost for the recovered candidate matches a direct parse ($${tagCost.toFixed(6)} === $${referenceCost.toFixed(6)})`,
-				tagInteractions.length === reference.length && Math.abs(tagCost - referenceCost) < 0.000001
-			);
-		} finally {
-			for (const pid of cleanupPids) { if (pid > 0) { try { process.kill(pid, "SIGTERM"); } catch {} } }
-			for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
-			await sleep(200);
-			for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-		}
-	}
-} finally {
-	for (const pid of cleanupPids) { if (pid > 0) { try { process.kill(pid, "SIGTERM"); } catch {} } }
-	for (const pf of cleanupPidFiles) { try { fs.unlinkSync(pf); } catch {} }
-	await sleep(200);
-	for (const d of fixtureDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-}
-
-// ---
 // PART B3 — the NESTED unreadable subagents dir in the live daemon.
 // Fixture: <session>/subagents/agent-<hash>/subagents/agent-*.jsonl, with the
 // INNER subagents dir chmod 000. Exactly ONE warning must fire (the innermost
@@ -553,12 +433,6 @@ try {
 // read fails (the discovery→parse race — a file that became unreadable, or
 // vanished, between the two reads), and that failure must be loud AND never
 // recorded as attributed, so a retried pass recovers the nested cost in full.
-// An unreadable candidate is warned once per file per process (latched) and
-// REPORTED in the discovery result instead of thrown, so a statically
-// unreadable nested transcript reaches the same loud path — the attribution
-// pass throws on the report — instead of silently skipping with the swept
-// marker stamped. The readable in-window matches are returned alongside the
-// report (partial progress), and the DIR-level failure still throws.
 
 // ---
 {
@@ -682,7 +556,13 @@ try {
 			err.code = "EACCES";
 			return err;
 		};
+		const injected = new Set();
 		const fail = (sp) => {
+			const failed = failsNow(sp);
+			if (failed) injected.add(sp);
+			return failed;
+		};
+		const failsNow = (sp) => {
 			if (failAll) return true;
 			if (failDiscovery && candidates.has(sp)) return true;
 			if (failDiscoveryPartial && sp === secondPath) return true;
@@ -770,64 +650,26 @@ try {
 		failAll = true;
 		const skipped = lib.loadSubagentInteractions([nestedPath]).length;
 
-		// Phase 5 — the discovery read is a read: an unreadable
-
-		// candidate must not be silently skipped. failDiscovery fails only the
-		// candidate reads, so parsing the parent transcript reaches the
-		// discovery boundary and must THROW (it was silent before round 4), and
-		// the discovery warning must name the candidate — nestedPath is already
-		// latched by Phase 4, so secondPath carries the naming pin.
 		failAll = false;
 		failDiscovery = true;
 		let discoveryPhaseThrew = false;
+		injected.clear();
 		try { lib.parseSessionFile(parentPath); } catch { discoveryPhaseThrew = true; }
+		const discoveryHitSecond = injected.has(secondPath);
 
-		// Phase 6 — the warning is latched per file per process: a second
-		// discovery pass over the same unreadable candidates adds zero new
-		// warnings (the daemon re-polls, the TUI re-reads on every widget
-		// refresh — an unlatched warning is its own noise floor). Since round
-		// 5 the per-file failure no longer THROWS: it is reported in the
-		// result, and every call reports it — the latch silences the WARNING,
-		// never the report.
-		const atDiscovery = () => capturedStderr.split("could not be read at discovery").length - 1;
-		const warnedBefore = atDiscovery();
-		let discoveryReported1 = false;
-		let discoveryThrew1 = false;
-		try {
-			const r6 = lib.discoverClaudeSubAgentSessionFiles(nestedCwd, Number(TC0));
-			discoveryReported1 = r6.unreadable !== null;
-		} catch { discoveryThrew1 = true; }
-		const warnedAfterFirst = atDiscovery();
-		let discoveryReported2 = false;
-		let discoveryThrew2 = false;
-		try {
-			const r6b = lib.discoverClaudeSubAgentSessionFiles(nestedCwd, Number(TC0));
-			discoveryReported2 = r6b.unreadable !== null;
-		} catch { discoveryThrew2 = true; }
-		const warnedAfterSecond = atDiscovery();
 
-		// Phase 7 — round 5 partial progress: with only secondPath unreadable,
-		// discovery returns the readable in-window match (nestedPath) alongside
-		// the report instead of discarding it, and the parent parse STILL
-		// throws via the attribution pass (this transcript's own command must
-		// not report a silently incomplete cost).
 		failDiscovery = false;
 		failDiscoveryPartial = true;
 		let partialKeptMatch = false;
-		let partialReportedUnreadable = false;
 		let partialParseThrew = false;
+		injected.clear();
 		try {
 			const r7 = lib.discoverClaudeSubAgentSessionFiles(nestedCwd, Number(TC0));
-			partialKeptMatch = r7.files.length === 1 && r7.files[0] === nestedPath;
-			partialReportedUnreadable = r7.unreadable !== null && String(r7.unreadable.message).includes(secondPath);
+			partialKeptMatch = r7.length === 1 && r7[0] === nestedPath;
 		} catch {}
 		try { lib.parseSessionFile(parentPath); } catch { partialParseThrew = true; }
+		const partialHitSecond = injected.has(secondPath);
 
-		// Phase 8 — the DIR-level failure still throws: an unreadable
-		// ~/.claude/projects/<slug>/ itself (readdirSync EACCES) warns once
-		// per dir and throws, the rule walkSubagentDir and the Pi sibling scan
-		// share. Only the per-FILE failure became a report; a dir that cannot
-		// even be listed has no matches to return.
 		failDiscoveryPartial = false;
 		failDiscoveryDir = true;
 		let dirLevelThrew = false;
@@ -837,34 +679,21 @@ try {
 		}
 		dirLevelWarned = capturedStderr.includes("a subagent transcripts directory could not be read");
 
-		// Phase 9 — the Pi half of discovery: an unreadable sibling
-
-		// is warned once and REPORTED (never thrown — the round-5 contract the
-		// claude half established), and the readable sibling that declares
-		// parentSession is still discovered alongside it (partial progress,
-		// the same guarantee as Phase 7).
 		failDiscoveryDir = false;
 		failPiSibling = true;
-		let piReported = false;
+		let piReportedNothing = false;
 		let piKeptSibling = false;
 		let piThrew = false;
 		let piWarnedNamesBadRead = false;
+		injected.clear();
 		try {
 			const r9 = lib.discoverSubagentSessionFiles(piParentPath);
-			piReported = r9.unreadable !== null && String(r9.unreadable.message).includes(piSiblingBadReadPath);
+			piReportedNothing = r9.unreadable === null;
 			piKeptSibling = r9.files.length === 1 && r9.files[0] === piSiblingGoodPath;
 		} catch { piThrew = true; }
 		piWarnedNamesBadRead = capturedStderr.includes(piSiblingBadReadPath);
+		const piHitBadRead = injected.has(piSiblingBadReadPath);
 
-		// Phase 10 — round 6: a sibling whose header cannot PARSE (bad JSON,
-		// empty file, partial crash) is skipped silently — it can never
-		// declare parentSession, so it can never contribute cost to this
-		// session. Warning would brand a harmless sibling "unreadable" and
-		// withhold the swept marker forever over nothing; the per-file report
-		// is for READ failures only, where cost may genuinely be missing. With
-		// every sibling readable, BOTH matching siblings (good and bad-read)
-		// are discovered — the bad-read name refers to its Phase-9 role — and
-		// the report is null.
 		failPiSibling = false;
 		let piCleanReportNull = false;
 		let piCleanKeptGood = false;
@@ -989,11 +818,10 @@ try {
 			discoveryPhaseThrew,
 			discoveryWarned: capturedStderr.includes("could not be read at discovery"),
 			discoveryWarnedNamesSecond: capturedStderr.includes(secondPath),
-			discoveryReported1, discoveryReported2, discoveryThrew1, discoveryThrew2,
-			discoveryLatchHolds: warnedAfterFirst === warnedBefore && warnedAfterSecond === warnedAfterFirst,
-			partialKeptMatch, partialReportedUnreadable, partialParseThrew,
+			discoveryHitSecond, partialHitSecond, piHitBadRead,
+			partialKeptMatch, partialParseThrew,
 			dirLevelThrew, dirLevelWarned,
-			piReported, piKeptSibling, piThrew, piWarnedNamesBadRead,
+			piReportedNothing, piKeptSibling, piThrew, piWarnedNamesBadRead,
 			piCleanReportNull, piCleanKeptGood, piCleanThrew, piBadJsonSilent,
 			piNullSilent, piNullKeptTwo, piNullThrew,
 			statProjectThrew, statPiBaseThrew, statPiBaseWarned,
@@ -1009,47 +837,27 @@ try {
 		timeout: 30_000,
 	}));
 
-	assert("unreadable nested transcript makes the parent parse throw (#457)", childOut.firstThrew);
-	assert("a direct attribution pass is loud too, not a silent zero", childOut.firstPassThrew);
+	assert("the race fixture's parent parse throws (#457)", childOut.firstThrew);
+	assert("the race fixture's direct attribution pass throws, not a silent zero", childOut.firstPassThrew);
 	assert("the retried pass succeeds once readability returns", !childOut.secondPassThrew);
 	assert("CLI/TUI path warns that the skipped transcript could not be read", childOut.warned);
 	assert("CLI/TUI path names the skipped file in the warning", childOut.warnedNamesFile);
 	assert("CLI/TUI path skips the unreadable file, returning []", childOut.skipped === 0);
 
-	// the discovery boundary is loud too (M2): an unreadable
-	// candidate is warned once per file per process, so the parent parse fails
-	// (via the round-5 attribution-pass throw) and the daemon withholds the
-	// swept marker instead of stamping it with the parent turn's attribution
-	// silently missing.
-	assert("unreadable discovery candidate makes the parent parse throw (round 4)", childOut.discoveryPhaseThrew);
-	assert("discovery warning uses the unreadable-candidate class phrase", childOut.discoveryWarned);
-	assert("discovery warning names the unreadable candidate file", childOut.discoveryWarnedNamesSecond);
-	assert("discovery warning is latched per file per process", childOut.discoveryLatchHolds);
+	assert("precondition: the parent parse's discovery met the injected read failure", childOut.discoveryHitSecond);
+	assert("an unreadable discovery candidate is skipped: the parent parse does not throw", !childOut.discoveryPhaseThrew);
+	assert("no discovery warning names the unreadable candidate", !childOut.discoveryWarnedNamesSecond);
+	assert("precondition: the partial phase met the injected read failure", childOut.partialHitSecond);
+	assert("discovery returns the readable in-window match beside an unreadable candidate", childOut.partialKeptMatch);
+	assert("the parent parse does not throw while a candidate is unreadable", !childOut.partialParseThrew);
 
-	// the per-file discovery failure is a REPORT, not a throw: the
-	// readable in-window matches are returned alongside it (partial progress —
-	// the daemon registers them so their costs land), the report names the
-	// candidate, and the attribution pass keeps the loud throw for this
-	// transcript's own command.
-	assert("a direct discovery call reports the unreadable candidate, every call", childOut.discoveryReported1 && childOut.discoveryReported2 && !childOut.discoveryThrew1 && !childOut.discoveryThrew2);
-	assert("discovery returns the readable in-window match alongside the failure", childOut.partialKeptMatch);
-	assert("discovery names the unreadable candidate in its report", childOut.partialReportedUnreadable);
-	assert("the parent parse still throws while any candidate is unreadable", childOut.partialParseThrew);
-
-	// the DIR-level failure still throws: an unreadable project dir
-	// has no matches to return, so the rule stays the round-4 one.
 	assert("an unreadable project dir still throws from a direct discovery call", childOut.dirLevelThrew);
 	assert("the dir-level throw warns once, naming the unreadable dir class", childOut.dirLevelWarned);
 
-	// the Pi half of discovery now matches the claude half's
-	// round-5 contract: an unreadable sibling warns once and is REPORTED, not
-	// thrown (the round-6 report keeps the readable siblings — the round-5
-	// throw starved the whole subtree every poll), the readable sibling that
-	// declares parentSession is still discovered alongside it, and the
-	// report is null when every sibling reads.
-	assert("Pi half reports the unreadable sibling, not a throw", childOut.piReported && !childOut.piThrew);
-	assert("Pi half keeps the readable sibling alongside the failure", childOut.piKeptSibling);
-	assert("Pi half's discovery warning names the unreadable sibling", childOut.piWarnedNamesBadRead);
+	assert("precondition: the Pi scan met the injected read failure", childOut.piHitBadRead);
+	assert("Pi half skips the unreadable sibling: unreadable null, no throw", childOut.piReportedNothing && !childOut.piThrew);
+	assert("Pi half keeps the readable sibling beside it", childOut.piKeptSibling);
+	assert("no Pi discovery warning names the unreadable sibling", !childOut.piWarnedNamesBadRead);
 	assert("Pi half reports nothing when every sibling reads", childOut.piCleanReportNull && !childOut.piCleanThrew && childOut.piCleanKeptGood);
 	assert("Pi half skips a bad-JSON sibling silently", childOut.piBadJsonSilent);
 	assert("Pi half skips a null-header sibling silently, report untouched (round 11)", childOut.piNullSilent && childOut.piNullKeptTwo && !childOut.piNullThrew);

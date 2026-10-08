@@ -265,8 +265,6 @@ function readCandidateHead(file: string): Omit<SpawnCandidate, "path" | "session
 	return { cwd, startedAt, launchedBy };
 }
 
-/** A path that went away — a transcript or project dir deleted mid-scan, or
- *  no projects root at all. Nothing is there to list. */
 function isGone(err: unknown): boolean {
 	return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
@@ -276,9 +274,6 @@ function isGone(err: unknown): boolean {
  * moves when a transcript is created in it, so an older directory cannot
  * hold a transcript that began after `sinceMs`. Symlinks count: `statSync`
  * follows them.
- *
- * Any read error other than a path that went away is THROWN, so the report
- * fails loudly: an empty listing must only ever mean "looked, found none".
  */
 function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 	const candidates: SpawnCandidate[] = [];
@@ -310,9 +305,8 @@ function listSpawnCandidates(sinceMs: number): SpawnCandidate[] {
 				if (!stat.isFile() || stat.mtimeMs < sinceMs) continue;
 				const head = readCandidateHead(file);
 				if (head) candidates.push({ path: file, sessionId: sessionIdOf(file), ...head });
-			} catch (err) {
-				if (isGone(err)) continue;
-				throw err;
+			} catch {
+				continue;
 			}
 		}
 	}
@@ -336,9 +330,6 @@ function indexSessionsById(): Map<string, string> {
 			.filter(e => e.isDirectory())
 			.map(e => e.name);
 	} catch (err) {
-		// ENOENT (raced away between the existsSync above and here) is ordinary:
-		// nothing to index. Anything else — permission denied, most commonly —
-		// must be LOUD: a caller cannot tell "no sessions" from "could not look".
 		if (isGone(err)) return index;
 		throw err;
 	}

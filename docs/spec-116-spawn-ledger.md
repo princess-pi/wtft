@@ -374,7 +374,7 @@ otherwise (spec-230).
   Still unrecorded: a raw `herdr agent start` outside `agent-new`, Pi and Codex children, and any
   child whose parent is not a Claude Code session.
 - **Folding descendants into TOTAL.** A separate decision, and it needs the interaction-level
-  attribution rework in #107 / #14 / #94 first.
+  attribution rework first.
 - **Listing an unrecorded child.** The Closer's second clause — #128, since landed
   (`docs/spec-128-unrecorded-spawns.md`). A spawner that never calls
   `spawn-record` is invisible to the walk; #128's listing reports it instead.

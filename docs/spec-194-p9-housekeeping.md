@@ -75,7 +75,7 @@ them records where they came from, when, and how to refresh them.
   the near-universal pair is present unless `agentType` is `workflow-subagent`, and
   `readSubagentMeta` accepts the file with every optional field it carries (`description`,
   `toolUseId`, `model`, `parentAgentId`, `isFork`) intact. It also checks that the corpus is
-  exactly the seven files the test's `CORPUS` list and the README table name, and that every
+  exactly the files the test's `CORPUS` list and the README table name, and that every
   key in it is one the reader carries or
   one the test lists as knowingly ignored, so a renamed key brought in by a refresh fails
   instead of going unread. The presence checks guard the committed data;

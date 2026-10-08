@@ -7,7 +7,7 @@ the reader is checked against the harness's field names as they were at capture.
 harness still writes those names is § M7b's job, on a host that has sidecars. Why they are here rather than hand-written:
 `docs/spec-194-p9-housekeeping.md` § H2.
 
-**Captured 2026-09-23, Claude Code 2.1.281.** File mtimes on the source host ran from 2026-08-10 to
+**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294.** File mtimes on the source host ran from 2026-08-10 to
 2026-09-23.
 
 | File | Shape it stands for |
@@ -19,6 +19,7 @@ harness still writes those names is § M7b's job, on a host that has sidecars. W
 | `agent-ace7ef5933e128a87` | a named agent type (`claude-code-guide`) |
 | `agent-a12b520b52dfc5d2a` | a named dispatch (`name`) |
 | `agent-a170388e12a7fa3bc` | a dispatch carrying `cwd` |
+| `agent-a1a9b0bea81408e23` | a background dispatch carrying `effort` |
 
 ## Refreshing it
 

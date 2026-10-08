@@ -5,8 +5,8 @@ Module: `extensions/lib/wtft-cli-shared.ts` · Seam: `parseWtftCliArgs`, tested 
 ## The gap
 
 `parseWtftCliArgs` matched each argument against its known flags and dropped anything else. A
-typo'd `--jsonn` rendered the ANSI chart and exited 0, which a caller checking `$?` cannot tell from
-a good `--json` run. A valued flag that could not use its value kept the default and left the value
+typo'd `--jsonn` ran an ordinary chart report, which a caller checking `$?` cannot tell from a good
+`--json` run. A valued flag that could not use its value kept the default and left the value
 to be read as one more argument, and `--stop` took the next argument whatever it was, so
 `wtft --stop --json` sent `--json` to the daemon as a session path.
 
@@ -15,7 +15,8 @@ to be read as one more argument, and `--stop` took the next argument whatever it
 **The parser returns the refusal; it never exits.** `parseWtftCliArgs(argv)` stays a pure function.
 Its result carries `usageError`: `undefined` for a call it can read, else one sentence saying why
 the first argument it cannot read was refused. It parses the rest anyway, so the other fields still hold what it could
-read. Each caller decides what a refusal does.
+read. A value that does not start with `-` is consumed by its flag whether or not the flag can use
+it. Each caller decides what a refusal does.
 
 **Refused** (`usageError` set):
 
@@ -43,18 +44,20 @@ read. Each caller decides what a refusal does.
 `-`; what that value names is checked where it is used, as before.
 
 **Bare words.** One gives a word meaning today: `spawn-record`, and only as the CLI's first
-argument, where `bin/wtft.ts` dispatches it to its own parser before the report path runs. No
+argument, where `bin/wtft.ts` dispatches it to its own parser instead of the report path. No
 caller in princess-pi-tools passes any other bare word: its callers run `wtft spawn-record …`
 (`agent-new`, `claude-nsp-guard`, `pr-review`). So every other bare word is refused, and so is
 `spawn-record` anywhere but first (`wtft --json spawn-record` was a report run; it is now a refusal).
 
-**The CLI** (`bin/wtft.ts`): a refused call prints the sentence on stderr, nothing on stdout, and
+**The CLI** (`bin/wtft.ts`): a refused call prints the sentence and a pointer to `--help` on stderr,
+nothing on stdout, and
 exits **2**. The refusal comes before anything the call asks for: no help, no report, no daemon
-spawn, no daemon command, and no `-p` refusal. From a deleted working directory it moves to the
-home directory, silently, and neither moves to `--dir` nor warns. `spawn-record`'s own exit 2 is
+spawn, no daemon command, and no `-p` refusal. From a deleted working directory it does not move to
+`--dir` and does not warn. `spawn-record`'s own exit 2 is
 unchanged.
 
-**The Pi extension** (`/wtft`): a refused call shows the sentence as an `error` notification and
+**The Pi extension** (`/wtft`): a refused call shows the sentence and a pointer to `--help` as an
+`error` notification and
 does nothing else: no widget change, no config write, no render.
 
 **The chart picker page** (`artifacts/chart-spec/picker.html`) and `renderReport` ignore
@@ -62,8 +65,7 @@ does nothing else: no widget change, no config write, no render.
 until its value arrives, and the page draws what the rest of the line says meanwhile.
 
 **Not changed:** contradictory flags (`--hide --show`, `--cost --tokens`) are still read as before;
-a well-formed flag a caller does not use (`--json` and the daemon flags in Pi, `-w` in the CLI) is
-still accepted there and ignored.
+a well-formed flag a caller does not use is still accepted there and ignored.
 
 ## Verification
 
@@ -81,7 +83,7 @@ still accepted there and ignored.
 
 `tests/wtft-26-json.test.ts` §1 checks that `wtft --json` with a session still prints one JSON
 object, §7 that exit 2 is in the manifest's exit-code table, and
-`tests/wtft-75-doc-claims.test.ts` that the README names only flags the parser accepts.
+`tests/wtft-75-doc-claims.test.ts` checks the README's flag names against the parser.
 
 ## Reconciliation
 

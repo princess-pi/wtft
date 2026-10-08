@@ -26,6 +26,12 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 		assert.match(refusal(["--json", "spawn-record"]) ?? "", /spawn-record/);
 	});
 
+	it("P1b flag spellings the parser does not take, named", () => {
+		for (const tok of ["--session=x", "--pad=3", "-i=7m", "-hW", "--", "-"]) {
+			assert.match(refusal([tok]) ?? "", new RegExp(` ${tok.replace(/[-=]/g, "\\$&")}$`), tok);
+		}
+	});
+
 	it("P3 a valued flag with no value, named, and the flag after it still read", () => {
 		const stopped = parseWtftCliArgs(["--stop", "/s.jsonl"]);
 		assert.equal(stopped.usageError, undefined);
@@ -35,6 +41,11 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 		assert.match(swallowed.usageError ?? "", /--stop/);
 		assert.equal(swallowed.daemonStop, undefined);
 		assert.equal(swallowed.json, true);
+		assert.match(refusal(["--stop", ""]) ?? "", /--stop/);
+		assert.match(refusal(["--pad", "-2"]) ?? "", /--pad/);
+		assert.match(refusal(["--tz", "-05:00"]) ?? "", /--tz/);
+		assert.match(refusal(["--interval="]) ?? "", /--interval/);
+		assert.equal(parseWtftCliArgs(["--limit", "abc"]).usageError, `--limit takes a whole number of 1 or more, not "abc"`, "the bad value is consumed, not re-read as a bare word");
 		for (const flag of ["-s", "--session", "--dir", "--cwd", "--harness", "--pad", "--thinking-budget", "-i", "--interval", "-l", "--limit", "-w", "--width", "--tz", "--timezone"]) {
 			assert.match(refusal([flag]) ?? "", new RegExp(`${flag}\\b`), `${flag} last`);
 			assert.match(refusal([flag, "--tokens"]) ?? "", new RegExp(`${flag}\\b`), `${flag} before --tokens`);
@@ -72,7 +83,7 @@ describe("P parseWtftCliArgs refuses what it cannot read", () => {
 			["--pad", "0"], ["--pad", "3"], ["--stop", "~/s.jsonl"], ["--thinking-budget", "800"],
 			["-i", "7m"], ["--interval", "4h"], ["-i", "1d"], ["-i", "1w"], ["-i", "5t"], ["-i", "2turns"], ["-i", "1turn"],
 			["-l", "3"], ["--limit", "08"], ["-w", "120"], ["--width", "80"], ["--tz", "UTC"], ["--timezone", "America/New_York"],
-			["--interval=5m"], ["--limit=3"], ["--width=90"], ["--tz=Europe/London"], ["--timezone=Asia/Tokyo"],
+			["--tz=-05:00"], ["--interval=5m"], ["--limit=3"], ["--width=90"], ["--tz=Europe/London"], ["--timezone=Asia/Tokyo"],
 		];
 		for (const argv of good) assert.equal(refusal(argv), undefined, argv.join(" "));
 		const read = parseWtftCliArgs(["--limit", "08", "--pad", "0", "--tz=Europe/London", "-i", "2turns"]);

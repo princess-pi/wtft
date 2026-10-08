@@ -397,7 +397,7 @@
     },
     {
       "code": 2,
-      "meaning": "The call was wrong, and nothing ran; stdout carries nothing. Any call but spawn-record: an unknown flag, a bare word, a flag with no value (wtft --stop, wtft --stop --json), or a value a flag cannot use (--limit abc, -i 9x, --harness bogus); stderr says why. It is checked before anything else, so a refused call exits 2 even with --help, --json or -p in it. `wtft spawn-record` (#116): a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field; nothing was appended."
+      "meaning": "The call was wrong; stdout carries nothing. Any call but spawn-record: an unknown flag, a bare word, a flag with no value (wtft --stop, wtft --stop --json), or a value a flag cannot use (--limit abc, -i 9x, --harness bogus); stderr says why. It is checked before anything the call asks for, so a refused call exits 2 even with --help, --json or -p in it. `wtft spawn-record` (#116): a missing required flag, an unknown flag, a flag with no value, a malformed session id, or an oversized field; nothing was appended."
     },
     {
       "code": 3,

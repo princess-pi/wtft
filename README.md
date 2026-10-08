@@ -221,7 +221,7 @@ retired in `@4`.
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
-- **2** — the call was wrong, nothing ran, and stdout carries nothing: an unknown flag, a bare word, a
+- **2** — the call was wrong, and stdout carries nothing: an unknown flag, a bare word, a
   flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
   cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr says why.
   A refused call exits 2 even with `--help`, `--json` or `-p` in it.

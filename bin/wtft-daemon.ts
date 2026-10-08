@@ -1543,7 +1543,8 @@ handled is not listed. A --stop of a session a harness serves ends the command a
                         that hold no lease here; a harness daemon only when its own tmp dir (TMPDIR, TMP or
                         TEMP in its environment) is under the tmp dir, not the tmp dir itself, and its own
                         root variable (set) and any --session are under it too. A holder
-                        --restart reaches and a respawn it started are not cleaned, stopped or listed
+                        --restart reaches, a respawn it started and a holder a respawn handed its session
+                        to are not cleaned, stopped or listed
   --restart             Stop every daemon holding a lease or a root pid file here (SIGTERM, SIGKILL after 2 s),
                         and respawn one per stopped lease holder with its own --session or --harness, root
                         environment, XDG_STATE_HOME, TMPDIR, TMP and TEMP, claiming its lease when free; a harness holding no lease is stopped (unless a respawn
@@ -1944,7 +1945,7 @@ if (showList || showCleanup || showRestart || stopSession) {
         const kind = classifyPid(proc.pid);
         if (kind !== "daemon" && kind !== "harness") continue;
         if (proc.started === null || processTable().startTime(proc.pid) !== proc.started) continue;
-        const where = proc.session || proc.roots.join(",");
+        const where = proc.harness ? `harness ${proc.roots.join(",")}` : proc.session || proc.roots.join(",");
         const named = stopSession !== null && proc.session === stopSession;
         const sent = processTable().signal(proc.pid, "SIGTERM");
         if (sent === "gone") continue;

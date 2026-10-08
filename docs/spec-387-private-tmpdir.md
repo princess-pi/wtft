@@ -13,7 +13,7 @@ Module: `extensions/lib/holder.ts` · Seam: `decideUnleased`, tested in
   When that cannot be read, only an absolute `--session` is kept, and it has no roots and no tmp
   dir. **Inside here** means here or under it.
 - **A harness's roots** are its own harness's root variable only (`WTFT_CLAUDE_PROJECTS_DIR` for
-  `claude`, `WTFT_PI_SESSIONS_DIR` for `pi`, none for any other name); a per-session daemon's are
+  `claude` or `claude-code`, `WTFT_PI_SESSIONS_DIR` for `pi`, none for any other name); a per-session daemon's are
   both, when set.
 - **A sandboxed harness** has a tmp dir inside here that is not here itself, sets its root
   variable inside here, and has a `--session` inside here or none.
@@ -29,7 +29,7 @@ session it shows, and a sandboxed harness by `--cleanup`:
   refuses the signal (EPERM) is reported `Not stopped` and the command exits 1. A harness is not
   stopped this way: its `--session` is only the session it was started for.
 - **S2. `--cleanup` sends SIGTERM to a sandboxed harness that holds no lease here,** reported
-  `Cleaned up: PID <pid> — fixture daemon: <where>`, like the per-session fixtures it already
+  `Cleaned up: PID <pid> — fixture daemon: harness <root>`, like the per-session fixtures it already
   stops. A harness that is not sandboxed is still never sent a signal by `--cleanup`.
 - **S3. `--restart --pid <pid>` also reaches that pid's leases and root pid file in its own tmp
   dir**, and in that dir only the files naming it. Like every respawn, its respawn runs with the
@@ -43,7 +43,7 @@ session it shows, and a sandboxed harness by `--cleanup`:
   start-up `--session`.
 - **S5. `--restart` takes precedence in the process-table pass too.** Its respawns are judged
   before that pass runs. A daemon `--restart` reaches through a root pid file, a respawn it
-  started, and a harness a respawn handed its session to are not listed by `--list`, cleaned by
+  started, and a holder a respawn handed its session to are not listed by `--list`, cleaned by
   `--cleanup` or stopped by `--stop` in the same command.
 
 The process-table pass signals a pid only when `classifyPid` still reads it as a daemon or a

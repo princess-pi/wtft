@@ -48,7 +48,7 @@ function harnessInBox(label: string, withSession = true) {
 		fs.writeFileSync(path.join(box, "root", "proj", "t.jsonl"), "{\"type\":\"session\"}\n");
 		return {
 			args: ["--harness", "claude", ...(withSession ? ["--session", path.join(box, "root", "proj", "t.jsonl")] : [])],
-			env: { WTFT_CLAUDE_PROJECTS_DIR: path.join(box, "root"), WTFT_PI_SESSIONS_DIR: path.join(box, "no-pi") },
+			env: { WTFT_CLAUDE_PROJECTS_DIR: path.join(box, "root"), WTFT_PI_SESSIONS_DIR: "/var/empty/wtft-387-no-pi" },
 		};
 	});
 }
@@ -143,7 +143,9 @@ try {
 		assert("exit 0", run.status === 0);
 		const tmpOf = read(`/proc/${respawn}/environ`).split("\0").find(row => row.startsWith("TMPDIR="));
 		assert(`fixture precondition: the respawn is a sandboxed harness, a --cleanup candidate (${tmpOf})`, tmpOf === `TMPDIR=${d.tmp}`);
-		assert(`and it is left running (${respawn})`, respawn !== d.pid && classifyPid(respawn) === "harness");
+		assert("no line cleans the respawn", respawn > 0 && linesFor(run.stdout, respawn).every(l => !l.startsWith("Cleaned up")));
+		await sleep(500);
+		assert(`and it is still running 500 ms later (${respawn})`, respawn !== d.pid && classifyPid(respawn) === "harness");
 	}
 
 	console.log("--restart --pid with --cleanup: a sandboxed harness found only through its root pid file is stopped once, by --restart");
@@ -165,6 +167,7 @@ try {
 		const session = path.join(root, "proj", "t.jsonl");
 		const up = await until(() => classifyPid(h.pid) === "harness" && filesNaming(h.tmp, ROOT_PID_FILE, h.pid).length > 0, 5000) < Infinity;
 		assert("fixture precondition: the harness holds its root pid file in its own tmp dir", up);
+		assert("fixture precondition: --list shows it by its root, a --cleanup candidate", linesFor(daemonCmd("--list").stdout, h.pid).some(l => l.endsWith(` harness ${root}`)));
 		const child = spawn(process.execPath, [DAEMON, "--session", session], {
 			detached: true,
 			stdio: "ignore",
@@ -177,7 +180,8 @@ try {
 		assert("fixture precondition: a per-session daemon holds that root's session lease in the same tmp dir", leased);
 		const run = daemonCmd("--restart", "--pid", String(p), "--cleanup");
 		assert(`the harness is not cleaned (${run.stdout.trim()})`, linesFor(run.stdout, h.pid).every(l => !l.startsWith("Cleaned up")));
-		assert("it is still running", classifyPid(h.pid) === "harness");
+		await sleep(500);
+		assert("it is still running 500 ms later", classifyPid(h.pid) === "harness");
 		assert("the restart did not fail: exit 0", run.status === 0);
 	}
 } finally {
@@ -199,7 +203,7 @@ console.log("decideUnleased: --stop and --cleanup for a daemon holding no lease 
 	assert("nor one whose tmp dir is outside here", decideUnleased({ ...sandboxedHarness, tmpDir: "/tmp/x" }, cleanup) === "keep");
 	assert("nor one whose tmp dir could not be read", decideUnleased({ ...sandboxedHarness, tmpDir: null }, cleanup) === "keep");
 	assert("nor one that sets no root variable", decideUnleased({ ...sandboxedHarness, roots: [] }, cleanup) === "keep");
-	assert("nor one with a root outside here", decideUnleased({ ...sandboxedHarness, roots: [`${box}/root`, "/home/u/.pi/sessions"] }, cleanup) === "keep");
+	assert("nor one whose root is outside here", decideUnleased({ ...sandboxedHarness, roots: ["/home/u/.claude/projects"] }, cleanup) === "keep");
 	assert("nor one whose --session is outside here", decideUnleased({ ...sandboxedHarness, session: "/home/u/.claude/projects/p/s.jsonl" }, cleanup) === "keep");
 	assert("a sandboxed harness with no --session is cleaned", decideUnleased({ ...sandboxedHarness, session: null }, cleanup) === "clean");
 	assert("--cleanup still cleans a per-session fixture", decideUnleased(perSession, cleanup) === "clean");

@@ -10,7 +10,7 @@ Tests: `tests/wtft-274-restart.test.ts` (P1–P3), `tests/wtft-46-install-wtft.t
   `--restart` handles only the holders, found through a lease or a harness root pid file, whose
   pid is named. Every other holder is handled as if `--restart` were not given: listed under
   `--list`, cleaned under `--cleanup`, and otherwise left as it was, lease and root pid file
-  included, except that a harness a respawn handed its session to is not listed or cleaned
+  included, except that a holder a respawn handed its session to is not listed, cleaned or stopped
   (`docs/spec-387-private-tmpdir.md`, S5). Without `--pid`, `--restart` reaches every holder, as before.
 - **P2. A named pid that holds no lease and no root pid file here, nor in its own tmp dir**
   (`docs/spec-387-private-tmpdir.md`, S3), prints

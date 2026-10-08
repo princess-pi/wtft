@@ -13,7 +13,7 @@ session from another day was drawn with today's surge hours and today's moon.
 - **A live view anchors on now.** A view is live when its caller says so — the Pi widget and
   `--watch` — or when the newest interaction shown falls in the current local hour.
 - **Any other view anchors on the newest interaction shown.** A session that crosses midnight is
-  drawn for the day of its newest interaction, the same day the chart's date label names.
+  drawn for the day of its newest interaction.
 - **The surge badge appears only on a live view.** On any other view the strip still colours the
   surge hours of the anchor's day, and no badge follows it.
 

@@ -283,8 +283,8 @@ repo, with nothing that failed when a change missed one, and one prose copy said
 2026" nine days after the rates moved (#495). No count is given, because every count of them
 written so far has been wrong; `grep` is the authority.
 `getSurgeLocalHours()` marks a display-timezone hour when any minute of that hour
-bills above 1. It resolves the day containing the instant passed to it, and the
-renderer passes `now` — so the bar describes today while the bins under it may be older.
+bills above 1. It resolves the day containing the instant passed to it: the
+renderer passes now on a live view, else the newest interaction shown.
 `checkSurgeProximity()` reads `SURGE_APPROACH_MINUTES` before a window opens, and
 `SURGE_ENDING_MINUTES` before the surge stops. Both are 20. Ending is those
 minutes before billing drops to 1. That instant follows windows that touch or

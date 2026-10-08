@@ -67,7 +67,7 @@ line from the controls, so a typed flag with no control, such as `-o`, is droppe
 slider's end moves that end.
 The chart shown is `renderReport`'s output for that command line with no config: the session path line, the title
 with its timeline strip and session-name suffix, the legend, the scale line, the rows, the rules, and the footers. The
-page adds a column ruler above and a line count below. It passes no clock, so the strip follows the reader's.
+page adds a column ruler above and a line count below.
 `paint.mjs` is deleted.
 
 `artifacts/chart-spec/spec.mdx` prints the four presets as the chart draws them under a pinned clock,

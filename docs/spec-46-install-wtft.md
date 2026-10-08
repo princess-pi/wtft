@@ -69,11 +69,11 @@ Resolving only the parent was the bug — it produced exactly the self-comparing
 | Code | Meaning | Remedy |
 |---|---|---|
 | `0` | Installed, or `--check` found this host in sync. Also `--version` and `--help`. | — |
-| `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); the clone's bundles are older than their sources (`stale-build`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
+| `1` | Drift: an artifact is missing, stale, not executable, or **not built** (`no-source`); under `--check`, a source of the CLI bundles changed after the clone's last build (`stale-build`); or `--dir` could not be created (`no-dir`) | run `install-wtft`, or fix the directory |
 | `2` | In sync but **shadowed** on PATH by a different `wtft` | the printed `rm` |
 | `3` | The build failed | read the build output on stderr |
 | `4` | In sync, but a config file is still at the old `princess-pi-tools` path (status `config-left`, #156) | in install mode, EITHER the new path already had a DIFFERENT file (a real conflict — declined) OR a file appeared at the new path while this run was moving (kept, never overwritten — re-run), OR the copy itself failed partway (`mkdir`/`mktemp`/`cp`/`ln` — a "could not move" stderr line names it and the cause; a failure to remove the OLD file after a successful copy is reported as `moved`, not this; a later run removes the byte-identical leftover once the old directory allows unlinking, and reports this — `identical, safe to delete` — until then) — either way, resolve which copy is authoritative and remove the other by hand; in `--check` mode, run `install-wtft`. OR, in either mode, the new path is already the old file under another name: there is one copy, so remove the link, never the file (re-running does not clear it) |
-| `5` | In sync, no config file left behind and wtft not shadowed, but the `claude-nsp-guard` shim is **shadowed**: a guard exists on PATH, but a different `claude` comes first (status `nsp-guard-shadowed`) | put the guard's directory before the winner's on PATH — nothing is deleted. When drift, `config-left` or a wtft shadow wins the exit code, human mode names a shadowed guard on an `Also:` line; `build-failed` and `no-dir` print only their own line |
+| `5` | In sync, no config file left behind and wtft not shadowed, but the `claude-nsp-guard` shim is **shadowed**: a guard exists on PATH, but a different `claude` comes first (status `nsp-guard-shadowed`) | put the guard's directory before the winner's on PATH — nothing is deleted. When drift, `stale-build`, `config-left` or a wtft shadow wins the exit code, human mode names a shadowed guard on an `Also:` line; `build-failed` and `no-dir` print only their own line |
 | `64` | Bad usage: unknown argument, `--dir` with no directory, `--dir` followed by a flag **or given an empty string**, or no `--dir` on a host with `HOME` unset | — |
 
 `1` and `64` are chosen to match `install-workflow-tools` so the two installers do not
@@ -83,12 +83,13 @@ either side noticing. Treat it as a convention this file states, not a guarantee
 remedy is a different verb entirely: re-running the installer cannot fix a PATH shadow, and
 cannot move a config file it has already declined to overwrite once.
 
-**Drift outranks a stale build, which outranks a left-behind config file, which outranks shadow,
+**Drift, `build-failed` and `no-dir` outrank a stale build, which outranks a left-behind config file, which outranks shadow,
 which outranks the `claude-nsp-guard` shim**, when more than one holds — a shadowed copy of the wrong bytes, or the right
 bytes with config in the wrong place, is still wrong, and fixing drift comes first. So exit
 `2` implies the artifacts are in sync AND no config file is left behind; exit `4` implies the
 artifacts are in sync; exit `5` implies the artifacts are in sync, no config file is left
-behind, and wtft itself is not shadowed. The reasoning for ranking the guard last, and its
+behind, and wtft itself is not shadowed. Under `--check`, each of `2`, `4` and `5` also implies
+`build: "current"`. The reasoning for ranking the guard last, and its
 identity check, are in `docs/spec-194-p9-housekeeping.md` § H3 — this file states the
 resulting contract, not the case for it.
 
@@ -188,8 +189,8 @@ now falls through the same evaluation as every other exit.
   non-option argument under `node` or `bun` (so `node --inspect <bundle>` counts): an editor with the
   file open is not counted. A relative path is resolved against
   the process's own cwd. `bun run build` and install mode leave
-  an unchanged bundle unwritten, so its mtime dates the last build that changed it. The start of the
-  last successful build is `tmp/last-build`'s mtime; a suite's freshness check needs it later than
+  an unchanged bundle unwritten, so its mtime dates the last build that changed it. `tmp/last-build`'s mtime is
+  when the last successful build started bundling; a suite's freshness check needs it later than
   every source it tests. When `older` is
   above 0 and every artifact checked out (not `drift`, so a failed copy never restarts daemons into
   the old build), install mode runs `<dir>/wtft-daemon --restart` (its output to stderr), then checks the
@@ -227,13 +228,17 @@ now falls through the same evaluation as every other exit.
   `ok`. Full reasoning, the sentinel, and the scan: `docs/spec-194-p9-housekeeping.md` § H3.
 
 - **`build` is present on every exit path, install or check.** It is `stale` when
-  `tmp/last-build` is absent, or when any of `bin/*.ts`, `extensions/lib/**/*.ts`, `build.ts`,
-  `package.json` or `bun.lock` has an mtime later than it; otherwise `current`. A `git pull` that
-  changes a source gives that file the pull's time, so `--check` after it reads `stale` even
-  though the installed copy matches the clone's bundle byte for byte. `status: "stale-build"`
-  (exit `1`) is reported when `build` is `stale` and every artifact is `ok`; human mode names one
-  newer source. A checkout that rewrites mtimes without changing content reads `stale` too, and
-  costs one rebuild.
+  `tmp/last-build` is absent, or when any of `bin/*.ts`, `extensions/lib/**/*.ts`,
+  `docs/manifests/wtft-cmd.json`, `build.ts`, `package.json` or `bun.lock` has an mtime later than
+  it; otherwise `current`. The bundled dependencies under `node_modules` are not checked; they
+  change with `bun.lock`. A `git pull` that changes one of those files gives it the pull's time, so
+  `--check` after it reads `stale` even though the installed copy matches the clone's bundle byte
+  for byte. `status: "stale-build"` (exit `1`) is reported only under `--check`, when `build` is
+  `stale` and the status would otherwise be `ok`; human mode names the changed file, or the absent
+  `tmp/last-build`, and adds an `Also:` line for a config file left at the old path. Install mode
+  has just built, so it never reports `stale-build`; its document still says `build: "stale"` when
+  a source is dated after that build. A checkout that rewrites mtimes without changing content
+  reads `stale` too, and costs one rebuild.
 
 Flat, one record per artifact, stable keys. `status` is the single field a caller reads
 to branch; `artifacts[].state` says which file to blame, and the same list is rendered
@@ -389,7 +394,7 @@ probe.
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
 | **V9** | config migration (#156), driven directly through the CLI (V9a–V9k) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing; a new path that is the old file under another name is `left` and never unlinked, while an old-name symlink or hardlink migrates (V9j, V9k). (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
 | **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr; a guard whose first 160 lines pass a pipe buffer is still recognised (V10g) |
-| **V12** | a stale build | a copy of the installer in a scratch clone whose bundles match the install dir: no source newer than `tmp/last-build` → `--check` exits `0`, `build: "current"`; one source newer → exit `1`, `status: "stale-build"`, `build: "stale"`, every artifact `ok`, stderr names that source; no `tmp/last-build` → `stale-build`; drift alongside a stale build → `status: "drift"`, `build: "stale"` |
+| **V12** | a stale build | a copy of the installer in a scratch clone whose bundles match the install dir: no source newer than `tmp/last-build` → `--check` exits `0`, `build: "current"`; each counted source newer in turn → exit `1`, `status: "stale-build"`, `build: "stale"`, all four artifacts `ok`, stderr names that source; install mode with a source dated after its build → exit `0`, `status: "ok"`, `build: "stale"`; no `tmp/last-build` → `stale-build`; drift alongside a stale build → exit `1`, `status: "drift"`, `build: "stale"` |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.

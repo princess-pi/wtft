@@ -1158,11 +1158,11 @@ if (!fs.existsSync("/proc/self/stat")) {
 	}
 }
 
-console.log("\n12. --check reports a stale build: the clone's bundles are older than their sources");
+console.log("\n12. --check reports a stale build: a source changed after the clone's last build");
 {
 	const clone = mkSandbox(path.join(os.tmpdir(), "46-stale-build-"));
-	const sources = ["bin/wtft.ts", "bin/wtft-daemon.ts", "extensions/lib/harness/x.ts", "build.ts", "package.json", "bun.lock"];
-	for (const dir of ["bin", "extensions/lib/harness", "tmp"]) fs.mkdirSync(path.join(clone, dir), { recursive: true });
+	const sources = ["bin/wtft.ts", "bin/wtft-daemon.ts", "extensions/lib/harness/x.ts", "docs/manifests/wtft-cmd.json", "build.ts", "package.json", "bun.lock"];
+	for (const dir of ["bin", "extensions/lib/harness", "docs/manifests", "tmp"]) fs.mkdirSync(path.join(clone, dir), { recursive: true });
 	const installer = path.join(clone, "bin", "install-wtft");
 	fs.copyFileSync(INSTALLER, installer);
 	fs.chmodSync(installer, 0o755);
@@ -1175,7 +1175,7 @@ console.log("\n12. --check reports a stale build: the clone's bundles are older 
 	}
 	const stamp = path.join(clone, "tmp", "last-build");
 	const now = Date.now() / 1000;
-	for (const f of sources) { fs.writeFileSync(path.join(clone, f), ""); fs.utimesSync(path.join(clone, f), now - 100, now - 100); }
+	for (const f of sources) { fs.writeFileSync(path.join(clone, f), f === "package.json" ? JSON.stringify({ scripts: { build: "true" } }) : ""); fs.utimesSync(path.join(clone, f), now - 100, now - 100); }
 	fs.writeFileSync(stamp, "");
 	fs.utimesSync(stamp, now - 50, now - 50);
 	const checkJson = () => {
@@ -1195,12 +1195,21 @@ console.log("\n12. --check reports a stale build: the clone's bundles are older 
 		const r = checkJson();
 		const human = run(["--check", "--dir", dest], [], {}, installer);
 		check(r.code === 1 && r.doc?.status === "stale-build" && r.doc?.build === "stale"
-			&& (r.doc?.artifacts ?? []).every((a: any) => a.state === "ok")
+			&& r.doc?.artifacts?.length === 4 && r.doc.artifacts.every((a: any) => a.state === "ok")
 			&& human.code === 1 && human.err.includes(path.join(clone, f)),
-			`V12b: ${f} newer than tmp/last-build -> exit 1, status stale-build, build stale, every artifact ok, stderr names it`,
+			`V12b: ${f} newer than tmp/last-build -> exit 1, status stale-build, build stale, all four artifacts ok, stderr names it`,
 			`exit ${r.code}: ${r.out.slice(0, 300)} | human ${human.code}: ${human.err.slice(0, 300)}`);
 		fs.utimesSync(path.join(clone, f), now - 100, now - 100);
 	}
+
+	fs.utimesSync(path.join(clone, "bin", "wtft.ts"), now + 1000, now + 1000);
+	const installRun = run(["--json", "--dir", dest], [], {}, installer);
+	let installDoc: any = null;
+	try { installDoc = JSON.parse(installRun.out); } catch { /* asserted below */ }
+	check(installRun.code === 0 && installDoc?.mode === "install" && installDoc?.status === "ok" && installDoc?.build === "stale",
+		"V12e: install mode reports build stale in the document but never status stale-build (a source dated after the build it just ran)",
+		`exit ${installRun.code}: ${installRun.out.slice(0, 300)} ${installRun.err.slice(0, 300)}`);
+	fs.utimesSync(path.join(clone, "bin", "wtft.ts"), now - 100, now - 100);
 
 	fs.renameSync(stamp, `${stamp}.away`);
 	const never = checkJson();
@@ -1210,7 +1219,7 @@ console.log("\n12. --check reports a stale build: the clone's bundles are older 
 	fs.appendFileSync(path.join(dest, "wtft.mjs"), "\n// drift\n");
 	const both = checkJson();
 	check(both.code === 1 && both.doc?.status === "drift" && both.doc?.build === "stale",
-		"V12d: drift alongside a stale build -> status drift, build stale", `exit ${both.code}: ${both.out.slice(0, 300)}`);
+		"V12d: drift alongside a stale build -> exit 1, status drift, build stale", `exit ${both.code}: ${both.out.slice(0, 300)}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);

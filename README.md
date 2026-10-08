@@ -36,8 +36,8 @@ wtft until this script (or a human) moves it; `--check` reports one without
 moving it. It also reports whether the `claude-nsp-guard` shim (princess-pi-tools,
 deployed as `~/bin/claude`) wins the PATH race for `claude` — an absent guard is
 a normal host, not a failure, and a caller that runs a `claude` binary by
-absolute path bypasses the guard entirely. When drift, a config file left
-behind, or a wtft shadow wins the exit code, human mode still names a shadowed
+absolute path bypasses the guard entirely. When drift, a stale build, a config
+file left behind, or a wtft shadow wins the exit code, human mode still names a shadowed
 guard on an `Also:` line (`--json` carries it in `nspGuard`). `install-wtft --json` gives
 the whole report as one document on every exit path but one: a usage error (64)
 is reported on stderr and carries no document, because the arguments that would
@@ -46,8 +46,8 @@ rest. (`wtft` has its own unrelated `--json` — a session summary, and no 64;
 see [Usage](#usage) below.)
 
 Re-run it after every rebuild; `--check` is how you find out you needed to, and
-it is scriptable: **0** in sync, **1** drift (including `stale-build`: the
-clone's bundles are older than their sources, as after a `git pull`), **2** shadowed on PATH, **4** a
+it is scriptable: **0** in sync, **1** drift or `stale-build` (a source of the
+CLI bundles changed after the clone's last build, as after a `git pull`), **2** shadowed on PATH, **4** a
 config file still at the old path, **5** the `claude-nsp-guard` shim is on PATH
 but another `claude` comes first and nothing else is wrong, **64** bad
 usage. A plain install adds **3** for a failed build, which `--check` cannot

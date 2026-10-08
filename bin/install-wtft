@@ -19,8 +19,9 @@
 # Exit codes:
 #   0   installed, or --check found this host in sync; also --version and --help
 #   1   drift: an artifact is missing, stale, not executable, or not built;
-#       the clone's bundles are older than their sources (status
-#       "stale-build"); also an un-creatable --dir (status "no-dir")
+#       under --check, a source of the CLI bundles changed after the clone's
+#       last build (status "stale-build"); also an un-creatable --dir
+#       (status "no-dir")
 #   2   in sync but SHADOWED on PATH by a different wtft
 #   3   the build failed
 #   4   in sync, but a config file is still at the old princess-pi-tools path
@@ -38,7 +39,10 @@
 # stderr. Under --json the document goes to stdout in every case, carrying a
 # configMigration array (from, to, state: "moved"|"left"|"none") and an nspGuard
 # object (state: "ok"|"shadowed"|"absent", found, guard) alongside the
-# existing artifacts/shadow fields, and a daemons object (older: how many
+# existing artifacts/shadow fields, a build field ("current"|"stale": whether
+# any of bin/*.ts, extensions/lib/**/*.ts, docs/manifests/wtft-cmd.json,
+# build.ts, package.json or bun.lock changed after tmp/last-build, or that file
+# is absent), and a daemons object (older: how many
 # processes run a wtft-daemon bundle from this clone or the install dir and
 # started no later than it last changed; restart: "none"|"done"|"failed"; left:
 # how many are still older after the restart). Linux only: elsewhere older is 0.
@@ -281,8 +285,9 @@ finish() {
                     # Report a coexisting shadow even when drift wins the exit code.
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
                     [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
-      stale-build)  echo "❌ install-wtft: the bundles in $SRC_DIR are older than their sources ($STALE_SOURCE)" >&2
+      stale-build)  echo "❌ install-wtft: $SRC_DIR needs a rebuild: $STALE_REASON" >&2
                     echo "   Run: $(self_path)" >&2
+                    [ -z "${CONFIG_LEFT_LINES:-}" ] || { echo "   Also: a config file is still at the old path:" >&2; printf '%s' "$CONFIG_LEFT_LINES" >&2; }
                     [ "${SHADOW_JSON:-null}" = null ] || printf '   Also: PATH resolves wtft to %s — rm %s\n' "$WINNER" "$(sh_squote "$WINNER")" >&2
                     [ "${NSP_GUARD_STATE:-absent}" != shadowed ] || printf '   Also: PATH resolves claude to %s before claude-nsp-guard at %s\n' "$NSP_FOUND" "$NSP_GUARD" >&2 ;;
       config-left)  if [ "$MODE" = check ]; then
@@ -403,14 +408,16 @@ LAST_BUILD="$REPO/tmp/last-build"
 if [ -f "$LAST_BUILD" ]; then
   STALE_SOURCE="$({ find "$REPO/bin" -maxdepth 1 -name '*.ts' -newer "$LAST_BUILD" -print
     find "$REPO/extensions/lib" -name '*.ts' -newer "$LAST_BUILD" -print
-    find "$REPO/build.ts" "$REPO/package.json" "$REPO/bun.lock" -maxdepth 0 -newer "$LAST_BUILD" -print
+    find "$REPO/docs/manifests/wtft-cmd.json" "$REPO/build.ts" "$REPO/package.json" "$REPO/bun.lock" -maxdepth 0 -newer "$LAST_BUILD" -print
   } 2>/dev/null | head -n 1)"
+  STALE_REASON="$STALE_SOURCE changed after the last build"
 else
-  STALE_SOURCE="no $LAST_BUILD"
+  STALE_SOURCE="$LAST_BUILD"
+  STALE_REASON="no successful build is recorded ($LAST_BUILD is absent)"
 fi
 if [ -n "$STALE_SOURCE" ]; then
   BUILD=stale
-  [ "$STATUS" = ok ] && { STATUS=stale-build; EXIT=1; }
+  [ "$MODE" = check ] && [ "$STATUS" = ok ] && { STATUS=stale-build; EXIT=1; }
 else
   BUILD=current
 fi

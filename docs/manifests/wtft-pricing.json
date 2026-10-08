@@ -396,6 +396,54 @@
           "cacheWrite": 6.25
         }
       ]
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "rates": [
+        {
+          "condition": "",
+          "input": 1.4,
+          "output": 4.4,
+          "cacheRead": 0.26,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.15,
+          "output": 0.5,
+          "cacheRead": 0.03,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "z-ai/glm-5.3-flashx",
+      "rates": [
+        {
+          "condition": "",
+          "input": 0.37,
+          "output": 1.25,
+          "cacheRead": 0.075,
+          "cacheWrite": 0
+        }
+      ]
+    },
+    {
+      "model": "z-ai/glm-5.3-prime",
+      "rates": [
+        {
+          "condition": "",
+          "input": 2.8,
+          "output": 8.8,
+          "cacheRead": 0.56,
+          "cacheWrite": 0
+        }
+      ]
     }
   ]
 }

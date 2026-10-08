@@ -222,8 +222,6 @@ export function isFixtureDaemon(proc: { session: string | null; roots: string[] 
 	return (proc.session !== null && isUnder(proc.session, tmpDir)) || proc.roots.some(root => isUnder(root, tmpDir));
 }
 
-/** A daemon from the process table: `session` resolved against its cwd, `tmpDir` null when its
- *  environment is unreadable. */
 export interface DaemonProc { pid: number; session: string | null; harness: boolean; roots: string[]; tmpDir: string | null }
 
 function isSandboxed(proc: DaemonProc, tmpDir: string): boolean {

@@ -1463,12 +1463,10 @@ function procEnv(pid: number): Map<string, string> | null {
   }
 }
 
-/** os.tmpdir() as that process would compute it: where its leases and root pid file live. */
 function procTmpDir(env: Map<string, string>, cwd: string): string {
   return path.resolve(cwd, env.get("TMPDIR") || env.get("TMP") || env.get("TEMP") || "/tmp");
 }
 
-/** A relative path is resolved only when the cwd could be read; otherwise null. */
 function resolvedIn(cwd: string | null, file: string): string | null {
   return cwd !== null ? path.resolve(cwd, file) : path.isAbsolute(file) ? file : null;
 }

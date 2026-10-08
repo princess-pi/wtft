@@ -667,7 +667,7 @@ function recordCli(args: string[]): { status: number | null; out: string; err: s
 
 	const unknown = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechansim", "typo"]);
 	check(unknown.status === 2 && /unknown argument --mechansim/.test(unknown.err),
-		"D8b a typo'd flag NAMES itself instead of blaming a missing one (#91)");
+		"D8b a typo'd flag NAMES itself instead of blaming a missing one");
 	const noValue = recordCli(["--parent", PARENT, "--child", CLOSER_CHILD, "--mechanism"]);
 	check(noValue.status === 2 && /--mechanism needs a value/.test(noValue.err),
 		"D8c a flag with no value says which flag");

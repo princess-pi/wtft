@@ -179,7 +179,7 @@ no model id. As of `@4` a consumer can size that divergence itself:
 `total.costUsd + total.untaggedCostUsd` equals the chart's total
 ([#119](https://github.com/princess-pi/wtft/issues/119)).
 
-`--json` suppresses the rendering flags. It does **not** apply to the commands
+`--json` suppresses the well-formed rendering flags. It does **not** apply to the commands
 that run instead of a report — `--help`/`--why`/`--version`, `--watch`, and
 `--list`/`--cleanup`/`--restart`/`--stop` keep their own output, and `-p` is
 still refused with exit 1. With an interactive terminal, `--json` no longer
@@ -221,10 +221,14 @@ retired in `@4`.
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
   `--tokens` and `--json`, the runs that read the spawn tree.
-- **2** / **3** — `wtft spawn-record` only (see below): the call was wrong, or
-  the ledger could not be written. The report path never returns either, and
-  `spawn-record` also returns **0** — on a successful append, and on `--help`,
-  which appends nothing.
+- **2** — the call was wrong, and stdout carries nothing: an unknown flag, a bare word, a
+  flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
+  cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr says why.
+  A refused call exits 2 even with `--help`, `--json` or `-p` in it.
+  `wtft spawn-record` exits 2 on a bad call too (see below).
+- **3** — `wtft spawn-record` only (see below): the ledger could not be
+  written. `spawn-record` also returns **0** — on a successful append, and on
+  `--help`, which appends nothing.
 - **10** — session not specified precisely enough
   ([#89](https://github.com/princess-pi/wtft/issues/89)): no interactive
   terminal, and either `-s <substring>` matched zero or several sessions, or no
@@ -271,7 +275,7 @@ each records only when the parent is a Claude Code session
 
 | Mechanism | Writer | Child |
 |---|---|---|
-| `shell` | the `~/bin/claude` PATH shim (`claude-nsp-guard`) | any new `claude` session a session's shell starts |
+| `shell` | `claude-nsp-guard`, deployed as `~/bin/claude` | any new `claude` session a session's shell starts |
 | `herdr`, `tmux` | `agent-new start` | a claude child on that backend |
 | `pr-review` | `pr-review` | each lens, cluster and verify child |
 
@@ -295,7 +299,7 @@ outside the tree rather than unattributed. A spawner is meant to ignore both: th
 then shows up only in `spawned.unrecorded[]`, if it matches a tier there.
 
 `spawn-record` is positional: it must be the **first** argument, so
-`wtft --json spawn-record …` is a report run, not a recording.
+`wtft --json spawn-record …` is refused with exit 2, not recorded.
 
 `wtft --json` then reports the lineage under `spawned` — every edge with its
 provenance, every descendant counted exactly once (with the subagent and

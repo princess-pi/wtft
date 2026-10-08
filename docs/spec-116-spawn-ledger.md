@@ -86,15 +86,14 @@ wtft spawn-record --parent <uuid> --child <uuid> --mechanism <name>
 wtft spawn-record --help
 ```
 
-`--flag value` and `--flag=value` both work. An **unknown** flag is an error, not a shrug — the
-report path silently ignores what it does not recognise (#91), and a typo'd `--mechansim` would
+`--flag value` and `--flag=value` both work. An **unknown** flag is an error, not a shrug — a typo'd `--mechansim` would
 otherwise surface as "`--mechanism` is required", blaming the flag the caller did pass.
 
 A positional subcommand: `argv[2]` exactly, dispatched instead of `main()`, so no session is
 loaded, no daemon is started and no session file is read. What sits at module scope still runs
 first, among it the config load and the report's own argument parse. And because the
-test is positional, `wtft --json spawn-record …` is **not** the subcommand — it is a report run
-with some flags the report parser ignores.
+test is positional, `wtft --json spawn-record …` is **not** the subcommand — the report parser
+refuses it, exit 2 (`docs/spec-91-strict-cli-args.md`).
 
 | Exit | Meaning |
 |---|---|
@@ -368,8 +367,8 @@ otherwise (spec-230).
 ## Not in this change
 
 - **The spawner side.** Lives in `princess-pi-tools`, and records only when the parent is a
-  Claude Code session (`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH: the `~/bin/claude`
-  PATH shim writes mechanism `shell` and `agent-new` writes `herdr` or `tmux`
+  Claude Code session (`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH: `claude-nsp-guard`,
+  deployed as `~/bin/claude`, writes mechanism `shell` and `agent-new` writes `herdr` or `tmux`
   (https://github.com/duppypro/princess-pi-tools/pull/1155); `pr-review` writes `pr-review` for
   each lens, cluster and verify child (https://github.com/duppypro/princess-pi-tools/pull/1154).
   Still unrecorded: a raw `herdr agent start` outside `agent-new`, Pi and Codex children, and any

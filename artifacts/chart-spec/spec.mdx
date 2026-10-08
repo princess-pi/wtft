@@ -190,7 +190,7 @@ $ wtft -b --tokens --tz UTC -i 1h -l 10
 ## Outside the picker
 
 - The CLI report prints the session path line and the chart, and more: the token summary when the last of `--tokens`, `--by-model`, `--cost` and `-C` is a token flag (so `--cost --tokens` prints it under a cost chart, and a token chart from the config prints none), the histogram under `--other` or `-o`, the provisional warning, and warnings on stderr. The chart picker prints the session path line and the chart.
-- `--width` is read and ignored by the CLI. The CLI takes its width from the terminal, minus `--pad` on each side (1 by default, at most half the terminal less one). The chart picker's terminal slider, 40 to 240, is the terminal's width, before the pad.
+- The CLI takes its width from the terminal, minus `--pad` on each side (1 by default, at most half the terminal less one). The chart picker's terminal slider, 40 to 240, is the terminal's width, before the pad.
 - The Pi widget builds the same chart from `extensions/wtft.ts`, with its own width (`-w`, else the terminal's width less 2; at most 240), which the terminal's width then caps, no padding rows, and a limit fitted under Pi's 10-line cap by `docs/spec-269-widget-fit.md`.
 
 ## Settled

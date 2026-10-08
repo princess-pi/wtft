@@ -21,4 +21,4 @@ removed, after checking that node cannot read it:
 - **V1** `--version` exits 0 and prints the version.
 - **V2** `--json` with no `--dir` and no sessions: no `uv_cwd` error, and stderr names the home
   directory and `--dir`.
-- **V3** `--json --dir <project>` reports that project's session, and stderr has no notice.
+- **V3** `--json --dir <project>` discovers that project's session, and stderr has no notice.

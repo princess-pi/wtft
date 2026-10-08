@@ -237,7 +237,7 @@
     },
     {
       "flags": "--tz, --timezone <zone>",
-      "desc": "Display timezone, an IANA name (e.g. America/New_York, Europe/London, Asia/Tokyo). Default: the wtft config's timezone; else system local in the CLI, and America/Los_Angeles in the Pi widget. --tz=<value> works too."
+      "desc": "Display timezone, an IANA name (e.g. America/New_York, Europe/London, Asia/Tokyo). Default: the wtft config's timezone; else system local in the CLI, and America/Los_Angeles in the Pi widget. A zone the runtime does not know is refused (exit 2); a value starting with - goes in the = spelling. --tz=<value> works too."
     },
     {
       "flags": "-c, --cumulative, -b, --bucket",

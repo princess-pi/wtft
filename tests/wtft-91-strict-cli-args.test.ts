@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { trackSandbox } from "./lib/sandbox.ts";
+import { whyDemo } from "../artifacts/renderer/why-demos.ts";
 
 const CLI_BIN = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 
@@ -180,5 +181,12 @@ describe("X the Pi /wtft command shows a refused call as an error and does nothi
 		assert.match(notes[0][0], /--jsonn/);
 		assert.deepEqual(widgets, []);
 		assert.deepEqual(fs.readdirSync(xdg), [], "no config written");
+	});
+});
+
+describe("D a --why demo command the CLI would refuse fails the artifacts build", () => {
+	it("D1 whyDemo throws, naming the argument", () => {
+		assert.ok(whyDemo("-i 4h").length > 0, "fixture precondition: a readable command draws");
+		assert.throws(() => whyDemo("-i 4hh"), /4hh/);
 	});
 });

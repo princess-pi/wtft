@@ -45,8 +45,9 @@ it. Each caller decides what a refusal does.
 
 **Bare words.** One gives a word meaning today: `spawn-record`, and only as the CLI's first
 argument, where `bin/wtft.ts` dispatches it to its own parser instead of the report path. No
-caller in princess-pi-tools passes any other bare word: its callers run `wtft spawn-record …`
-(`agent-new`, `claude-nsp-guard`, `pr-review`). So every other bare word is refused, and so is
+caller in princess-pi-tools passes any other bare word: a search of its tracked files for `wtft`
+invocations finds only `wtft spawn-record …` (`agent-new`, `claude-nsp-guard`, `pr-review`), and
+none of those uses a spelling this change refuses. So every other bare word is refused, and so is
 `spawn-record` anywhere but first (`wtft --json spawn-record` was a report run; it is now a refusal).
 
 **The CLI** (`bin/wtft.ts`): a refused call prints the sentence and a pointer to `--help` on stderr,
@@ -62,7 +63,9 @@ does nothing else: no widget change, no config write, no render.
 
 **The chart picker page** (`artifacts/chart-spec/picker.html`) and `renderReport` ignore
 `usageError`. The page parses the command line on every keystroke, so a half-typed `-i` sets it
-until its value arrives, and the page draws what the rest of the line says meanwhile.
+until its value arrives, and the page draws what the rest of the line says meanwhile. `whyDemo`
+(`artifacts/renderer/why-demos.ts`) throws on it instead, so a `--why` demo command the CLI would
+refuse fails `bun run artifacts`.
 
 **Not changed:** contradictory flags (`--hide --show`, `--cost --tokens`) are still read as before;
 a well-formed flag a caller does not use is still accepted there and ignored.
@@ -78,6 +81,7 @@ a well-formed flag a caller does not use is still accepted there and ignored.
   `wtft --stop`, `wtft --stop --json`, `wtft foo` and `wtft --help --bogus` each exit 2 with stdout
   empty and the offending token on stderr, and write no daemon log, lease or pid file.
   `wtft --dir rel --bogus` from a deleted working directory exits 2 with one line on stderr.
+- **D** `whyDemo("-i 4hh")` throws, naming `4hh`.
 - **X** the Pi `/wtft` handler on a recording context: `--jsonn` notifies once at `error` naming
   it, and sets no widget and writes no config.
 

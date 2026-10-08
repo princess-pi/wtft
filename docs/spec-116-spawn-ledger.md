@@ -367,8 +367,8 @@ otherwise (spec-230).
 ## Not in this change
 
 - **The spawner side.** Lives in `princess-pi-tools`, and records only when the parent is a
-  Claude Code session (`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH: the `~/bin/claude`
-  PATH shim writes mechanism `shell` and `agent-new` writes `herdr` or `tmux`
+  Claude Code session (`CLAUDE_CODE_SESSION_ID` set) and `wtft` is on PATH: `claude-nsp-guard`,
+  deployed as `~/bin/claude`, writes mechanism `shell` and `agent-new` writes `herdr` or `tmux`
   (https://github.com/duppypro/princess-pi-tools/pull/1155); `pr-review` writes `pr-review` for
   each lens, cluster and verify child (https://github.com/duppypro/princess-pi-tools/pull/1154).
   Still unrecorded: a raw `herdr agent start` outside `agent-new`, Pi and Codex children, and any

@@ -1176,6 +1176,8 @@ console.log("\n12. --check reports a stale build: a source changed after the clo
 	const stamp = path.join(clone, "tmp", "last-build");
 	const now = Date.now() / 1000;
 	for (const f of sources) { fs.writeFileSync(path.join(clone, f), f === "package.json" ? JSON.stringify({ scripts: { build: "true" } }) : ""); fs.utimesSync(path.join(clone, f), now - 100, now - 100); }
+	fs.writeFileSync(path.join(clone, "extensions/lib/harness/gone.ts"), "");
+	for (const d of ["extensions/lib/harness/gone.ts", "extensions/lib/harness", "extensions/lib"]) fs.utimesSync(path.join(clone, d), now - 100, now - 100);
 	fs.writeFileSync(stamp, "");
 	fs.utimesSync(stamp, now - 50, now - 50);
 	const checkJson = () => {
@@ -1201,6 +1203,15 @@ console.log("\n12. --check reports a stale build: a source changed after the clo
 			`exit ${r.code}: ${r.out.slice(0, 300)} | human ${human.code}: ${human.err.slice(0, 300)}`);
 		fs.utimesSync(path.join(clone, f), now - 100, now - 100);
 	}
+
+	fs.unlinkSync(path.join(clone, "extensions/lib/harness/gone.ts"));
+	const deleted = checkJson();
+	const deletedHuman = run(["--check", "--dir", dest], [], {}, installer);
+	check(deleted.code === 1 && deleted.doc?.status === "stale-build" && deleted.doc?.build === "stale"
+		&& deletedHuman.err.includes(path.join(clone, "extensions/lib/harness")),
+		"V12f: a source deleted after tmp/last-build -> exit 1, status stale-build, stderr names its directory",
+		`exit ${deleted.code}: ${deleted.out.slice(0, 300)} | ${deletedHuman.err.slice(0, 300)}`);
+	fs.utimesSync(path.join(clone, "extensions/lib/harness"), now - 100, now - 100);
 
 	fs.utimesSync(path.join(clone, "bin", "wtft.ts"), now + 1000, now + 1000);
 	const installRun = run(["--json", "--dir", dest], [], {}, installer);

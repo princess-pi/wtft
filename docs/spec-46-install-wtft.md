@@ -228,8 +228,8 @@ now falls through the same evaluation as every other exit.
   `ok`. Full reasoning, the sentinel, and the scan: `docs/spec-194-p9-housekeeping.md` § H3.
 
 - **`build` is present on every exit path, install or check.** It is `stale` when
-  `tmp/last-build` is absent, or when any of `bin/*.ts`, `extensions/lib/**/*.ts`,
-  `docs/manifests/wtft-cmd.json`, `build.ts`, `package.json` or `bun.lock` has an mtime later than
+  `tmp/last-build` is absent, or when any of `bin/*.ts`, `extensions/lib/**/*.ts`, a directory
+  under `extensions/lib` (so a deleted source counts), `docs/manifests/wtft-cmd.json`, `build.ts`, `package.json` or `bun.lock` has an mtime later than
   it; otherwise `current`. The bundled dependencies under `node_modules` are not checked. A `git pull` that changes one of those files gives it the pull's time, so
   `--check` after it reads `stale` even though the installed copy matches the clone's bundle byte
   for byte. `status: "stale-build"` (exit `1`) is reported only under `--check`, when `build` is
@@ -393,7 +393,7 @@ probe.
 | **V8** | hostile paths | an apostrophe, a newline, and a destination symlink — the review bot's four findings, each reproduced before it was adopted |
 | **V9** | config migration (#156), driven directly through the CLI (V9a–V9k) | install moves every legacy file present to its new name, byte-identical, and deletes the old one; a second run (or `--check`) reports `none` for all; a file already at the new path is `left`, exit `4`, neither copy touched — including one that appears between the check and the move (V9i, a `cp` shim on PATH creates it at that instant); `--check` reports the same leftover and writes nothing; a new path that is the old file under another name is `left` and never unlinked, while an old-name symlink or hardlink migrates (V9j, V9k). (The `config-left` ESCALATION LOGIC ITSELF is mutation-proofed as **M4**, checked under **V7**, not here — V9 exercises the feature end-to-end and never invokes `run-mutants.sh`.) |
 | **V10** | the `claude-nsp-guard` shim (#30, spec-194 § H3) | the guard first on `PATH` → exit `0`, `nspGuard.state: "ok"`; a decoy `claude` before the guard → exit `5`, `status: "nsp-guard-shadowed"`, both paths named; no `claude` anywhere → exit `0`, `state: "absent"`; a file that only mentions the sentinel mid-line is not a guard; a coexisting wtft shadow outranks the guard check, which still reports `shadowed` in the document and on an `Also:` line; human mode prints the remedy on stderr; a guard whose first 160 lines pass a pipe buffer is still recognised (V10g) |
-| **V12** | a stale build | a copy of the installer in a scratch clone whose bundles match the install dir: no source newer than `tmp/last-build` → `--check` exits `0`, `build: "current"`; each counted source newer in turn → exit `1`, `status: "stale-build"`, `build: "stale"`, all four artifacts `ok`, stderr names that source; install mode with a source newer than `tmp/last-build` → exit `0`, `status: "ok"`, `build: "stale"`; no `tmp/last-build` → `stale-build`; drift alongside a stale build → exit `1`, `status: "drift"`, `build: "stale"` |
+| **V12** | a stale build | a copy of the installer in a scratch clone whose bundles match the install dir: no source newer than `tmp/last-build` → `--check` exits `0`, `build: "current"`; each counted source newer in turn → exit `1`, `status: "stale-build"`, `build: "stale"`, all four artifacts `ok`, stderr names that source; a source deleted after it → `stale-build`, stderr names its directory; install mode with a source newer than `tmp/last-build` → exit `0`, `status: "ok"`, `build: "stale"`; no `tmp/last-build` → `stale-build`; drift alongside a stale build → exit `1`, `status: "drift"`, `build: "stale"` |
 
 `0755` is what install *writes* and what V2 asserts; the **tool's** check is any execute
 bit, so a hand-`chmod`ed `0700` copy still reports `ok`.

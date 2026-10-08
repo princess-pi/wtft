@@ -40,9 +40,9 @@
 # configMigration array (from, to, state: "moved"|"left"|"none") and an nspGuard
 # object (state: "ok"|"shadowed"|"absent", found, guard) alongside the
 # existing artifacts/shadow fields, a build field ("current"|"stale": whether
-# any of bin/*.ts, extensions/lib/**/*.ts, docs/manifests/wtft-cmd.json,
-# build.ts, package.json or bun.lock changed after tmp/last-build, or that file
-# is absent), and a daemons object (older: how many
+# any of bin/*.ts, extensions/lib/**/*.ts or a directory under extensions/lib,
+# docs/manifests/wtft-cmd.json, build.ts, package.json or bun.lock changed after
+# tmp/last-build, or that file is absent), and a daemons object (older: how many
 # processes run a wtft-daemon bundle from this clone or the install dir and
 # started no later than it last changed; restart: "none"|"done"|"failed"; left:
 # how many are still older after the restart). Linux only: elsewhere older is 0.
@@ -407,7 +407,7 @@ done
 LAST_BUILD="$REPO/tmp/last-build"
 if [ -f "$LAST_BUILD" ]; then
   STALE_SOURCE="$({ find "$REPO/bin" -maxdepth 1 -name '*.ts' -newer "$LAST_BUILD" -print
-    find "$REPO/extensions/lib" -name '*.ts' -newer "$LAST_BUILD" -print
+    find "$REPO/extensions/lib" \( -type d -o -name '*.ts' \) -newer "$LAST_BUILD" -print
     find "$REPO/docs/manifests/wtft-cmd.json" "$REPO/build.ts" "$REPO/package.json" "$REPO/bun.lock" -maxdepth 0 -newer "$LAST_BUILD" -print
   } 2>/dev/null | head -n 1)"
   STALE_REASON="$STALE_SOURCE changed after the last build"

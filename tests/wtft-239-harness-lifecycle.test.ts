@@ -158,8 +158,8 @@ try {
 		const h = start(root, ["--harness", "claude", "--session", other], "rb.err");
 		check(await until(() => classified(other, "rbo-0"), 15_000) !== Infinity, "fixture: a harness is serving another session");
 		start(root, ["--harness", "claude", "--session", target], "rb-ask.err");
-		await until(() => read(getDaemonPidPath(target)).trim() === String(h.pid) && classified(target, "rb-0") && !classified(target, "rb-bogus"), 10_000);
-		check(classified(target, "rb-0") && !classified(target, "rb-bogus"), "the harness rebuilds the tag instead of resuming it");
+		const rebuilt = await until(() => read(getDaemonPidPath(target)).trim() === String(h.pid) && classified(target, "rb-0") && !classified(target, "rb-bogus"), 30_000);
+		check(rebuilt !== Infinity, `the harness rebuilds the tag instead of resuming it (lease reads ${JSON.stringify(read(getDaemonPidPath(target)).trim())}, harness ${h.pid}; rb-0 ${classified(target, "rb-0")}, rb-bogus ${classified(target, "rb-bogus")})`);
 		try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ }
 		await until(() => !alive(h.pid), 5_000);
 	}

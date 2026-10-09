@@ -100,7 +100,8 @@ console.log("\nPART R — replaceLease");
 	const began = Date.now();
 	check(replaceLease(f, "rebuild", ME, ME) === true && leaseHolder(f) === "rebuild" && Date.now() - began < 1000, "R7 a lock older than the wait is taken over, though its owner lives");
 	fs.writeFileSync(`${f}.lock`, "999999999");
-	check(replaceLease(f, "1", ME, "rebuild") === true && leaseHolder(f) === "1", "R8 a lock naming a dead owner does not hold off a conditional replace");
+	const deadBegan = Date.now();
+	check(replaceLease(f, "1", ME, "rebuild") === true && leaseHolder(f) === "1" && Date.now() - deadBegan < 1000, "R8 a lock naming a dead owner does not hold off a conditional replace");
 	check(!fs.existsSync(`${f}.lock`), "R9 a conditional replace leaves no lock behind");
 }
 {
@@ -110,7 +111,7 @@ console.log("\nPART R — replaceLease");
 	const began = Date.now();
 	const replaced = replaceLease(f, "rebuild", ME, ME);
 	const waited = Date.now() - began;
-	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300, `R10 a conditional replace waits while a live owner holds the lock, then lands (waited ${waited} ms)`);
+	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && waited < 2000, `R10 a conditional replace waits while a live owner holds the lock, then lands (waited ${waited} ms)`);
 }
 {
 	const f = fresh(ME);
@@ -119,7 +120,7 @@ console.log("\nPART R — replaceLease");
 	const began = Date.now();
 	const replaced = replaceLease(f, "rebuild", ME);
 	const waited = Date.now() - began;
-	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && !fs.existsSync(`${f}.lock`), `R11 an unconditional replace takes its turn under the lock too (waited ${waited} ms)`);
+	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && waited < 2000 && !fs.existsSync(`${f}.lock`), `R11 an unconditional replace takes its turn under the lock too (waited ${waited} ms)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

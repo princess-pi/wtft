@@ -236,6 +236,36 @@ describe("C4 -F", () => {
 		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "rebuild");
 		assert.strictEqual(leaseHolder(f.lease), "rebuild");
 	});
+	it("a lease a per-session daemon took while -F stopped the holder is left to it, busy", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(706, ["--session", f.file]);
+		t.daemon(705, ["--session", f.file]);
+		fs.writeFileSync(f.lease, "706");
+		restore = useProcessTable({ ...t, signal(pid, sig) {
+			const sent = t.signal(pid, sig);
+			if (pid === 706 && sig === "SIGTERM") fs.writeFileSync(f.lease, "705");
+			return sent;
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "busy");
+		assert.strictEqual(leaseHolder(f.lease), "705");
+	});
+	it("a harness lease a per-session daemon took before the rebuild token landed is left to it, busy", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(707, ["--harness", "claude"]);
+		t.daemon(708, ["--session", f.file]);
+		fs.writeFileSync(f.lease, "707");
+		let moved = false;
+		restore = useProcessTable({ ...t, inspectable() {
+			if (!moved) { moved = true; fs.writeFileSync(f.lease, "708"); }
+			return t.inspectable();
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "busy");
+		assert.ok(moved);
+		assert.strictEqual(leaseHolder(f.lease), "708");
+		assert.deepStrictEqual(t.signals, []);
+	});
 	it("a harness gets the rebuild token; a daemon is stopped; a non-daemon is not signalled", () => {
 		const t = fakeProcessTable();
 		restore = useProcessTable(t);

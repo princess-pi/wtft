@@ -451,7 +451,7 @@ mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, r
 		check(fs.existsSync(fired), `fixture precondition: -F read the start's claim inside its hand-off (-F read ${JSON.stringify(read(path.join(root, "force-reads")))})`);
 		check(starter.status === 0, `fixture precondition: the start handed the target to the harness and exited 0 (exit ${starter.status}${starter.error ? `, ${starter.error.message}` : ""}: ${starter.stderr.trim()})`);
 		check(await until(() => read(forceExit).trim() !== "", 20_000) !== Infinity, "fixture: -F finished");
-		check(read(forceExit).trim() !== "" && read(forceExit).trim() !== "1", `-F does not fail (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);
+		check(["0", "9"].includes(read(forceExit).trim()), `-F reports, plain or provisional (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);
 		const costOf = (out: string) => { try { return JSON.parse(out.slice(out.indexOf("{")))?.total?.costUsd ?? NaN; } catch { return NaN; } };
 		const oneTurn = costOf(spawnSync("node", [cli, "--json", "-s", other], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
 		check(oneTurn > 0 && Math.abs(costOf(read(forceOut)) - oneTurn) < 1e-9, `-F reports the transcript's one row and not the row it does not hold ($${costOf(read(forceOut))}, one row $${oneTurn})`);

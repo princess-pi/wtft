@@ -547,14 +547,15 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	const kind = verifiedKind(leasePid(initial));
 	if (kind === "harness" && processTable().inspectable()) {
-		const version = harnessTaggerVersion(sessionPath, leasePid(initial));
+		const version = harnessTaggerVersion(leasePid(initial));
 		if (taggerIsOlder(version, WTFT_TAGGER_VERSION)) return "older-harness";
+		if (!deleteTags(sessionPath, version)) return "undeletable";
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
 		} catch {
 			return "unwritable";
 		}
-		return deleteTags(sessionPath, version) ? "rebuild" : "undeletable";
+		return "rebuild";
 	}
 	if (kind === "unverified") return "busy";
 	// Its shutdown flushes into the tag, so the tag goes only once it has
@@ -606,36 +607,24 @@ function pathIsUnder(file: string, root: string): boolean {
 	return resolvedFile === resolvedRoot || resolvedFile.startsWith(resolvedRoot + path.sep);
 }
 
-/** The pid file a harness of `which` serving `root` claims. */
-export function harnessPidFileFor(which: string, root: string): string {
-	const hash = createHash("sha256").update(root).digest("hex").slice(0, 12);
-	return path.join(os.tmpdir(), `wtft-harness-${which}-${hash}.pid`);
-}
-
-/** The file holding the tagger version of harness `pid` under `pidFile`. */
-export function harnessVersionFile(pidFile: string, pid: number): string {
-	return `${pidFile}.${pid}.version`;
-}
-
-/** The tagger version harness `pid` serving `sessionPath` runs, "" when it cannot be read. */
-export function harnessTaggerVersion(sessionPath: string, pid: number, env: NodeJS.ProcessEnv = process.env): string {
-	const [flag, which] = daemonLaunchArgs(sessionPath, env);
-	if (flag !== "--harness") return "";
-	const root = path.resolve(harnessRootDir(which as "claude" | "pi", env));
-	try { return fs.readFileSync(harnessVersionFile(harnessPidFileFor(which, root), pid), "utf8").trim(); } catch { return ""; }
+/** The tagger version live harness `pid` wrote beside its root pid file at its start, "" when
+ *  none can be read. */
+export function harnessTaggerVersion(pid: number): string {
+	const suffix = `.pid.${pid}.version`;
+	let names: string[] = [];
+	try { names = fs.readdirSync(os.tmpdir()); } catch { return ""; }
+	const file = names.find(name => name.startsWith("wtft-harness-") && name.endsWith(suffix));
+	if (!file) return "";
+	try { return fs.readFileSync(path.join(os.tmpdir(), file), "utf8").trim(); } catch { return ""; }
 }
 
 /** A session under a harness root is served by that root's one daemon. */
 export function daemonLaunchArgs(sessionPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
-	for (const which of ["claude", "pi"] as const) {
-		if (pathIsUnder(sessionPath, harnessRootDir(which, env))) return ["--harness", which, "--session", sessionPath];
-	}
+	const claude = projectsDir(env);
+	const pi = env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
+	if (pathIsUnder(sessionPath, claude)) return ["--harness", "claude", "--session", sessionPath];
+	if (pathIsUnder(sessionPath, pi)) return ["--harness", "pi", "--session", sessionPath];
 	return ["--session", sessionPath];
-}
-
-/** The session tree a harness of `which` serves. */
-export function harnessRootDir(which: "claude" | "pi", env: NodeJS.ProcessEnv = process.env): string {
-	return which === "claude" ? projectsDir(env) : env.WTFT_PI_SESSIONS_DIR || path.join(os.homedir(), ".pi", "agent", "sessions");
 }
 
 export function resolveMovedSession(sessionPath: string): string | null {

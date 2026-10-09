@@ -201,7 +201,7 @@ retired in `@4`.
   object.
 - **1** — error: no session found or selected, an invalid path, a daemon that
   could not be spawned or that died before producing data, a refused flag
-  (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a harness log parser daemon of an older build, a daemon that did not
+  (`--pager`), `--stop` unable to drop a session, `-F` unable to rebuild (a harness log parser daemon of an older build or an unreadable version, a daemon that did not
   stop, a holder that could not be verified as a daemon, a lease another daemon claimed meanwhile, a lease that could not be read, a rebuild lease that
   could not be written, a daemon that could not be signalled, a lease or tag file that could not be deleted, a daemon that could not be
   started, or a harness that did not take the session up within

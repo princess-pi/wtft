@@ -67,7 +67,7 @@ Two kinds of sub-agent transcript exist. They are DISCOVERED differently and REA
 
 | Kind | Discovery | Read | Per-file state |
 |---|---|---|---|
-| Task/agent/workflow sub-agents (#82) | `discoverSubagentSessionFiles(sessionPath)`, re-run every poll | `syncSubagentTranscript(file)` | `discoveredSubagentFiles: Map<transcriptPath, SubagentFileState>` (a `TaggerState` field, `extensions/lib/session-tagger.ts`) |
+| Task/agent/workflow sub-agents (#82) | `discoverSubagentSessionFiles` (`docs/spec-wtft-parser.md`), re-run every poll | `syncSubagentTranscript(file)` | `discoveredSubagentFiles: Map<transcriptPath, SubagentFileState>` (a `TaggerState` field, `extensions/lib/session-tagger.ts`) |
 | `claude -p` bash sub-agents (#138) | `discoverClaudeSubAgentFilesForTurn(commands, ts, ownCwd)` — one `discoverClaudeSubAgentSessionFiles(cwd, ts)` per spawning segment, with the session's own cwd standing in for a spawn that no `cd` precedes and whose own segment runs `claude` itself, never for a launcher that only names it in a flag (#107) — re-run every poll; once a file matches, until the bash turn's discovery window has closed. A turn that searched and found nothing, and one with nothing to search, both wait out the window and are then dropped (#107). An unreadable directory stays pending. Each matched PATH is then kept | `syncSubagentTranscript(file)` — the same function | `discoveredClaudeFiles: Set<path>` for the registry, plus the same `discoveredSubagentFiles` entry as any other transcript |
 
 ### Where the transcripts are on disk
@@ -286,21 +286,9 @@ no longer swallows a nested transcript whose read fails after discovery into a s
 propagates to the same handler, so the SUBAGENT transcript's rows are not written that
 poll and the sweep is withheld while any part of the read it depends on is unreadable.
 (The MAIN parent's rows are unaffected: `flushPending()` runs before `scanForSubAgents()`
-in the same poll, and the subagent reader never parses the parent session.) Discovery skips a candidate it cannot read: a `claude -p` candidate in
-`~/.claude/projects/<slug>/` or a Pi sibling whose head read fails is skipped the same as one that
-does not match, with no warning and no report, so the marker is not withheld over it. A sibling
-whose header cannot parse is skipped the same way. The dir-level failures stay loud — an unreadable
-subagents directory (`walkSubagentDir`, top-level OR nested: the recursion sits outside
-the per-entry stat catch since round 5), an unreadable `~/.claude/projects/<slug>/`
-(its existence gate was `existsSync` until round 6, which read a stat error — EACCES on
-an ancestor, ENOTDIR, ELOOP — as "absent" and stamped the marker over the missing
-subtree; the gate is now `statSync`, ENOENT absent, every other error a dir-level
-throw), and an unreadable Pi sibling sessionDir warn once per dir per process and
-throw; the daemon routes those into `pollHadFailure`, the TUI/CLI degrade to the
-warning. `walkSubagentDir`'s stat failure carves out ENOENT (deleted between readdir
-and stat) and ELOOP, which hold no cost to miss and stay silent; every other stat error
-warns once per file per process. Both discovery halves skip an entry whose read reports
-EISDIR the same way — a directory, or a symlink to one, named `*.jsonl` holds no cost. Which read
+in the same poll, and the subagent reader never parses the parent session.) What discovery
+skips silently, what it reports, and what it throws: `docs/spec-wtft-parser.md`. The daemon
+routes a report or a throw into `pollHadFailure`. Which read
 failures reach the nested read, honestly: (1) the transient discovery→parse race (a
 file that vanished, or became unreadable, between the two reads); (2) a statically
 unreadable Task/agent transcript — `walkSubagentDir` discovers by name and stat only,
@@ -340,7 +328,7 @@ CLI consumes it, but a reader tracking the code should not look for it at the
 |---|---|---|
 | `stale-version` | yes | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
 | `unswept` | yes | a current-version tag holding classified data but no `_meta.swept` |
-| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: a subagent transcript could not be read (one file, or a whole directory of them), so the `--tokens` table is missing a subtree's uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
+| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: a session file could not be read (a transcript, or a whole directory of them), so the `--tokens` table may be missing uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
 
 **There is no scan window.** The first version scanned only the last 8KB, justified as
 "matching `readLastMetaOffset`" — a justification that does not survive contact, since
@@ -388,8 +376,8 @@ evidence, and a permanent unreadability also blocks the daemon's rebuild, so the
 tag-derived reasons cannot be trusted to point at an action that ends the loop.
 The TUI's degrade (main-interactions-only) has no exit surface — its reader is the
 interactive widget, and the widget appends a yellow warning line, "some transcripts
-could not be counted — total is provisional", whenever discovery reports an
-unreadable transcript OR the load drops one (#165): the extension's stderr is not
+could not be counted — total is provisional", whenever discovery reports or throws a
+failure, or the load drops a transcript (#165): the extension's stderr is not
 a user surface, so the parser's latched stderr warning alone left the degrade
 invisible. The prose line stays the whole surface — it appears on every render
 until the transcripts count again, and the widget has no exit code to set.

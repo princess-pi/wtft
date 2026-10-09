@@ -5,7 +5,8 @@
 [#148](https://github.com/princess-pi/wtft/issues/148) ·
 **Tests:** `tests/wtft-146-149-subagent-discovery.test.ts`
 
-Three gaps in `discoverSubagentSessionFiles` and its meta reader, each with its own closer.
+Three gaps in `discoverSubagentSessionFiles` and its meta reader, each with its own closer. What
+discovery lists, skips, reports and throws today: `docs/spec-wtft-parser.md`.
 
 ## #146 — an unreadable `.meta.json` read as an absent one
 
@@ -27,7 +28,7 @@ carries no notice.
 
 ## #147 — discovery read whole transcripts to look at line 1
 
-Both discovery halves and the `claude -p` scan read a file's first lines through
+Where discovery reads a file, it reads only its first lines, through
 `readHeadLines(file, count)`: chunked `openSync`/`readSync`, stopping at the count. A session
 transcript can be hundreds of MB, and discovery runs on every daemon poll and every widget
 refresh.
@@ -48,10 +49,6 @@ foreign tree, so `subagents/all -> /` would walk the filesystem synchronously be
 returned. A symlinked FILE still counts: a symlink to a transcript is a transcript. A stat failure on
 either takes the same report path as any other entry — ENOENT and ELOOP hold no cost to miss,
 every other errno is reported through `unreadable` — so none is swallowed by the symlink rule.
-
-A directory named `*.jsonl`, or a symlink to one, holds no transcript. `isDirectory()` is false
-for the symlink, so both halves skip on the read's EISDIR instead: reporting it would brand the
-session unreadable and make the daemon withhold its swept marker on every poll from then on.
 
 **Closer:** a transcript nested eight levels deep is listed and the report stays settled; a
 `loop -> .` symlink lists its child once; a sibling symlinked to a walked child is listed once;

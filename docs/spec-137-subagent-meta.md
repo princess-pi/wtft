@@ -95,8 +95,8 @@ meta would put label lookup inside the function whose job is deciding what count
 unreadable subagent directory — two unrelated failure modes in one signature. A separate reader
 any caller may use keeps the interface small and leaves that boundary exactly where #457 left it.
 
-**A missing or broken meta is never an error.** It returns `null` and the caller renders what it
-renders today. This is an **undocumented harness file**: it may vanish, gain fields, or change
+**A missing or broken meta reads as `null`, and never throws.** The caller renders what it
+renders today; one that exists and cannot be read also gets a notice (`docs/spec-wtft-parser.md` §4). This is an **undocumented harness file**: it may vanish, gain fields, or change
 names in any release, and wtft must degrade to today's behaviour rather than fail. Only **two** fields — `agentType` and `spawnDepth` — are required for a meta to be considered
 valid; anything else missing is `undefined`, never a rejection. The first cut required all
 four, which would have silently declined the 48 workflow children that carry no `description`

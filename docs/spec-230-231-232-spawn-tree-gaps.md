@@ -21,8 +21,7 @@ Every part is parsed with the child and all its subagent transcripts as `doNotFo
 folds another. The parts are parsed in order, and a `claude -p` session a kept part folds on a
 deduplicated, model-tagged turn (the folds `spawned.total` counts) is added to `doNotFold` for the
 parts after it, so no session lands in the edge total twice. Which files discovery lists, and which it skips without reporting, is
-`discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
-transcripts are on disk*); this change prices what it
+`discoverSubagentSessionFiles`'s contract (`docs/spec-wtft-parser.md`); this change prices what it
 lists.
 
 **Each subagent session is billed once.** A subagent transcript's id is its file name without

@@ -22,7 +22,7 @@ mid-run, not from a real session.
 
 ## 2. Behaviour
 
-Discovery folds only files it can read that match its pattern.
+What the discovery functions in `extensions/lib/wtft-parser.ts` do today: `docs/spec-wtft-parser.md`.
 
 - **A file discovery cannot read is a non-match.** In `claude -p` discovery, the Pi sibling scan,
   and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
@@ -34,7 +34,6 @@ Discovery folds only files it can read that match its pattern.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.
 - **Unchanged:**
-  - A directory discovery searches that is absent reads as "none here".
   - A directory it finds but cannot read is still a failure, not a skip.
   - The walk of a session's own `subagents/` directory is unchanged: every file it lists is this
     session's own cost, not another session's transcript.

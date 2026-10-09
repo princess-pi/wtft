@@ -28,9 +28,11 @@ export function scanChildren(state, world, { sliceMs? }): { records; cut; wrote;
 - **`World`** is the one place the tagging code touches the filesystem or the clock, path
   canonicalisation included. `fsWorld()` is the daemon's adapter; a test uses `fsWorld(clock)`
   over a sandbox corpus with a clock it advances.
-- **`log`** stands in for stderr: `{ level: "warn" | "debug", text }`. The daemon prints warnings
-  always and debug lines under `WTFT_DAEMON_DEBUG`. Warn-once latches live in the state, so a
-  session dropped and adopted again warns again.
+- **`log`** stands in for stderr for the tagger's own lines: `{ level: "warn" | "debug", text }`.
+  The daemon prints warnings always and debug lines under `WTFT_DAEMON_DEBUG`. The tagger's
+  warn-once latches live in the state, so a session dropped and adopted again warns again.
+  Discovery behind `discoverTask` and `discoverClaude` writes its own warnings
+  (`docs/spec-wtft-parser.md`).
 - **`cut`** means the child scan's pass is not finished (the slice ran out, or a transcript grew
   after the pass took it); the caller appends `records` and calls again.
 - **`flush`** says whether pending turns may be written this step. The caller owns the write
@@ -76,6 +78,10 @@ timers.
   the sweep. The scan skips a gone child, writes the turn it held under the source its earlier
   lines carry (unless a transcript with that source was read again in the same scan), and the tag
   can be stamped swept.
+- **Discovery.** `discoverTask` leaves the session transcript's own read failure to the tagger,
+  which warns once for it. A failure either discovery reports or throws fails the poll, so the
+  sweep is withheld and the next poll retries. What discovery lists and reports:
+  `docs/spec-wtft-parser.md`.
 - **The swept-marker retraction reads the session's fixed tag path**, not one derived from the
   session's current path.
 

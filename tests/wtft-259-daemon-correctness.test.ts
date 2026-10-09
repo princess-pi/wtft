@@ -483,7 +483,7 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		fs.writeFileSync(staleTag, row + "\n" + row.replace('"stale-target"', '"stale-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
 		check(classified(target, "stale-bogus"), "fixture precondition: a tag of the CLI's version beside the transcript carries a row the transcript does not");
 		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
-		check(forced.status !== 1, `-F does not fail (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		check(forced.status === 9, `-F reports the newer build's tag, provisional (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
 		check(oneTurn > 0 && Math.abs(costOf(forced.stdout) - oneTurn) < 1e-9, `-F's report counts the transcript's one row and not the stale tag's extra one ($${costOf(forced.stdout)}, one row $${oneTurn})`);
 		const later = spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 		check(Math.abs(costOf(later.stdout) - oneTurn) < 1e-9, `a later wtft reads the rebuilt tag too ($${costOf(later.stdout)})`);

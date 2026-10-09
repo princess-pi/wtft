@@ -523,7 +523,9 @@ export function getDaemonPidPath(sessionPath: string): string {
  * that claimed the session meanwhile, leaves everything in place ("busy"); a
  * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
  * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
- * and a lease or tag that cannot be deleted ("undeletable") are failures.
+ * a lease or tag that cannot be deleted ("undeletable"), and, after the
+ * rebuild lease is written, a tag of another version that cannot be deleted
+ * ("stale-tags") are failures.
  * Unless busy or a failure, the caller then asks for the session.
  */
 export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable" | "older-harness" | "stale-tags";
@@ -535,7 +537,7 @@ export function describeForceRebuildFailure(how: string): string | null {
 		case "unwritable": return "the rebuild lease could not be written";
 		case "unsignalled": return "its log parser daemon could not be signalled";
 		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
-		case "stale-tags": return "the harness log parser daemon was asked to rebuild it, but a tag of another version could not be deleted, so a report may read that tag";
+		case "stale-tags": return "the rebuild was requested, but a tag of another version could not be deleted, so a report may read that tag";
 		case "older-harness": return "the harness log parser daemon serving it is an older build than this wtft, or its version could not be read; run bin/install-wtft, then -F again";
 		default: return null;
 	}

@@ -31,8 +31,7 @@ export const BUN_DIR = (() => {
 execSync("bun run build", { cwd: REPO, stdio: "pipe" });
 
 /** Run the installer with PATH set to `pathDirs`, bun and the system dirs, and a fresh HOME
- *  and XDG_CONFIG_HOME unless `env` sets them. Returns its exit code, or -1 when it could not
- *  be spawned. */
+ *  and XDG_CONFIG_HOME unless `env` sets them. Returns its exit code. */
 export function run(
 	args: string[],
 	pathDirs: string[] = [],

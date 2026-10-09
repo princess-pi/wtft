@@ -1,4 +1,4 @@
-# Spec 369 — discovery skips a transcript it cannot read
+# Spec 369 — discovery skips a `claude -p` candidate or Pi sibling it cannot read
 
 Issue: https://github.com/princess-pi/wtft/issues/369.
 Status: **Spec Approved** (Duppy, 2026-09-28: option C, "keep it minimal and trust the file system";
@@ -22,24 +22,23 @@ mid-run, not from a real session.
 
 ## 2. Behaviour
 
-Discovery folds only files it can read that match its pattern.
+What the discovery functions in `extensions/lib/wtft-parser.ts` do today: `docs/spec-wtft-parser.md`.
 
 - **A file discovery cannot read is a non-match.** In `claude -p` discovery, the Pi sibling scan,
   and the unrecorded-spawn scan, a transcript whose read fails is skipped the same as a file that
   does not match: no warning, no `unreadable`, no throw.
 - **What a skipped file costs.** A `claude -p` child or Pi sibling discovery cannot read is not
-  folded or listed by that discovery, and discovery does not report it. Nothing retries it: the
-  turn's discovery window closes and the tag reads settled. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
+  folded or listed by that discovery, and discovery does not report it. A `claude -p` child is not
+  retried: the turn's discovery window closes and the tag reads settled. In the unrecorded-spawn scan, an older copy of a session may be listed when its newest
   copy cannot be read.
 - **`discoverClaudeSubAgentSessionFiles` returns the files it found** (`string[]`); it has no
   unreadable result left to report.
 - **Unchanged:**
-  - A directory discovery searches that is absent reads as "none here".
   - A directory it finds but cannot read is still a failure, not a skip.
   - The walk of a session's own `subagents/` directory is unchanged: every file it lists is this
     session's own cost, not another session's transcript.
   - The session transcript's own read failure is still reported as `unreadable` /
-    `sessionUnreadable`, when the transcript exists. One not written yet is no failure:
+    `sessionUnreadable`. One not written yet is no failure:
     `docs/spec-479-pi-discovery-enoent.md`.
   - A discovered file that then fails to parse is still reported by the parse.
 

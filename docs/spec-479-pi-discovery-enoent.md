@@ -1,5 +1,7 @@
 # Spec 479 — a session transcript not written yet is not unreadable at discovery
 
+**Superseded by `docs/spec-wtft-parser.md`**, the live spec for discovery. Read this file as the record of the change, not as current behaviour.
+
 Issue: https://github.com/princess-pi/wtft/issues/479.
 Status: **Spec Approved** (Duppy, 2026-10-08: "start 479").
 

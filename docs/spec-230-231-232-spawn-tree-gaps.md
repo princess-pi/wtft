@@ -21,8 +21,7 @@ Every part is parsed with the child and all its subagent transcripts as `doNotFo
 folds another. The parts are parsed in order, and a `claude -p` session a kept part folds on a
 deduplicated, model-tagged turn (the folds `spawned.total` counts) is added to `doNotFold` for the
 parts after it, so no session lands in the edge total twice. Which files discovery lists, and which it skips without reporting, is
-`discoverSubagentSessionFiles`'s contract (`docs/wtft-incremental-render-spec.md` § *Where the
-transcripts are on disk*); this change prices what it
+`discoverSubagentSessionFiles`'s contract (`docs/spec-wtft-parser.md`); this change prices what it
 lists.
 
 **Each subagent session is billed once.** A subagent transcript's id is its file name without
@@ -159,7 +158,7 @@ The opened-PR loop on #238 (Draft, before `pr-submit`) found six Low. All six ar
 behaviour older than this branch:
 
 - The discovery exceptions (`wtft-tags`, symlinked directories, ENOENT/ELOOP) live in
-  `docs/wtft-incremental-render-spec.md`; the glossary entry summarises and does not repeat them.
+  `docs/spec-wtft-parser.md`; the glossary entry summarises and does not repeat them.
 - A fold on an untagged or de-duplicated turn is neither marked folded nor queued. Its cost
   sits in `descendantUntagged`, as `CONTEXT.md` § Self / tree already says.
 - "Minimum depth" is the smallest of the assigned queue depths (§2), not a position in the ledger.

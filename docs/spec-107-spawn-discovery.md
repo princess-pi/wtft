@@ -33,7 +33,7 @@ the second and not the first, and a `cd` after the last spawn is where the shell
 where anything ran. Each spawn takes the `cd` state standing when the shell reached it, which is
 also what keeps a segment that merely names claude (`which claude`) from ending the scan.
 
-**A spawn with no `cd` searches the session's own working directory.** "Own working directory" is
+**A direct `claude` spawn with no `cd` searches the session's own working directory.** "Own working directory" is
 resolved from the session's own transcript with `resolveLastCwd` (`extensions/lib/harness/session-cwd.ts`),
 not from the transcript's path.
 
@@ -70,9 +70,9 @@ A nested file inside that call is still read by `parseSessionFile`, which adds t
 parsing to the same set. A child does not fold the session that spawned it, and does not fold
 its own transcript.
 
-**A transcript the caller already lists is never folded into a sibling.** The one-shot CLI and
-the widget parse a list of a session's children — its Task subagents and its Pi siblings — and
-append every one of them, so a sibling that one of them folds is that sibling's cost twice.
+**A transcript the caller already lists is never folded into a sibling.** The widget parses a
+list of a session's children — its Task subagents and its Pi siblings — and appends every one
+of them, so a sibling that one of them folds is that sibling's cost twice.
 `loadSubagentInteractionsChecked` therefore hands every path in the list to every parse as
 `doNotFold`, which is the same rule the daemon states as one child, one holder, in the one place
 where a single call can see the whole list. The spawn walk prices a descendant the same way
@@ -121,7 +121,7 @@ is gone, and #128 (P6) lists its child in `spawned.unrecorded[]` when one appear
   guard lives in the FOLD pass, not in discovery: discovery still returns the transcript, and each
   caller decides. Identity is the canonical path (`canonicalTranscriptPath`, a `realpathSync` that
   falls back to `resolve`), because discovery builds its paths by joining and a symlinked
-  transcript or project dir would otherwise reach the guard spelled differently. `loadSubagentInteractionsChecked` — the CLI and widget's reader for Task-tool
+  transcript or project dir would otherwise reach the guard spelled differently. `loadSubagentInteractionsChecked` — the widget's reader for Task-tool
   children — takes the root session as `rootFile` for the same reason: a Task child that runs a
   bare `claude -p` searches the root's own project dir. The daemon's own caller drops a discovered file whose path is the session it is
   watching, for the same reason and by a different route.

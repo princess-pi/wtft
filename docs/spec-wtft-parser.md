@@ -61,8 +61,8 @@ failure:
 A throw returns no files: the caller has nothing from that call.
 
 **EISDIR, half by half.**
-- **The walk** reads no file, so it never meets EISDIR. A real directory is walked into, whatever
-  its name, `agent-*.jsonl` included. A symlink to a directory is skipped by its stat type.
+- **The walk** reads no file, so it never meets EISDIR. A real directory named
+  `agent-*.jsonl` is walked into like any other. A symlink to a directory is skipped by its stat type.
 - **The sibling scan** skips a real directory by its entry type. A symlink to a directory fails its
   first-line read with EISDIR and is skipped like any sibling it cannot read.
 - **The session transcript** that is a directory fails its first-line read with EISDIR, and is
@@ -112,7 +112,7 @@ Never throws.
 - `tests/wtft-146-149-subagent-discovery.test.ts` — the seam: bounded first-line reads; unbounded
   depth; a symlink cycle listed once; a symlinked directory not walked; a symlink whose target
   cannot be stat'd reported; real-path dedup across the halves; a directory, or a symlink to one,
-  named `*.jsonl` skipped silently in the `claude -p` scan, and a symlink to one in the sibling
+  named `*.jsonl` skipped silently in the `claude -p` scan; a symlink to one skipped in the sibling
   scan; the meta notice.
 - `tests/wtft-457-unreadable-transcript.test.ts` (Part C) — a walk entry that cannot be stat'd
   reported, not thrown; an unreadable `subagents/` or project directory warned and thrown;

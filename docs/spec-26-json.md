@@ -505,10 +505,9 @@ now has one spelling.
 
 **Absent ≠ `[]`, and this is the point of the field.** Every other block here is
 present on every run, so an empty one means "looked, found none". This one is
-OMITTED whenever the answer would be incomplete, which makes `[]` an
+OMITTED when discovery reports or throws a failure, which makes `[]` an
 unambiguous "looked, found none" instead of a value that also has to cover
-"nobody looked". A consumer testing for the key learns whether discovery ran; a
-consumer reading the array learns what it found. A version string cannot carry
+"nobody looked". A version string cannot carry
 that distinction, which is why `schema` is not the way to ask.
 
 **`meta: null` is a gap, not a missing subagent.** The transcript is listed and

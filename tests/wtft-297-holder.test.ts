@@ -222,6 +222,20 @@ describe("C3 restartDaemon", () => {
 });
 
 describe("C4 -F", () => {
+	it("a lease a harness took while -F stopped its per-session holder gets the rebuild token", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(704, ["--session", f.file]);
+		t.daemon(703, ["--harness", "claude"]);
+		fs.writeFileSync(f.lease, "704");
+		restore = useProcessTable({ ...t, signal(pid, sig) {
+			const sent = t.signal(pid, sig);
+			if (pid === 704 && sig === "SIGTERM") fs.writeFileSync(f.lease, "703");
+			return sent;
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "rebuild");
+		assert.strictEqual(leaseHolder(f.lease), "rebuild");
+	});
 	it("a harness gets the rebuild token; a daemon is stopped; a non-daemon is not signalled", () => {
 		const t = fakeProcessTable();
 		restore = useProcessTable(t);

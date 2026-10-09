@@ -570,7 +570,11 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
-	if (now !== "" && now !== initial) return "busy";
+	if (now !== "" && now !== initial) {
+		if (!processTable().inspectable() || verifiedKind(leasePid(now)) !== "harness") return "busy";
+		try { return replaceLease(leasePath, "rebuild", String(process.pid), now) ? "rebuild" : "busy"; }
+		catch { return "unwritable"; }
+	}
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";

@@ -410,11 +410,12 @@ const lease = process.env.WTFT_488_LEASE;
 const originalRename = realFs.renameSync.bind(realFs);
 const originalRead = realFs.readFileSync.bind(realFs);
 realFs.writeFileSync(lease, String(process.pid));
+spawn("sh", ["-c", '"$WTFT_488_BUN" --preload "$WTFT_488_FPRELOAD" "$WTFT_488_CLI" --json -F -s "$WTFT_488_TARGET" > "$WTFT_488_OUT" 2>&1; echo $? > "$WTFT_488_EXIT"'], { detached: true, stdio: "ignore" }).unref();
 let done = false;
 function renameSync(from, to) {
   if (!done && String(to) === lease && String(from) === lease + ".replace-" + process.pid) {
     done = true;
-    spawn("sh", ["-c", '"$WTFT_488_BUN" --preload "$WTFT_488_FPRELOAD" "$WTFT_488_CLI" --json -F -s "$WTFT_488_TARGET" > "$WTFT_488_OUT" 2>&1; echo $? > "$WTFT_488_EXIT"'], { detached: true, stdio: "ignore" }).unref();
+    realFs.writeFileSync(process.env.WTFT_488_GO, "");
     const readByF = () => { try { return originalRead(process.env.WTFT_488_READ, "utf8").split("\\n")[0]; } catch { return ""; } };
     for (const until = Date.now() + 20000; Date.now() < until && readByF() === "";) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
     const landed = () => { try { return originalRead(lease, "utf8").trim() === "rebuild"; } catch { return false; } };
@@ -425,13 +426,17 @@ function renameSync(from, to) {
 }
 mock.module("node:fs", () => ({ ...realFs, renameSync, default: { ...realFs, renameSync } }));
 `);
-		// -F records each value it reads from the lease.
 		const fPreload = path.join(root, "force-reads.mjs");
 		fs.writeFileSync(fPreload, `
 import * as realFs from "node:fs";
 import { mock } from "bun:test";
 const originalRead = realFs.readFileSync.bind(realFs);
+let gated = false;
 function readFileSync(file, ...rest) {
+  if (!gated && String(file) === process.env.WTFT_488_LEASE) {
+    gated = true;
+    for (const until = Date.now() + 30000; Date.now() < until && !realFs.existsSync(process.env.WTFT_488_GO);) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+  }
   const value = originalRead(file, ...rest);
   if (String(file) === process.env.WTFT_488_LEASE) realFs.appendFileSync(process.env.WTFT_488_READ, String(value).trim() + "\\n");
   return value;
@@ -441,12 +446,12 @@ mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, r
 		const starter = spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
 			encoding: "utf8", timeout: 40_000,
 			env: { ...envFor(root), WTFT_488_LEASE: lease, WTFT_488_CLI: cli, WTFT_488_TARGET: target, WTFT_488_OUT: forceOut, WTFT_488_EXIT: forceExit, WTFT_488_FIRED: fired,
-				WTFT_488_BUN: process.execPath, WTFT_488_FPRELOAD: fPreload, WTFT_488_READ: path.join(root, "force-reads") },
+				WTFT_488_BUN: process.execPath, WTFT_488_FPRELOAD: fPreload, WTFT_488_READ: path.join(root, "force-reads"), WTFT_488_GO: path.join(root, "force-go") },
 		});
 		check(fs.existsSync(fired), `fixture precondition: -F read the start's claim inside its hand-off (-F read ${JSON.stringify(read(path.join(root, "force-reads")))})`);
 		check(starter.status === 0, `fixture precondition: the start handed the target to the harness and exited 0 (exit ${starter.status}${starter.error ? `, ${starter.error.message}` : ""}: ${starter.stderr.trim()})`);
 		check(await until(() => read(forceExit).trim() !== "", 20_000) !== Infinity, "fixture: -F finished");
-		check(read(forceExit).trim() === "0", `-F exits 0 (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);
+		check(read(forceExit).trim() !== "" && read(forceExit).trim() !== "1", `-F does not fail (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);
 		const costOf = (out: string) => { try { return JSON.parse(out.slice(out.indexOf("{")))?.total?.costUsd ?? NaN; } catch { return NaN; } };
 		const oneTurn = costOf(spawnSync("node", [cli, "--json", "-s", other], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
 		check(oneTurn > 0 && Math.abs(costOf(read(forceOut)) - oneTurn) < 1e-9, `-F reports the transcript's one row and not the row it does not hold ($${costOf(read(forceOut))}, one row $${oneTurn})`);

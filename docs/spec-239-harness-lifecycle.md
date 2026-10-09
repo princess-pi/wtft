@@ -4,7 +4,7 @@
 [#249](https://github.com/princess-pi/wtft/issues/249),
 [#243](https://github.com/princess-pi/wtft/issues/243),
 [#250](https://github.com/princess-pi/wtft/issues/250) ·
-**Tests:** `tests/wtft-239-harness-lifecycle.test.ts`, `tests/wtft-205-one-daemon-per-harness.test.ts`
+**Tests:** `tests/wtft-239-harness-lifecycle.test.ts`, `tests/wtft-239-harness-races.test.ts`, `tests/wtft-205-one-daemon-per-harness.test.ts`
 
 **Status:** Superseded in part by #259.
 
@@ -114,7 +114,7 @@
 
 ## Closer
 
-`tests/wtft-239-harness-lifecycle.test.ts`:
+`tests/wtft-239-harness-lifecycle.test.ts`, then `tests/wtft-239-harness-races.test.ts` from the `--restart` race on:
 
 - A root of 2,000 sessions and one being appended to, with the harness started for that one:
   no other session gets a tag, the harness holds one lease, the live session stays classified,
@@ -123,8 +123,8 @@
   another process is served, its subagent transcript included, and a later write to that
   subagent transcript is read. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
-- A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns in under 3 s with the session's own sum, marked provisional
-  (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
+- A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns with the session's own sum, marked provisional
+  (exit 9), before the subagent turns are in the tag; a later report is complete (exit 0) and counts the subagent turns the first did not.
   A second session handed to that running harness gets its sum on its first report.
 - A session adopted again after its harness stopped has its old swept verdict retracted, then
   its subagent written while nothing served it is read.

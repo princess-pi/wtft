@@ -250,8 +250,9 @@ console.log("\nwtft restart over an id-less child line");
 	assert("D5a fixture precondition: the child's one turn parses, with no message id",
 		parseSessionFile(child).length === 1 && !parseSessionFile(child)[0].messageId);
 	const settle = async (done: () => boolean) => {
-		for (let i = 0; i < 40 && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional); i++) await sleep(250);
+		for (const until = Date.now() + 30_000; Date.now() < until && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional);) await sleep(250);
 	};
+	const copies = () => fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
 	let pid = 0;
 	let first = 0, second = 0;
 	try {
@@ -261,13 +262,12 @@ console.log("\nwtft restart over an id-less child line");
 		await stopDaemon(pid, rootPath);
 		pid = 0;
 		pid = spawnDaemon(rootPath);
-		await sleep(1_500);
-		await settle(() => outOf() >= 301);
+		await settle(() => copies() >= 2);
 		second = outOf();
 	} finally {
 		if (pid > 0) await stopDaemon(pid, rootPath);
 	}
-	const appended = fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
+	const appended = copies();
 	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,
 		first === 301 && appended >= 2);
 	assert(`D5 a restart that re-appends an id-less child line bills it once (got ${second})`, second === 301);

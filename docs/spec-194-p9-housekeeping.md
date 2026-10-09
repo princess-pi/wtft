@@ -130,7 +130,7 @@ directory there, so a `claude` in the cwd that a shell would run first is not se
 - **Limit, stated:** a caller that runs a `claude` binary by absolute path bypasses the
   guard. The guard's own `--help` says so.
 
-**Closer** (`tests/wtft-46-install-wtft.test.ts` §10): a fake guard (a file carrying the
+**Closer** (`tests/wtft-46-install-wtft-host.test.ts` §10): a fake guard (a file carrying the
 sentinel) with a decoy `claude` earlier on PATH exits 5, `nspGuard.state` is `shadowed`,
 and both paths are named. The guard first is exit 0, `ok`. No guard is exit 0, `absent`.
 A file that only *mentions* the sentinel mid-line does not count as a guard. With a wtft

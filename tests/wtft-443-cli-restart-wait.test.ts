@@ -34,7 +34,7 @@ try {
 	const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
 	const fake = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", env, detached: true });
 	children.push(fake);
-	check(awaitStandIn(fake.pid!), "fixture precondition: the stand-in reads as a daemon");
+	check(awaitStandIn(fake.pid!, 20_000), "fixture precondition: the stand-in reads as a daemon");
 	const lease = getDaemonPidPath(session);
 	fs.writeFileSync(lease, String(fake.pid));
 
@@ -42,14 +42,18 @@ try {
 	const r = spawnSync(process.execPath, [WTFT, "--restart"], { encoding: "utf8", env: { ...env, WTFT_RESPAWN_SETTLE_MS: String(SETTLE_MS) }, timeout: 60_000 });
 	const ms = Date.now() - t0;
 	const respawn = Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
-	if (respawn > 0) try { process.kill(respawn, "SIGTERM"); } catch { /* gone */ }
+	const respawnKind = classifyPid(respawn);
 
 	check(ms >= SETTLE_MS, `fixture precondition: wtft-daemon --restart ran past 10 s (${ms} ms)`);
 	check(r.status === 0, `exit 0 (got ${r.status}): ${r.stderr}`);
 	check(new RegExp(`Restarted: PID ${fake.pid} → fresh daemon`).test(r.stdout), `the holder was respawned:\n${r.stdout}`);
-	check(respawn > 0 && respawn !== fake.pid && classifyPid(respawn) !== "gone", "a new daemon held its lease");
+	check(respawn > 0 && respawn !== fake.pid && (respawnKind === "daemon" || respawnKind === "harness"), `a new log parser daemon held its lease (lease names ${respawn || "nobody"}, ${respawnKind})`);
 } finally {
 	for (const c of children) try { process.kill(c.pid!, "SIGKILL"); } catch { /* gone */ }
+	let holder = 0;
+	try { holder = Number(fs.readFileSync(getDaemonPidPath(path.join(root, "proj", "a.jsonl")), "utf8").trim()); } catch { /* no lease */ }
+	const kind = classifyPid(holder);
+	if (kind === "daemon" || kind === "harness") try { process.kill(holder, "SIGTERM"); } catch { /* gone */ }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

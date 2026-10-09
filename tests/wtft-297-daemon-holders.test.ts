@@ -40,11 +40,16 @@ describe("C5 the per-session child's claim", () => {
 		fs.writeFileSync(lease, String(squatter.pid));
 		const d = spawn(process.execPath, [DAEMON_BIN, "--session", file], { stdio: "ignore", env: process.env });
 		started.push(d);
-		const took = await pollUntil(() => fs.readFileSync(lease, "utf8").trim() === String(d.pid), 20_000);
-		assert.ok(took, `the lease names the daemon (${fs.readFileSync(lease, "utf8")}), not the squatter ${squatter.pid}`);
-		assert.strictEqual(squatter.exitCode, null, "the squatter was not signalled");
-		d.kill("SIGTERM");
-		assert.ok(await pollUntil(() => d.exitCode !== null || d.signalCode !== null, 30_000), `the daemon ${d.pid} exited before the next case`);
+		const exited = () => d.exitCode !== null || d.signalCode !== null;
+		try {
+			const took = await pollUntil(() => fs.readFileSync(lease, "utf8").trim() === String(d.pid), 20_000);
+			assert.ok(took, `the lease names the daemon (${fs.readFileSync(lease, "utf8")}), not the squatter ${squatter.pid}`);
+			assert.strictEqual(squatter.exitCode, null, "the squatter was not signalled");
+		} finally {
+			d.kill("SIGTERM");
+			if (!await pollUntil(exited, 20_000)) { d.kill("SIGKILL"); await pollUntil(exited, 10_000); }
+		}
+		assert.ok(exited(), `the daemon ${d.pid} exited before the next case`);
 	});
 });
 

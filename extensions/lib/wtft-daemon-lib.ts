@@ -518,8 +518,8 @@ export function getDaemonPidPath(sessionPath: string): string {
  * ("rebuild"). Otherwise the lease and every version of the tag, beside the
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
- * running ("deleted"); a daemon still running 2 s after the signal, or one
- * that claimed the session meanwhile, leaves everything in place ("busy"); a
+ * running ("deleted"); a daemon still running 2 s after the signal leaves
+ * everything in place ("busy"); a
  * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
  * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
  * and a lease or tag that cannot be deleted ("undeletable") are failures.
@@ -566,11 +566,11 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 		if (outcome === "denied") return "unsignalled";
 		if (outcome === "survived") return "busy";
 	}
-	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	if (now !== "" && now !== initial) {
+		if (now === "rebuild") return "rebuild";
 		if (!processTable().inspectable() || verifiedKind(leasePid(now)) !== "harness") return "busy";
 		try { return replaceLease(leasePath, "rebuild", String(process.pid), now) ? "rebuild" : "busy"; }
 		catch { return "unwritable"; }

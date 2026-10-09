@@ -72,7 +72,7 @@ daemon itself or, the moment it spawns one, by its spawner for the child's pid (
 spawner leaves a `rebuild` token or a live daemon holder alone (a live process that is not a daemon is displaced, spec-holder); it takes the claim back for a child
 already dead, and the CLI's startup wait for one it sees exit), a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
-identity it observed, on that inode), a replacement is a rename made under the lease's lock. A harness daemon's root pid file is a different
+identity it observed, on that inode), a replacement is a rename, after waiting for the lease's lock. A harness daemon's root pid file is a different
 file.
 _Avoid_: lock file, session pid file
 

@@ -123,7 +123,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   does not rewrite a lease that already names that harness. When it does point a lease at the
   harness, it does so only if the lease still reads what the start read, so a `-F` that lands
   after that read keeps its token. A `-F` that finds the lease handed to a harness between its read
-  and its write writes `rebuild` against that harness instead.
+  and its write writes `rebuild` against that harness instead; any other change leaves the lease
+  alone, as busy.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names

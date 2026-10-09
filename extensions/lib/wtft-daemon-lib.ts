@@ -547,7 +547,9 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	if (kind === "harness" && processTable().inspectable()) {
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) {
-				const now = leaseHolder(leasePath);
+				let now = "";
+				try { now = fs.readFileSync(leasePath, "utf8").trim(); }
+				catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 				if (now !== "rebuild" && (verifiedKind(leasePid(now)) !== "harness" || !replaceLease(leasePath, "rebuild", String(process.pid), now))) return "busy";
 			}
 		} catch {

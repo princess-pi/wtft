@@ -55,15 +55,16 @@ function sleepSync(ms: number): void {
  * Publish `value` at `file` through a rename, so no reader sees an empty
  * lease. It first takes `<file>.lock`, waiting up to `REPLACE_LOCK_WAIT_MS`; a
  * lock naming a dead owner, or older than that, is taken over. With
- * `expected`, only when the lock was taken and the lease still holds it, else
- * false. True when written. Throws when the write itself fails.
+ * `expected`, only when the lock was taken, and, just before the rename, it
+ * still holds the lock and the lease still holds `expected`; else false. True
+ * when written. Throws when the write itself fails.
  */
 export function replaceLease(file: string, value: string, owner: string, expected?: string): boolean {
 	const lock = `${file}.lock`;
 	const locked = takeLock(lock, owner);
 	try {
-		if (expected !== undefined && (!locked || leaseHolder(file) !== expected)) return false;
-		return publish(file, value, owner);
+		if (expected !== undefined && !locked) return false;
+		return publish(file, value, owner, () => expected === undefined || (leaseHolder(lock) === owner && leaseHolder(file) === expected));
 	} finally {
 		if (locked) unlinkLeaseIf(lock, owner);
 	}
@@ -82,10 +83,14 @@ function lockAgeMs(lock: string): number {
 	try { return Date.now() - fs.statSync(lock).mtimeMs; } catch { return 0; }
 }
 
-function publish(file: string, value: string, owner: string): true {
+function publish(file: string, value: string, owner: string, ready: () => boolean): boolean {
 	const replacement = `${file}.replace-${owner}`;
 	try {
 		fs.writeFileSync(replacement, value);
+		if (!ready()) {
+			fs.rmSync(replacement, { force: true });
+			return false;
+		}
 		fs.renameSync(replacement, file);
 		return true;
 	} catch (err) {

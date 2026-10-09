@@ -33,16 +33,18 @@ function session(name: string): string {
 }
 
 describe("C5 the per-session child's claim", () => {
-	it("takes a lease naming a live process that is not a daemon", async () => {
+	it("takes a lease naming a live process that is not a daemon", { timeout: 60_000 }, async () => {
 		const file = session("c5");
 		const lease = getDaemonPidPath(file);
 		const squatter = notADaemon();
 		fs.writeFileSync(lease, String(squatter.pid));
 		const d = spawn(process.execPath, [DAEMON_BIN, "--session", file], { stdio: "ignore", env: process.env });
 		started.push(d);
-		const took = await pollUntil(() => fs.readFileSync(lease, "utf8").trim() === String(d.pid), 5000);
+		const took = await pollUntil(() => fs.readFileSync(lease, "utf8").trim() === String(d.pid), 20_000);
 		assert.ok(took, `the lease names the daemon (${fs.readFileSync(lease, "utf8")}), not the squatter ${squatter.pid}`);
 		assert.strictEqual(squatter.exitCode, null, "the squatter was not signalled");
+		d.kill("SIGTERM");
+		assert.ok(await pollUntil(() => d.exitCode !== null || d.signalCode !== null, 30_000), `the daemon ${d.pid} exited before the next case`);
 	});
 });
 

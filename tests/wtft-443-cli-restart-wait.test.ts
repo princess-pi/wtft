@@ -47,7 +47,7 @@ try {
 	check(ms >= SETTLE_MS, `fixture precondition: wtft-daemon --restart ran past 10 s (${ms} ms)`);
 	check(r.status === 0, `exit 0 (got ${r.status}): ${r.stderr}`);
 	check(new RegExp(`Restarted: PID ${fake.pid} → fresh daemon`).test(r.stdout), `the holder was respawned:\n${r.stdout}`);
-	check(respawn > 0 && respawn !== fake.pid && respawnKind !== "gone", `a new daemon held its lease (lease names ${respawn || "nobody"}, ${respawnKind})`);
+	check(respawn > 0 && respawn !== fake.pid && (respawnKind === "daemon" || respawnKind === "harness"), `a new log parser daemon held its lease (lease names ${respawn || "nobody"}, ${respawnKind})`);
 } finally {
 	for (const c of children) try { process.kill(c.pid!, "SIGKILL"); } catch { /* gone */ }
 	let holder = 0;

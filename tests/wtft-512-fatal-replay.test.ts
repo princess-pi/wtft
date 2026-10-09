@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../bin/wtft.mjs";
 import { pollUntil, sleep } from "./lib/poll";
 import { isolateTmpdir, trackSandbox } from "./lib/sandbox";
-import { standInDaemonArgs } from "./lib/stand-in-daemon.ts";
+import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon.ts";
 
 isolateTmpdir("fatal-replay");
 
@@ -97,6 +97,13 @@ function startDaemon(inject: boolean): { child: ChildProcess; stderr: () => stri
 
 const DAEMON_WAIT_MS = 20_000;
 
+/** Which of a restart's three signs are missing, for a failure message. */
+function restartState(pidPath: string, pid: number | undefined, tagPath: string, since: number, rowId: string): string {
+	let lease = "";
+	try { lease = fs.readFileSync(pidPath, "utf8").trim(); } catch { lease = "(none)"; }
+	return `lease names ${lease} (daemon ${pid}), start heartbeat ${heartbeatSince(tagPath, since) ? "seen" : "missing"}, row ${rowId} ${readClassifiedTagFile(tagPath).some((row: any) => row.messageId === rowId) ? "present" : "missing"}`;
+}
+
 /** Whether a daemon started at or after `since` has written its start heartbeat to the tag. */
 function heartbeatSince(tagPath: string, since: number): boolean {
 	let lines: string[] = [];
@@ -108,10 +115,12 @@ function heartbeatSince(tagPath: string, since: number): boolean {
 
 async function waitForExit(child: ChildProcess, ceilingMs = DAEMON_WAIT_MS): Promise<number | null> {
 	if (child.exitCode !== null) return child.exitCode;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 	await Promise.race([
 		new Promise<void>(resolve => child.once("exit", () => resolve())),
-		sleep(ceilingMs),
+		new Promise<void>(resolve => { timer = setTimeout(resolve, ceilingMs); }),
 	]);
+	clearTimeout(timer);
 	return child.exitCode;
 }
 
@@ -166,7 +175,7 @@ try {
 			return ownsLease && heartbeatSince(tagPath, replayStart) && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === targetId);
 		},
 		DAEMON_WAIT_MS,
-	)) throw new Error("second poisoned-lease replay did not restore the source turn");
+	)) throw new Error(`second poisoned-lease replay did not settle: ${restartState(pidPath, replayed.child.pid, tagPath, replayStart, targetId)}`);
 
 	const sentinelId = "stale-pid-resume-sentinel";
 	fs.appendFileSync(tagPath, JSON.stringify({ t: Date.now(), c: 0.01, id: sentinelId }) + "\n");
@@ -182,7 +191,7 @@ try {
 			return ownsLease && heartbeatSince(tagPath, staleStart) && readClassifiedTagFile(tagPath).some((row: any) => row.messageId === sentinelId);
 		},
 		DAEMON_WAIT_MS,
-	)) throw new Error("stale numeric lease discarded the resumable tag");
+	)) throw new Error(`restart over a stale numeric lease did not resume the tag: ${restartState(pidPath, staleRestart.child.pid, tagPath, staleStart, sentinelId)}`);
 
 	// A contender can replace a stale lease after this daemon reads it but
 	// before reclamation. The stale reader must not unlink that new live lease.
@@ -192,6 +201,7 @@ try {
 	// The successor must read as a live daemon to the holder module (spec-297).
 	const successor = spawn(process.execPath, standInDaemonArgs("setInterval(() => {}, 1e6)"), { stdio: "ignore" });
 	children.push(successor);
+	if (!awaitStandIn(successor.pid!, DAEMON_WAIT_MS)) throw new Error("fixture precondition: the successor stand-in never read as a daemon");
 	const contender = spawn(process.execPath, ["--preload", reclaimPreloadPath, daemonPath, "--session", sessionPath], {
 		env: {
 			...process.env,

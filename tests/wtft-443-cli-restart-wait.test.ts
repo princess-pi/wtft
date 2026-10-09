@@ -43,7 +43,6 @@ try {
 	const ms = Date.now() - t0;
 	const respawn = Number(fs.existsSync(lease) ? fs.readFileSync(lease, "utf8").trim() : 0);
 	const respawnKind = classifyPid(respawn);
-	if (respawn > 0) try { process.kill(respawn, "SIGTERM"); } catch { /* gone */ }
 
 	check(ms >= SETTLE_MS, `fixture precondition: wtft-daemon --restart ran past 10 s (${ms} ms)`);
 	check(r.status === 0, `exit 0 (got ${r.status}): ${r.stderr}`);
@@ -51,6 +50,10 @@ try {
 	check(respawn > 0 && respawn !== fake.pid && respawnKind !== "gone", `a new daemon held its lease (lease names ${respawn || "nobody"}, ${respawnKind})`);
 } finally {
 	for (const c of children) try { process.kill(c.pid!, "SIGKILL"); } catch { /* gone */ }
+	let holder = 0;
+	try { holder = Number(fs.readFileSync(getDaemonPidPath(path.join(root, "proj", "a.jsonl")), "utf8").trim()); } catch { /* no lease */ }
+	const kind = classifyPid(holder);
+	if (kind === "daemon" || kind === "harness") try { process.kill(holder, "SIGTERM"); } catch { /* gone */ }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -1,9 +1,4 @@
 #!/usr/bin/env bun
-/**
- * #512 — a partial tag append is terminal, poisons the existing
- *   singleton lease, and the next owner rederives the transient cache.
- */
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -173,9 +168,6 @@ try {
 		DAEMON_WAIT_MS,
 	)) throw new Error("second poisoned-lease replay did not restore the source turn");
 
-	// A stale numeric PID is only evidence of an unclean process exit, not an
-	// append failure. It must preserve #124 incremental resume rather than
-	// turning every SIGKILL/OOM/reboot into an unnecessary full replay.
 	const sentinelId = "stale-pid-resume-sentinel";
 	fs.appendFileSync(tagPath, JSON.stringify({ t: Date.now(), c: 0.01, id: sentinelId }) + "\n");
 	const replayedExit = new Promise<void>(resolve => replayed.child.once("exit", () => resolve()));

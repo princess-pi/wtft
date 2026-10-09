@@ -251,6 +251,5 @@ make, as follows:
 - **The request-directory watch re-arm** changes latency only, under the 250 ms sweep, and so
   does the 10 s retry of a failed directory watch.
 - **`--stop`'s `Not stopped` path** needs a lease to change inside one syscall gap.
-- **The lease race**, and `-F` finding a harness lease changed before it replaces it, need two
-  processes inside one syscall gap.
+- **The lease race** needs two processes inside one syscall gap.
 - **A9 off Linux** needs a host without `/proc`.

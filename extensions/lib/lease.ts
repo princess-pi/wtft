@@ -53,11 +53,10 @@ function sleepSync(ms: number): void {
 
 /**
  * Publish `value` at `file` through a rename, so no reader sees an empty
- * lease. Replaces of one lease take turns under `<file>.lock`; a lock naming a
- * dead owner, or older than `REPLACE_LOCK_WAIT_MS`, is taken over. With
- * `expected`, only when the lease still holds it; false when it does not, or
- * when the lock could not be taken within `REPLACE_LOCK_WAIT_MS`. True when
- * written. Throws when the write itself fails.
+ * lease. It first takes `<file>.lock`, waiting up to `REPLACE_LOCK_WAIT_MS`; a
+ * lock naming a dead owner, or older than that, is taken over. With
+ * `expected`, only when the lock was taken and the lease still holds it, else
+ * false. True when written. Throws when the write itself fails.
  */
 export function replaceLease(file: string, value: string, owner: string, expected?: string): boolean {
 	const lock = `${file}.lock`;

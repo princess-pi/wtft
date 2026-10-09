@@ -414,23 +414,36 @@ let done = false;
 function renameSync(from, to) {
   if (!done && String(to) === lease && String(from) === lease + ".replace-" + process.pid) {
     done = true;
-    spawn("sh", ["-c", 'node "$WTFT_488_CLI" --json -F -s "$WTFT_488_TARGET" > "$WTFT_488_OUT" 2>&1; echo $? > "$WTFT_488_EXIT"'], { detached: true, stdio: "ignore" }).unref();
-    let landed = false;
-    for (const until = Date.now() + 3000; Date.now() < until && !landed;) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-      try { landed = originalRead(lease, "utf8").trim() === "rebuild"; } catch {}
-    }
-    realFs.writeFileSync(process.env.WTFT_488_FIRED, landed ? "landed inside the hand-off" : "held off until the hand-off ended");
+    spawn("sh", ["-c", '"$WTFT_488_BUN" --preload "$WTFT_488_FPRELOAD" "$WTFT_488_CLI" --json -F -s "$WTFT_488_TARGET" > "$WTFT_488_OUT" 2>&1; echo $? > "$WTFT_488_EXIT"'], { detached: true, stdio: "ignore" }).unref();
+    const readByF = () => { try { return originalRead(process.env.WTFT_488_READ, "utf8").split("\\n")[0]; } catch { return ""; } };
+    for (const until = Date.now() + 20000; Date.now() < until && readByF() === "";) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    const landed = () => { try { return originalRead(lease, "utf8").trim() === "rebuild"; } catch { return false; } };
+    for (const until = Date.now() + 500; Date.now() < until && !landed();) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+    if (readByF() === String(process.pid)) realFs.writeFileSync(process.env.WTFT_488_FIRED, "-F read the start's claim before the start's rename");
   }
   return originalRename(from, to);
 }
 mock.module("node:fs", () => ({ ...realFs, renameSync, default: { ...realFs, renameSync } }));
 `);
+		// -F records each value it reads from the lease.
+		const fPreload = path.join(root, "force-reads.mjs");
+		fs.writeFileSync(fPreload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const originalRead = realFs.readFileSync.bind(realFs);
+function readFileSync(file, ...rest) {
+  const value = originalRead(file, ...rest);
+  if (String(file) === process.env.WTFT_488_LEASE) realFs.appendFileSync(process.env.WTFT_488_READ, String(value).trim() + "\\n");
+  return value;
+}
+mock.module("node:fs", () => ({ ...realFs, readFileSync, default: { ...realFs, readFileSync } }));
+`);
 		const starter = spawnSync(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
-			encoding: "utf8", timeout: 30_000,
-			env: { ...envFor(root), WTFT_488_LEASE: lease, WTFT_488_CLI: cli, WTFT_488_TARGET: target, WTFT_488_OUT: forceOut, WTFT_488_EXIT: forceExit, WTFT_488_FIRED: fired },
+			encoding: "utf8", timeout: 40_000,
+			env: { ...envFor(root), WTFT_488_LEASE: lease, WTFT_488_CLI: cli, WTFT_488_TARGET: target, WTFT_488_OUT: forceOut, WTFT_488_EXIT: forceExit, WTFT_488_FIRED: fired,
+				WTFT_488_BUN: process.execPath, WTFT_488_FPRELOAD: fPreload, WTFT_488_READ: path.join(root, "force-reads") },
 		});
-		check(fs.existsSync(fired), `fixture precondition: -F ran during the start's lease hand-off (${read(fired)})`);
+		check(fs.existsSync(fired), `fixture precondition: -F read the start's claim inside its hand-off (-F read ${JSON.stringify(read(path.join(root, "force-reads")))})`);
 		check(starter.status === 0, `fixture precondition: the start handed the target to the harness and exited 0 (exit ${starter.status}${starter.error ? `, ${starter.error.message}` : ""}: ${starter.stderr.trim()})`);
 		check(await until(() => read(forceExit).trim() !== "", 20_000) !== Infinity, "fixture: -F finished");
 		check(read(forceExit).trim() === "0", `-F exits 0 (exit ${read(forceExit).trim()}: ${read(forceOut).split("\n").filter(l => l.includes("Force re-parse")).join(" ")})`);

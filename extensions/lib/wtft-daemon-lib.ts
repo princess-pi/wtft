@@ -548,7 +548,7 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) {
 				const now = leaseHolder(leasePath);
-				if (verifiedKind(leasePid(now)) !== "harness" || !replaceLease(leasePath, "rebuild", String(process.pid), now)) return "busy";
+				if (now !== "rebuild" && (verifiedKind(leasePid(now)) !== "harness" || !replaceLease(leasePath, "rebuild", String(process.pid), now))) return "busy";
 			}
 		} catch {
 			return "unwritable";

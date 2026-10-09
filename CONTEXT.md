@@ -477,7 +477,7 @@ names the usage mode)
 A total that may still change: the tag file was written by another tagger build
 (`stale-version`) or read before the log parser daemon swept it — read every subagent
 transcript and wrote every subagent turn (`unswept`), the CLI's
-scan could not list or read a session file (`subagent-unreadable`), or a counted descendant
+scan hit a discovery failure or could not read a listed subagent transcript (`subagent-unreadable`), or a counted descendant
 is still writing its transcript or one of its subagent transcripts (`descendant-live`: its
 spawn-tree edge is **live**; the exact
 test is `docs/spec-26-json.md`, Amendment 4). The number printed is
@@ -489,8 +489,8 @@ reason** (above); name the container when both are in play. The Pi widget surfac
 this state as a third, contract-less channel: prose only ("total is provisional"), no exit
 code, no JSON field. It prints the tag's own verdict, read with the
 same `readTagFileWithVerdict()` the CLI uses and worded by the same
-`describeProvisionalReason()` (#176), and one line for anything the widget itself could
-not read (#165). The opposite state is
+`describeProvisionalReason()` (#176), and one line when its discovery fails or a subagent transcript
+cannot be loaded (#165). The opposite state is
 **settled**, never "final" or "done".
 _Avoid_: Partial, incomplete, estimated (the number is measured, just not finished)
 

@@ -158,7 +158,7 @@ The opened-PR loop on #238 (Draft, before `pr-submit`) found six Low. All six ar
 behaviour older than this branch:
 
 - The discovery exceptions (`wtft-tags`, symlinked directories, ENOENT/ELOOP) live in
-  `docs/wtft-incremental-render-spec.md`; the glossary entry summarises and does not repeat them.
+  `docs/spec-wtft-parser.md`; the glossary entry summarises and does not repeat them.
 - A fold on an untagged or de-duplicated turn is neither marked folded nor queued. Its cost
   sits in `descendantUntagged`, as `CONTEXT.md` § Self / tree already says.
 - "Minimum depth" is the smallest of the assigned queue depths (§2), not a position in the ledger.

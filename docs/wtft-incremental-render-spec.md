@@ -328,7 +328,7 @@ CLI consumes it, but a reader tracking the code should not look for it at the
 |---|---|---|
 | `stale-version` | yes | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
 | `unswept` | yes | a current-version tag holding classified data but no `_meta.swept` |
-| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: a session file could not be read (a transcript, or a whole directory of them), so the `--tokens` table may be missing uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
+| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: its discovery reported or threw a failure, or a listed subagent transcript could not be read, so the `--tokens` table may be missing uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
 
 **There is no scan window.** The first version scanned only the last 8KB, justified as
 "matching `readLastMetaOffset`" — a justification that does not survive contact, since
@@ -374,7 +374,7 @@ the reason named in the warning line — assigned unconditionally on the CLI's o
 discovery failure, whatever the tag verdict (round 7): the failure is direct
 evidence, and a permanent unreadability also blocks the daemon's rebuild, so the
 tag-derived reasons cannot be trusted to point at an action that ends the loop.
-The TUI's degrade (main-interactions-only) has no exit surface — its reader is the
+The TUI's degrade (it leaves out what it could not read) has no exit surface — its reader is the
 interactive widget, and the widget appends a yellow warning line, "some transcripts
 could not be counted — total is provisional", whenever discovery reports or throws a
 failure, or the load drops a transcript (#165): the extension's stderr is not

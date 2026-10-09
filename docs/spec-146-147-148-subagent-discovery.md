@@ -18,9 +18,9 @@ ENOTDIR — the absent cases — and for a meta that reads but does not parse, w
 indistinguishable from an absent one because only the read failure is observable as a failure.
 A non-null `error` adds a `subagent-meta-unreadable` notice naming the file.
 
-**The notice is emitted independently of whether the rows survive.** Discovery that is
-incomplete for another reason withholds `subagents[]` entirely, and the notice still names the
-unreadable meta — so a notice is never evidence that a row is listed.
+**The notice does not depend on the rows surviving.** Discovery that reports a failure withholds
+`subagents[]` entirely, and the notice still names an unreadable meta beside any transcript it
+listed — so a notice is never evidence that a row is listed.
 
 **Closer:** `--json` on a session with a mode-000 meta lists the child with `meta: null` AND
 carries a `subagent-meta-unreadable` notice naming it; the same session with the meta absent
@@ -44,7 +44,7 @@ paths, shared by both discovery halves: each directory is visited once, and a tr
 reachable by two paths — a symlink cycle, a Pi sibling symlinked to a walked Claude child — is
 listed once and counted once.
 
-A symlinked DIRECTORY is never traversed. The `seen` set bounds a cycle, not an acyclic
+A symlinked DIRECTORY below `subagents/` is never traversed. The `seen` set bounds a cycle, not an acyclic
 foreign tree, so `subagents/all -> /` would walk the filesystem synchronously before discovery
 returned. A symlinked FILE still counts: a symlink to a transcript is a transcript. A stat failure on
 either takes the same report path as any other entry — ENOENT and ELOOP hold no cost to miss,

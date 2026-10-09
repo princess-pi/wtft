@@ -363,7 +363,7 @@ readers, and 9 is distinct from 1 because "the run failed" and "the run succeede
 the number is not final" are different facts.
 
 The same exit is earned by a render-side degrade with the same shape (#457, round 5):
-under `--tokens`, an unreadable subagent transcript — one file (round 6: the failure
+under `--tokens`, an unreadable session or subagent transcript — one file (round 6: the failure
 is reported, not thrown, and the readable siblings still scan) or a whole unreadable
 directory of them — drops uncounted billables from the token table. A Pi sibling discovery
 cannot read is not listed, so it sets nothing. The parser's
@@ -393,8 +393,7 @@ arm that always skips is untested, not covered. One sentence true in both cases 
 such arm.
 
 `subagent-unreadable` earns its own remedy line for the same reason (rounds 6/7): it
-fires whenever the CLI's own discovery reports an unreadable transcript — one file, or
-a whole directory — whatever the tag verdict. The tag-derived "run wtft again in a
+fires whenever the CLI's own discovery reports or throws a failure, whatever the tag verdict. The tag-derived "run wtft again in a
 moment" line is a loop against a permanent unreadability for the same reason `-F` is:
 the daemon's poll fails on the same unreadable file, so no rebuild is coming and the
 marker stays stale. The tag total may ALSO be missing this transcript's cost: the swept
@@ -526,7 +525,7 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
 | Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (duppypro/princess-pi-tools#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
-| `--tokens` blind-spot scan loses a subtree | An unreadable subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
+| `--tokens` blind-spot scan loses a subtree | An unreadable session or subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |

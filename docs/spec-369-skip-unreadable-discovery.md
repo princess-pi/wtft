@@ -1,4 +1,4 @@
-# Spec 369 — discovery skips a transcript it cannot read
+# Spec 369 — discovery skips a `claude -p` candidate or Pi sibling it cannot read
 
 Issue: https://github.com/princess-pi/wtft/issues/369.
 Status: **Spec Approved** (Duppy, 2026-09-28: option C, "keep it minimal and trust the file system";

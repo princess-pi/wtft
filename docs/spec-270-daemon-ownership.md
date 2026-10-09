@@ -122,7 +122,7 @@ Session `.jsonl`, `<id>/subagents/agent-*.jsonl` and `.meta.json`, Pi sibling fi
 `claude -p` children under the projects root. Read by the daemon (`parseNewLines`,
 `syncSubagentTranscript`, discovery), by the CLI (`scanSessionUncounted`,
 `collectSubagentJson`, `computeSpawnTree` → `parseDescendant`), by the widget
-(`readInteractions`, and `/wtft --tokens` → `computeSpawnTree` → `parseDescendant`), and by `readHealthFacts` (the session
+(`readInteractions` → discovery and `loadSubagentInteractionsChecked`, and `/wtft --tokens` → `computeSpawnTree` → `parseDescendant`), and by `readHealthFacts` (the session
 file's mtime, and the whole file for a model only when an idle answer needs a TTL and the tag tail
 named none).
 

@@ -140,7 +140,7 @@ a section of SPAWNED, because a built-in subagent's money is inside TOTAL.
 ]
 ```
 
-**The key is ABSENT, not `[]`, when discovery reports or throws a failure** (`docs/spec-26-json.md`).
+**The key is ABSENT, not `[]`, when discovery did not run, or reported or threw a failure** (`docs/spec-26-json.md`).
 
 A consumer never needs to know which reason. Absent means the answer cannot be trusted as
 complete; `[]` means discovery ran and found none. Test both directions separately — weakening

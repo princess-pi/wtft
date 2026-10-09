@@ -39,7 +39,7 @@ function describeProvisionalRemedy(provisional: { reason: string | null }, tagPa
 			: "The daemon is rebuilding this tag at the current version — run wtft again in a moment to read the settled total";
 	}
 	return provisional.reason === "subagent-unreadable"
-		? "restore read access to the unreadable session file or directory, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
+		? "fix the session file or directory that could not be read, then run wtft again — the daemon re-reads it on its next poll, and wtft reads it directly on the --tokens and --json paths"
 		: "The daemon is still reading this session's subagents into its tag — run wtft again once they have stopped writing to read the settled total";
 }
 

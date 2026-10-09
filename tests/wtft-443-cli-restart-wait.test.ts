@@ -34,7 +34,7 @@ try {
 	const [script] = standInDaemonArgs("setInterval(() => {}, 1000);");
 	const fake = spawn(process.execPath, [script, "--session", session], { stdio: "ignore", env, detached: true });
 	children.push(fake);
-	check(awaitStandIn(fake.pid!), "fixture precondition: the stand-in reads as a daemon");
+	check(awaitStandIn(fake.pid!, 20_000), "fixture precondition: the stand-in reads as a daemon");
 	const lease = getDaemonPidPath(session);
 	fs.writeFileSync(lease, String(fake.pid));
 

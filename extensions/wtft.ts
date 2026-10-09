@@ -400,7 +400,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				const how = forceRebuildSession(sessionFile);
 				const failure = describeForceRebuildFailure(how);
 				if (failure) {
-					ctx.ui.notify(`Force re-parse: ${failure}. Nothing was rebuilt.`, "warning");
+					ctx.ui.notify(`Force re-parse: ${failure}.${how === "stale-tags" ? "" : " Nothing was rebuilt."}`, "warning");
 					return;
 				}
 				if (how === "busy") {

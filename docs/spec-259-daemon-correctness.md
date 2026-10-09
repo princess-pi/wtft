@@ -119,10 +119,10 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   as soon as it does, with no new request. A lease an earlier `-F` left
   reading `rebuild`, with no daemon behind it, is treated as no holder. Telling a harness apart
   reads `/proc`, so this holds on Linux; elsewhere the harness is stopped as below.
-- **`-F` reads the tag the harness rebuilds, whatever its build.** With the harness on the same or
-  a newer tagger version than the CLI, `-F` deletes the session's tags of other versions, so its
-  report reads the harness's. On Linux, a harness serving the session that the CLI reads as an
-  older tagger version, or whose version it cannot read, is left serving: `-F` names `bin/install-wtft` and exits 1 with nothing changed,
+- **On Linux, `-F` reads the tag the harness rebuilds, whatever its build.** With the harness on
+  the same or a newer tagger version than the CLI, `-F` deletes the session's tags of other
+  versions, so its report reads the harness's. A harness serving the session that the CLI reads as
+  an older tagger version, or whose version it cannot read, is left serving: `-F` names `bin/install-wtft` and exits 1 with nothing changed,
   since the CLI's own start would stop that harness and every session it serves.
 - **A harness start keeps a `rebuild` token written after its read.** A start that finds a live harness
   does not rewrite a lease that already names that harness. When it does point a lease at the

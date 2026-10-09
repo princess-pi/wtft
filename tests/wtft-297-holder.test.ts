@@ -231,6 +231,8 @@ describe("C4 -F", () => {
 		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a harness whose tagger version cannot be read is left alone");
 		assert.strictEqual(leaseHolder(a.lease), "701");
 		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid.701.version"), WTFT_TAGGER_VERSION);
+		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a version file beside a root pid file that does not name the harness is not its");
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid"), "701");
 		assert.strictEqual(forceRebuildSession(a.file), "rebuild");
 		assert.strictEqual(leaseHolder(a.lease), "rebuild");
 		const b = session();

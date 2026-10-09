@@ -526,7 +526,7 @@ export function getDaemonPidPath(sessionPath: string): string {
  * and a lease or tag that cannot be deleted ("undeletable") are failures.
  * Unless busy or a failure, the caller then asks for the session.
  */
-export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable" | "older-harness";
+export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable" | "older-harness" | "stale-tags";
 
 /** What a failed `-F` could not do, as a sentence fragment, or null. */
 export function describeForceRebuildFailure(how: string): string | null {
@@ -535,6 +535,7 @@ export function describeForceRebuildFailure(how: string): string | null {
 		case "unwritable": return "the rebuild lease could not be written";
 		case "unsignalled": return "its log parser daemon could not be signalled";
 		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
+		case "stale-tags": return "the harness log parser daemon was asked to rebuild it, but a tag of another version could not be deleted, so a report may read that tag";
 		case "older-harness": return "the harness log parser daemon serving it is an older build than this wtft, or its version could not be read; run bin/install-wtft, then -F again";
 		default: return null;
 	}
@@ -549,13 +550,12 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	if (kind === "harness" && processTable().inspectable()) {
 		const version = harnessTaggerVersion(leasePid(initial));
 		if (taggerIsOlder(version, WTFT_TAGGER_VERSION)) return "older-harness";
-		if (!deleteTags(sessionPath, version)) return "undeletable";
 		try {
 			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
 		} catch {
 			return "unwritable";
 		}
-		return "rebuild";
+		return deleteTags(sessionPath, version) ? "rebuild" : "stale-tags";
 	}
 	if (kind === "unverified") return "busy";
 	// Its shutdown flushes into the tag, so the tag goes only once it has
@@ -607,13 +607,14 @@ function pathIsUnder(file: string, root: string): boolean {
 	return resolvedFile === resolvedRoot || resolvedFile.startsWith(resolvedRoot + path.sep);
 }
 
-/** The tagger version live harness `pid` wrote beside its root pid file at its start, "" when
- *  none can be read. */
+/** The tagger version harness `pid` wrote beside the root pid file it holds, "" when none can be
+ *  read. */
 export function harnessTaggerVersion(pid: number): string {
 	const suffix = `.pid.${pid}.version`;
 	let names: string[] = [];
 	try { names = fs.readdirSync(os.tmpdir()); } catch { return ""; }
-	const file = names.find(name => name.startsWith("wtft-harness-") && name.endsWith(suffix));
+	const file = names.find(name => name.startsWith("wtft-harness-") && name.endsWith(suffix)
+		&& leaseHolder(path.join(os.tmpdir(), name.slice(0, -`.${pid}.version`.length))) === String(pid));
 	if (!file) return "";
 	try { return fs.readFileSync(path.join(os.tmpdir(), file), "utf8").trim(); } catch { return ""; }
 }

@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 /**
  * The harness daemon's lifecycle: it serves only the sessions it is asked for,
- * a report shows a partial sum before subagents are read, one harness per root
- * after --restart, and the startup reaper never acts on a harness for its
- * start-up --session. --cleanup is not run here: it stops
+ * and a report shows a partial sum before subagents are read. --cleanup is not run here: it stops
  * every fixture daemon under /tmp, including other suites'.
  */
 

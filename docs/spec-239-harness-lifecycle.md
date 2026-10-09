@@ -124,7 +124,7 @@
   subagent transcript is read. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
 - A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns with the session's own sum, marked provisional
-  (exit 9), before the subagent turns are in the tag; a later report is complete (exit 0) and counts the subagent turns the first did not.
+  (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
   A second session handed to that running harness gets its sum on its first report.
 - A session adopted again after its harness stopped has its old swept verdict retracted, then
   its subagent written while nothing served it is read.

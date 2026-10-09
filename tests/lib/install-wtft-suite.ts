@@ -39,10 +39,6 @@ export const BUN_DIR = (() => {
 	return shim;
 })();
 
-// The installer builds before it copies, so the artifacts need not pre-exist —
-// but every OTHER suite in this repo imports ../bin/wtft.mjs, and the runner is
-// serial, so building here keeps this suite from being the one that leaves the
-// tree half-built if it dies partway.
 execSync("bun run build", { cwd: REPO, stdio: "pipe" });
 
 /**

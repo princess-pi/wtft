@@ -70,7 +70,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 
 - **Adoption never signals a harness** (decision H, A5). A harness asked for a session whose
   lease names another live harness does not take it; it retries (below). A focus request never
-  repoints a lease another live daemon holds; the harness's adoption takes it by these rules. A per-session daemon
+  repoints a lease it identifies as another live daemon's; the harness's adoption takes it by these rules. A per-session daemon
   holding the lease is still stopped with SIGTERM and waited for, about 1 s (20 × 50 ms) before
   the adoption goes to its retries, because it serves only that
   session, and waiting keeps two writers off one tag. On Linux: the liveness check reads
@@ -127,18 +127,18 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
 - **A harness start keeps a `rebuild` token written after its read.** A start that finds a live harness
   does not rewrite a lease that already names that harness. When it does point a lease at the
   harness, it does so only if the lease still reads what the start read, so a `-F` that lands
-  after that read keeps its token. The check compares,
-  then renames: a write in the gap between those two calls is not caught.
+  after that read keeps its token. A `-F` that finds the lease handed to a harness between its read
+  and its write treats the session as that harness's, as above, once a hand-off in flight has
+  ended; any other change leaves the lease alone, as busy.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
   `wtft-daemon` is signalled; off Linux the command line is read through `ps` instead, and a holder neither read can verify is not signalled: `-F` says busy (`verifiedKind`, `docs/spec-holder.md`). When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
-  exits 1. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
+  exits 1; on Linux a lease a harness took meanwhile is treated as that harness's session instead. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
   cannot be signalled, a lease or tag
   file that cannot be deleted, since what is left would be resumed
-  rather than rebuilt, and a daemon that cannot be started. A harness lease that changed between
-  being read and being replaced is left alone, as busy. The CLI and the Pi widget share one implementation, so
+  rather than rebuilt, and a daemon that cannot be started. The CLI and the Pi widget share one implementation, so
   the widget now deletes every version too, not only the current one.
 - **`wtft --list`, `--cleanup`, `--restart` and `--stop` pass `wtft-daemon`'s exit code through**,
   and pass the session path as one argument, so a path with a space is not split.
@@ -257,6 +257,5 @@ make, as follows:
 - **The request-directory watch re-arm** changes latency only, under the 250 ms sweep, and so
   does the 10 s retry of a failed directory watch.
 - **`--stop`'s `Not stopped` path** needs a lease to change inside one syscall gap.
-- **The lease race**, and `-F` finding a harness lease changed before it replaces it, need two
-  processes inside one syscall gap.
+- **The lease race** needs two processes inside one syscall gap.
 - **A9 off Linux** needs a host without `/proc`.

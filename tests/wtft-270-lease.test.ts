@@ -7,7 +7,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { claimLease, unlinkLeaseIf, replaceLease, leaseHolder, leaseIdentity } from "../extensions/lib/lease.ts";
+import { spawn } from "node:child_process";
+import { awaitLeaseReplace, claimLease, unlinkLeaseIf, replaceLease, leaseHolder, leaseIdentity } from "../extensions/lib/lease.ts";
 import { trackSandbox } from "./lib/sandbox";
 
 let passed = 0;
@@ -90,6 +91,45 @@ console.log("\nPART R — replaceLease");
 	let threw = false;
 	try { replaceLease(path.join(dir, "missing-dir", "x.pid"), ME, ME); } catch { threw = true; }
 	check(threw, "R6 a write that cannot land throws");
+}
+{
+	const f = fresh(ME);
+	fs.writeFileSync(`${f}.lock`, String(process.pid));
+	const longAgo = new Date(Date.now() - 3_600_000);
+	fs.utimesSync(`${f}.lock`, longAgo, longAgo);
+	const began = Date.now();
+	check(replaceLease(f, "rebuild", ME, ME) === true && leaseHolder(f) === "rebuild" && Date.now() - began < 1000, "R7 a lock older than the wait is taken over, though its owner lives");
+	fs.writeFileSync(`${f}.lock`, "999999999");
+	const deadBegan = Date.now();
+	check(replaceLease(f, "1", ME, "rebuild") === true && leaseHolder(f) === "1" && Date.now() - deadBegan < 1000, "R8 a lock naming a dead owner does not hold off a conditional replace");
+	check(!fs.existsSync(`${f}.lock`), "R9 a conditional replace leaves no lock behind");
+}
+{
+	const f = fresh(ME);
+	const holder = spawn("sleep", ["0.4"]);
+	fs.writeFileSync(`${f}.lock`, String(holder.pid));
+	const began = Date.now();
+	const replaced = replaceLease(f, "rebuild", ME, ME);
+	const waited = Date.now() - began;
+	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && waited < 2000, `R10 a conditional replace waits while a live owner holds the lock, then lands (waited ${waited} ms)`);
+}
+{
+	const f = fresh(ME);
+	const holder = spawn("sleep", ["0.4"]);
+	fs.writeFileSync(`${f}.lock`, String(holder.pid));
+	const began = Date.now();
+	const replaced = replaceLease(f, "rebuild", ME);
+	const waited = Date.now() - began;
+	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && waited < 2000 && !fs.existsSync(`${f}.lock`), `R11 an unconditional replace takes its turn under the lock too (waited ${waited} ms)`);
+}
+{
+	const f = fresh(ME);
+	const holder = spawn("sleep", ["0.4"]);
+	fs.writeFileSync(`${f}.lock`, String(holder.pid));
+	const began = Date.now();
+	awaitLeaseReplace(f, ME);
+	const waited = Date.now() - began;
+	check(leaseHolder(f) === ME && waited >= 300 && waited < 2000 && !fs.existsSync(`${f}.lock`), `W1 awaiting a replace waits while a live owner holds the lock, and leaves the lease and no lock (waited ${waited} ms)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

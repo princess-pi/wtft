@@ -45,16 +45,55 @@ export function unlinkLeaseIf(file: string, value: string, observed?: LeaseIdent
 	}
 }
 
+const REPLACE_LOCK_WAIT_MS = 5000;
+
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Publish `value` at `file` through a rename, so no reader sees an empty
- * lease. With `expected`, only when the lease still holds it; true when
- * written. Throws when the write itself fails.
+ * lease. It first takes `<file>.lock`, waiting up to `REPLACE_LOCK_WAIT_MS`; a
+ * lock naming a dead owner, or older than that, is taken over. With
+ * `expected`, only when the lock was taken, and, just before the rename, it
+ * still holds the lock and the lease still holds `expected`; else false. True
+ * when written. Throws when the write itself fails.
  */
 export function replaceLease(file: string, value: string, owner: string, expected?: string): boolean {
+	const lock = `${file}.lock`;
+	const locked = takeLock(lock, owner);
+	try {
+		if (expected !== undefined && !locked) return false;
+		return publish(file, value, owner, () => expected === undefined || (leaseHolder(lock) === owner && leaseHolder(file) === expected));
+	} finally {
+		if (locked) unlinkLeaseIf(lock, owner);
+	}
+}
+
+/** Wait, up to `REPLACE_LOCK_WAIT_MS`, for a `replaceLease` of `file` in flight to finish. */
+export function awaitLeaseReplace(file: string, owner: string): void {
+	const lock = `${file}.lock`;
+	if (takeLock(lock, owner)) unlinkLeaseIf(lock, owner);
+}
+
+function takeLock(lock: string, owner: string): boolean {
+	const held = (holder: string) => pidAlive(leasePid(holder)) && lockAgeMs(lock) < REPLACE_LOCK_WAIT_MS;
+	for (const until = Date.now() + REPLACE_LOCK_WAIT_MS; ;) {
+		if (claimLease(lock, owner, held) === "claimed") return true;
+		if (Date.now() >= until) return false;
+		sleepSync(5);
+	}
+}
+
+function lockAgeMs(lock: string): number {
+	try { return Date.now() - fs.statSync(lock).mtimeMs; } catch { return 0; }
+}
+
+function publish(file: string, value: string, owner: string, ready: () => boolean): boolean {
 	const replacement = `${file}.replace-${owner}`;
 	try {
 		fs.writeFileSync(replacement, value);
-		if (expected !== undefined && leaseHolder(file) !== expected) {
+		if (!ready()) {
 			fs.rmSync(replacement, { force: true });
 			return false;
 		}

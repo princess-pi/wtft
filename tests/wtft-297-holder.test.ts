@@ -221,7 +221,78 @@ describe("C3 restartDaemon", () => {
 	});
 });
 
+function harnessRoot(pid: number, version: string): void {
+	const root = path.join(sandbox, `wtft-harness-claude-root${pid}.pid`);
+	fs.writeFileSync(root, String(pid));
+	fs.writeFileSync(`${root}.${pid}.version`, version);
+}
+
 describe("C4 -F", () => {
+	for (const [version, outcome, holder] of [[WTFT_TAGGER_VERSION, "rebuild", "rebuild"], ["0.0.1", "older-harness", "703"]]) {
+		it(`a lease a harness of tagger ${version === WTFT_TAGGER_VERSION ? "this" : "an older"} version took while -F stopped its per-session holder: ${outcome}`, () => {
+			const t = fakeProcessTable();
+			const f = session();
+			t.daemon(704, ["--session", f.file]);
+			t.daemon(703, ["--harness", "claude"]);
+			harnessRoot(703, version);
+			fs.writeFileSync(f.lease, "704");
+			restore = useProcessTable({ ...t, signal(pid, sig) {
+				const sent = t.signal(pid, sig);
+				if (pid === 704 && sig === "SIGTERM") fs.writeFileSync(f.lease, "703");
+				return sent;
+			} });
+			assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), outcome);
+			assert.strictEqual(leaseHolder(f.lease), holder);
+		});
+	}
+	it("a harness lease an older harness took before the rebuild token landed is left to it", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(709, ["--harness", "claude"]);
+		t.daemon(710, ["--harness", "claude"]);
+		harnessRoot(709, WTFT_TAGGER_VERSION);
+		harnessRoot(710, "0.0.1");
+		fs.writeFileSync(f.lease, "709");
+		let moved = false;
+		restore = useProcessTable({ ...t, inspectable() {
+			if (!moved) { moved = true; fs.writeFileSync(f.lease, "710"); }
+			return t.inspectable();
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "older-harness");
+		assert.ok(moved);
+		assert.strictEqual(leaseHolder(f.lease), "710");
+	});
+	it("a lease a per-session daemon took while -F stopped the holder is left to it, busy", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(706, ["--session", f.file]);
+		t.daemon(705, ["--session", f.file]);
+		fs.writeFileSync(f.lease, "706");
+		restore = useProcessTable({ ...t, signal(pid, sig) {
+			const sent = t.signal(pid, sig);
+			if (pid === 706 && sig === "SIGTERM") fs.writeFileSync(f.lease, "705");
+			return sent;
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "busy");
+		assert.strictEqual(leaseHolder(f.lease), "705");
+	});
+	it("a harness lease a per-session daemon took before the rebuild token landed is left to it, busy", () => {
+		const t = fakeProcessTable();
+		const f = session();
+		t.daemon(707, ["--harness", "claude"]);
+		t.daemon(708, ["--session", f.file]);
+		harnessRoot(707, WTFT_TAGGER_VERSION);
+		fs.writeFileSync(f.lease, "707");
+		let moved = false;
+		restore = useProcessTable({ ...t, inspectable() {
+			if (!moved) { moved = true; fs.writeFileSync(f.lease, "708"); }
+			return t.inspectable();
+		} });
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "busy");
+		assert.ok(moved);
+		assert.strictEqual(leaseHolder(f.lease), "708");
+		assert.deepStrictEqual(t.signals, []);
+	});
 	it("a harness gets the rebuild token; a daemon is stopped; a non-daemon is not signalled", () => {
 		const t = fakeProcessTable();
 		restore = useProcessTable(t);

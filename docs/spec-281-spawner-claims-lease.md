@@ -54,7 +54,7 @@ export function claimLeaseForChild(file: string, childPid: number): "claimed" | 
 - **The child, harness:** adoption (`takeOverLease`) already returns true for
   `holder === process.pid`. A `--harness` start that exits before serving (missing root,
   `--session` outside the root, a sixth busy answer for the root pid file) unlinks a lease still
-  naming it. The hand-off exit runs the same unlink, which finds the lease already republished.
+  naming it. The hand-off exit runs the same unlink.
 - **The one trap:** a `--harness` start that finds a live harness points the session at it
   (`pointSessionAt`). That function published the harness pid only when
   `held || !procIsDaemon(holder)`. A lease naming the starting process is a live daemon that is

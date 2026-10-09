@@ -19,7 +19,7 @@ import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 import { repaint, frameRows, eraseFrame, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
+import { awaitLeaseReplace, replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
@@ -519,8 +519,8 @@ export function getDaemonPidPath(sessionPath: string): string {
  * or unreadable tagger version is left alone ("older-harness"). Otherwise the lease and every version of the tag, beside the
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
- * running ("deleted"); a daemon still running 2 s after the signal, or one
- * that claimed the session meanwhile, leaves everything in place ("busy"); a
+ * running ("deleted"); a daemon still running 2 s after the signal leaves
+ * everything in place ("busy"); a
  * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
  * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
  * a lease or tag that cannot be deleted ("undeletable"), and, after the
@@ -550,14 +550,7 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	const kind = verifiedKind(leasePid(initial));
 	if (kind === "harness" && processTable().inspectable()) {
-		const version = harnessTaggerVersion(leasePid(initial));
-		if (taggerIsOlder(version, WTFT_TAGGER_VERSION)) return "older-harness";
-		try {
-			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) return "busy";
-		} catch {
-			return "unwritable";
-		}
-		return deleteTags(sessionPath, version) ? "rebuild" : "stale-tags";
+		return rebuildInHarness(sessionPath, leasePath, initial);
 	}
 	if (kind === "unverified") return "busy";
 	// Its shutdown flushes into the tag, so the tag goes only once it has
@@ -568,11 +561,14 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 		if (outcome === "denied") return "unsignalled";
 		if (outcome === "survived") return "busy";
 	}
-	// A daemon that claimed the session since owns lease and tag; leave both.
 	let now = "";
 	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
-	if (now !== "" && now !== initial) return "busy";
+	if (now !== "" && now !== initial) {
+		if (now === "rebuild") return "rebuild";
+		if (!processTable().inspectable() || verifiedKind(leasePid(now)) !== "harness") return "busy";
+		return rebuildInHarness(sessionPath, leasePath, now);
+	}
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
 	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
@@ -584,6 +580,29 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	}
 	if (!deleteTags(sessionPath)) return "undeletable";
 	return stopped ? "stopped" : "deleted";
+}
+
+/** Mark the lease `rebuild` for harness `holder`, or, when the lease has meanwhile passed to
+ *  another harness, once more for that one. */
+function rebuildInHarness(sessionPath: string, leasePath: string, holder: string, again = true): "rebuild" | "busy" | "older-harness" | "stale-tags" | "unwritable" | "unreadable" {
+	const owner = String(process.pid);
+	const version = harnessTaggerVersion(leasePid(holder));
+	let refused: "busy" | "older-harness";
+	if (taggerIsOlder(version, WTFT_TAGGER_VERSION)) {
+		awaitLeaseReplace(leasePath, owner);
+		refused = "older-harness";
+	} else {
+		try { if (replaceLease(leasePath, "rebuild", owner, holder)) return deleteTags(sessionPath, version) ? "rebuild" : "stale-tags"; }
+		catch { return "unwritable"; }
+		refused = "busy";
+	}
+	if (!again) return refused;
+	let now = "";
+	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
+	if (now === holder) return refused;
+	if (now === "rebuild") return "rebuild";
+	return verifiedKind(leasePid(now)) === "harness" ? rebuildInHarness(sessionPath, leasePath, now, false) : "busy";
 }
 
 /** Delete every version of the session's tag but `keep`, beside the transcript and in the sibling

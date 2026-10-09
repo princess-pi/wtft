@@ -34,9 +34,9 @@ is still unwritten after 1 h, and when its lease names another holder. Spawned o
 `session_start` and `agent_end`, by `/wtft -F`, on a CLI report, by `r` in `--watch`, and by `wtft-daemon --restart`. A per-session process is revived after an idle exit and replaced on a
 version bump, and a harness daemon from an older tagger is replaced (SIGTERM, SIGKILL after 2 s) by the next start
 from a newer one. On Linux, a live harness
-daemon is left running; a later start asks it for the session and points the session's lease
-at it unless another live daemon holds that lease or it reads `rebuild`, because
-that check reads `/proc/<pid>/cmdline`. Health is one answer, `health()` in
+daemon is left running; a later start asks it for the session and may point the session's lease
+at it, never over `rebuild` or a holder it identifies as another live daemon, which
+it does by reading `/proc/<pid>/cmdline`. Health is one answer, `health()` in
 `wtft-daemon-lib.ts` over `extensions/lib/daemon-health.ts`, rendered via `renderDaemonStatus()`.
 
 *Two registers, one concept.* Say **"log parser daemon"** in high-level user-facing prose — doc
@@ -72,7 +72,7 @@ daemon itself or, the moment it spawns one, by its spawner for the child's pid (
 spawner leaves a `rebuild` token or a live daemon holder alone (a live process that is not a daemon is displaced, spec-holder); it takes the claim back for a child
 already dead, and the CLI's startup wait for one it sees exit), a release
 unlinks only a lease that still holds what the caller read (and, when the caller hands over the
-identity it observed, on that inode), a replacement is a rename. A harness daemon's root pid file is a different
+identity it observed, on that inode), a replacement is a rename, after waiting for the lease's lock. A harness daemon's root pid file is a different
 file.
 _Avoid_: lock file, session pid file
 

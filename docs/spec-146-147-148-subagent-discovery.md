@@ -1,5 +1,7 @@
 # Spec 146 / 147 / 148 — subagent discovery: unreadable metadata, head reads, unbounded depth
 
+**Superseded by `docs/spec-wtft-parser.md`**, the live spec for discovery. Read this file as the record of the change, not as current behaviour.
+
 **Issues:** [#146](https://github.com/princess-pi/wtft/issues/146),
 [#147](https://github.com/princess-pi/wtft/issues/147),
 [#148](https://github.com/princess-pi/wtft/issues/148) ·

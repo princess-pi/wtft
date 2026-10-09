@@ -1,7 +1,7 @@
 # Discovery — which child transcripts a session's total takes in
 
 The live spec for the discovery functions of `extensions/lib/wtft-parser.ts`. A behaviour change
-in them edits this file. Its scope is discovery only: the rest of the module (parsing,
+in them edits this file. Its change records are in §8. Its scope is discovery only: the rest of the module (parsing,
 classification, `claude -p` attribution) is still described by its per-issue specs. Vocabulary:
 `CONTEXT.md` (Session, Subagent session, Subagent meta, Provisional).
 
@@ -130,11 +130,18 @@ Never throws.
 A session path that is a directory, and a real directory named `*.jsonl` in the sibling scan, have
 no test of their own.
 
-## 7. Per-issue specs behind it
+## 7. Related
 
-These record how discovery got here. Where one disagrees with this file, this file is current.
+These cover discovery and more besides, so they stay live for their other parts. Where one
+disagrees with this file about discovery, this file is current.
+
+- `docs/spec-369-skip-unreadable-discovery.md` — a candidate discovery cannot read is a non-match.
+- `docs/spec-107-spawn-discovery.md` — one `claude -p` discovery per spawn directory.
+
+## 8. Change records
+
+These describe how discovery got here, and each says so in its header. Where one disagrees with
+this file, this file is current.
 
 - `docs/spec-146-147-148-subagent-discovery.md` — meta read errors, first-line reads, no depth cap.
-- `docs/spec-369-skip-unreadable-discovery.md` — a candidate discovery cannot read is a non-match.
 - `docs/spec-479-pi-discovery-enoent.md` — a session transcript not written yet is not a failure.
-- `docs/spec-107-spawn-discovery.md` — one `claude -p` discovery per spawn directory.

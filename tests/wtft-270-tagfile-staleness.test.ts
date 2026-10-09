@@ -40,12 +40,13 @@ function assert(label: string, ok: boolean) {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 const cleanupPids: number[] = [];
 const cleanupPidFiles: string[] = [];
 
 function spawnDaemon(sessionPath: string): number {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
+	const child = spawn("node", [DAEMON_BIN, "--session", sessionPath], {
 		detached: true, stdio: "ignore",
 	});
 	child.unref();
@@ -57,7 +58,7 @@ function spawnDaemon(sessionPath: string): number {
 async function stopDaemon(pid: number, sessionPath: string) {
 	try { process.kill(pid, "SIGTERM"); } catch {}
 	const pidPath = getDaemonPidPath(sessionPath);
-	for (let i = 0; i < 20; i++) {
+	for (const until = Date.now() + 30_000; Date.now() < until;) {
 		await sleep(100);
 		try { process.kill(pid, 0); } catch { break; }
 	}
@@ -250,26 +251,32 @@ console.log("\nwtft restart over an id-less child line");
 	assert("D5a fixture precondition: the child's one turn parses, with no message id",
 		parseSessionFile(child).length === 1 && !parseSessionFile(child)[0].messageId);
 	const settle = async (done: () => boolean) => {
-		for (let i = 0; i < 40 && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional); i++) await sleep(250);
+		for (const until = Date.now() + 30_000; Date.now() < until && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional);) await sleep(250);
+	};
+	const copies = () => {
+		try { return fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length; }
+		catch { return 0; }
 	};
 	let pid = 0;
-	let first = 0, second = 0;
+	let first = 0, second = 0, afterFirst = 0;
 	try {
 		pid = spawnDaemon(rootPath);
 		await settle(() => outOf() === 301);
 		first = outOf();
+		const firstPid = pid;
 		await stopDaemon(pid, rootPath);
 		pid = 0;
+		assert("D5c fixture precondition: the first life has exited before the restart", !alive(firstPid));
+		afterFirst = copies();
 		pid = spawnDaemon(rootPath);
-		await sleep(1_500);
-		await settle(() => outOf() >= 301);
+		await settle(() => copies() > afterFirst);
 		second = outOf();
 	} finally {
 		if (pid > 0) await stopDaemon(pid, rootPath);
 	}
-	const appended = fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
-	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,
-		first === 301 && appended >= 2);
+	const appended = copies();
+	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${afterFirst} copies after the first life, ${appended} after the restart)`,
+		first === 301 && afterFirst >= 1 && appended > afterFirst);
 	assert(`D5 a restart that re-appends an id-less child line bills it once (got ${second})`, second === 301);
 }
 

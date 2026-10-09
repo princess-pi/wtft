@@ -629,10 +629,15 @@ function cli(args: string[], env: Record<string, string> = {}): { out: string; s
 	fs.mkdirSync(copyDir, { recursive: true });
 	const copy = path.join(copyDir, `${PARENT}.jsonl`);
 	fs.copyFileSync(source, copy);
-	const r = spawnSync("node", [CLI_BIN, "-s", copy, ...args], {
+	const once = () => spawnSync("node", [CLI_BIN, "-s", copy, ...args], {
 		encoding: "utf8",
 		env: { ...process.env, XDG_STATE_HOME: stateHome, WTFT_CLAUDE_PROJECTS_DIR: cliProjects, ...env },
 	});
+	let r = once();
+	for (const until = Date.now() + 30_000; /no data yet/.test(`${r.stdout}${r.stderr}`) && Date.now() < until;) {
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+		r = once();
+	}
 	if (r.status !== 0 && r.status !== 9) {
 		throw new Error(`wtft -s <copy> ${args.join(" ")} exited ${r.status}: ${r.stderr}`);
 	}

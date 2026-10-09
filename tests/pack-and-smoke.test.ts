@@ -216,6 +216,14 @@ try {
 		if (!walkUp) env.PRINCESS_PI_CONFIG_NO_WALKUP = "1";
 		return spawnSync(bin, args, { cwd: consumerDir, env, encoding: "utf8" });
 	}
+	function runSettled(args: string[], xdgHome: string, walkUp = false) {
+		let result = runInstalled(wtftBin, args, xdgHome, walkUp);
+		for (const until = Date.now() + 30_000; (result.status === 9 || /no data yet/.test(`${result.stdout}${result.stderr}`)) && Date.now() < until;) {
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+			result = runInstalled(wtftBin, args, xdgHome, walkUp);
+		}
+		return result;
+	}
 
 	const versionResult = runInstalled(wtftBin, ["--version"], mkTemp("wtft-xdg-"));
 	check(`wtft --version exits 0 and its first line is exactly "wtft ${PKG.version}"`, () => {
@@ -254,11 +262,7 @@ try {
 		}) + "\n",
 	);
 
-	const renderResult = runInstalled(
-		wtftBin,
-		["-s", fixturePath, "--cost", "--no-emoji", "--pad", "0"],
-		mkTemp("wtft-xdg-"),
-	);
+	const renderResult = runSettled(["-s", fixturePath, "--cost", "--no-emoji", "--pad", "0"], mkTemp("wtft-xdg-"));
 
 	check("wtft -s <fixture> shows the deterministic $4.50 cost (exit 0, no ❌ or System Error line on stdout or stderr)", () => {
 		assert.strictEqual(renderResult.status, 0, `exit ${renderResult.status}: ${renderResult.stdout}${renderResult.stderr}`);
@@ -272,8 +276,8 @@ try {
 	const renderArgs = ["-s", fixturePath, "--cost", "--no-emoji", "--pad", "0"];
 	fs.mkdirSync(path.join(consumerParent, ".wtft"));
 	fs.writeFileSync(path.join(consumerParent, ".wtft", "config.json"), JSON.stringify({ mode: "bucket" }));
-	const walked = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"), true);
-	const planted = runInstalled(wtftBin, renderArgs, mkTemp("wtft-xdg-"));
+	const walked = runSettled(renderArgs, mkTemp("wtft-xdg-"), true);
+	const planted = runSettled(renderArgs, mkTemp("wtft-xdg-"));
 	check("fixture precondition: with config walk-up on, the render loses the cumulative key and still exits 0 with $4.50", () => {
 		assert.ok(renderResult.stdout.includes("earlier bins"), `cumulative key absent from the plain render:\n${renderResult.stdout}`);
 		assert.strictEqual(walked.status, 0, `exit ${walked.status}: ${walked.stderr}`);

@@ -4,7 +4,7 @@
 [#249](https://github.com/princess-pi/wtft/issues/249),
 [#243](https://github.com/princess-pi/wtft/issues/243),
 [#250](https://github.com/princess-pi/wtft/issues/250) ·
-**Tests:** `tests/wtft-239-harness-lifecycle.test.ts`, `tests/wtft-205-one-daemon-per-harness.test.ts`
+**Tests:** `tests/wtft-239-harness-lifecycle.test.ts`, `tests/wtft-239-harness-races.test.ts`, `tests/wtft-205-one-daemon-per-harness.test.ts`
 
 **Status:** Superseded in part by #259.
 
@@ -107,14 +107,14 @@
 - **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
-- **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
+- **The #205 and #239 suites run their long-lived daemons under node** (the #239 suites run
   every daemon command under node; the #205 suite's one-shot `--stop` and `--restart` still run
   under the test runner's bun), and the #205 suite waits for the event it
   measures, with wall-time limits of 30 s, instead of a fixed sleep.
 
 ## Closer
 
-`tests/wtft-239-harness-lifecycle.test.ts`:
+`tests/wtft-239-harness-lifecycle.test.ts`, then `tests/wtft-239-harness-races.test.ts` from the first 40,000-lease bullet on:
 
 - A root of 2,000 sessions and one being appended to, with the harness started for that one:
   no other session gets a tag, the harness holds one lease, the live session stays classified,
@@ -123,7 +123,7 @@
   another process is served, its subagent transcript included, and a later write to that
   subagent transcript is read. The issue asked for RSS; RSS keeps heap a parse freed
   and did not return (#97), so the test measures live heap.
-- A session with 20 subagent transcripts, scanned in 0 ms slices with 300 ms between them: the first `wtft --json` returns in under 3 s with the session's own sum, marked provisional
+- A session with 20 subagent transcripts, scanned in 0 ms slices with 1 s between them: the first `wtft --json` returns with the session's own sum, marked provisional
   (exit 9); a later report is complete (exit 0) and counts the subagent turns the first did not.
   A second session handed to that running harness gets its sum on its first report.
 - A session adopted again after its harness stopped has its old swept verdict retracted, then

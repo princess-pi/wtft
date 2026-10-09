@@ -87,7 +87,7 @@ across sessions), the hand-off file I/O, and starting and stopping the harness.
 
 `tests/wtft-270-harness-registry.test.ts`, in memory, no daemon process: **S** serve, **M** move,
 **I** idle, **R** retries, **D** drop and **H** the hand-off round trip, each as §2 states it. The
-process-level suites (`tests/wtft-205-*`, `wtft-239-harness-lifecycle`,
+process-level suites (`tests/wtft-205-*`, `wtft-239-harness-*`,
 `wtft-259-daemon-correctness`, `wtft-262-daemon-gaps`) check the daemon around it.
 `tests/wtft-276-list-lease-session.test.ts` checks `sessionsByLease` in memory, then that
 `wtft-daemon --list` names each of a harness's two leases by its own session.

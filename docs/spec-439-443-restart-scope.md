@@ -2,7 +2,7 @@
 
 Issues: https://github.com/princess-pi/wtft/issues/439, https://github.com/princess-pi/wtft/issues/443 ·
 Module: `bin/wtft-daemon.ts` (the `--restart` pass) · Also: `bin/install-wtft`, `extensions/lib/cli/daemon-command.ts` ·
-Tests: `tests/wtft-274-restart.test.ts` (P1–P3), `tests/wtft-46-install-wtft.test.ts` (V11h), `tests/wtft-443-cli-restart-wait.test.ts`
+Tests: `tests/wtft-274-restart.test.ts` (P1–P3), `tests/wtft-46-install-wtft-host.test.ts` (V11h), `tests/wtft-443-cli-restart-wait.test.ts`
 
 ## Behaviour
 

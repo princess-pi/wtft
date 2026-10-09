@@ -40,6 +40,7 @@ const SOLO = [
 	"wtft-96-fixture-daemons.test.ts",
 	"wtft-205-one-daemon-per-harness.test.ts",
 	"wtft-46-install-wtft.test.ts",
+	"wtft-46-install-wtft-host.test.ts",
 ];
 
 /** Last run's per-suite times, so the slowest start first and the pool's tail

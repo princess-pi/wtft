@@ -33,7 +33,7 @@ the second and not the first, and a `cd` after the last spawn is where the shell
 where anything ran. Each spawn takes the `cd` state standing when the shell reached it, which is
 also what keeps a segment that merely names claude (`which claude`) from ending the scan.
 
-**A spawn with no `cd` searches the session's own working directory.** "Own working directory" is
+**A direct `claude` spawn with no `cd` searches the session's own working directory.** "Own working directory" is
 resolved from the session's own transcript with `resolveLastCwd` (`extensions/lib/harness/session-cwd.ts`),
 not from the transcript's path.
 

@@ -218,7 +218,7 @@ try {
 	}
 	function runSettled(args: string[], xdgHome: string, walkUp = false) {
 		let result = runInstalled(wtftBin, args, xdgHome, walkUp);
-		for (const until = Date.now() + 30_000; result.status === 9 && Date.now() < until;) {
+		for (const until = Date.now() + 30_000; (result.status === 9 || /no data yet/.test(`${result.stdout}${result.stderr}`)) && Date.now() < until;) {
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
 			result = runInstalled(wtftBin, args, xdgHome, walkUp);
 		}

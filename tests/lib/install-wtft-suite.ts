@@ -20,17 +20,6 @@ export function skip(label: string) { console.log(`  ${YELLOW}SKIP${RESET} ${lab
 export const REPO = path.resolve(import.meta.dirname, "..", "..");
 export const INSTALLER = path.join(REPO, "bin", "install-wtft");
 
-// install-wtft builds before it copies, so the PATH handed to it needs bun — but
-// handing it bun's OWN directory is a trap that arms itself the first time
-// anybody uses this tool for real. On this host `bun` is `~/bin/bun`, and `~/bin`
-// is install-wtft's DEFAULT TARGET: the moment a real run puts `~/bin/wtft`
-// there, every child in this suite sees a foreign `wtft` first on PATH and seven
-// checks start failing on a working installer.
-//
-// So the child gets a directory containing exactly one entry, a `bun` symlink,
-// and nothing else can leak in. (Not `path.dirname(process.execPath)` either:
-// under this runner that is the npm package's internal `bun.exe` directory,
-// which holds no `bun` command at all.)
 export const BUN_DIR = (() => {
 	let real = "";
 	try { real = execSync("command -v bun", { encoding: "utf8" }).trim(); } catch { return ""; }
@@ -41,24 +30,9 @@ export const BUN_DIR = (() => {
 
 execSync("bun run build", { cwd: REPO, stdio: "pipe" });
 
-/**
- * Run the installer with a PATH we control. Never inherits the real one.
- *
- * A FAILED SPAWN RETURNS -1, NOT 1. `execFileSync` on a file that does not
- * exist throws with `status === undefined`, so the obvious `e.status ?? 1`
- * makes "there is no installer" indistinguishable from "the installer reported
- * drift" — and the drift check below then PASSES on an empty repo. It did,
- * once, while this file was being written. -1 is outside the documented
- * exit-code table, so every check that names a real code fails honestly.
- */
-/**
- * A PRIVATE HOME/XDG_CONFIG_HOME, fresh per call, unless `env` overrides them.
- * #156 gave install-wtft a config-migration side effect — it now READS AND
- * MOVES files under XDG_CONFIG_HOME — so a caller that inherited the real
- * HOME (every one of them did, before this) would touch this host's actual
- * ~/.config the moment that landed. Never touch the real ~/.config from a
- * test: build a throwaway one instead.
- */
+/** Run the installer with PATH set to `pathDirs`, bun and the system dirs, and a fresh HOME
+ *  and XDG_CONFIG_HOME unless `env` sets them. Returns its exit code, or -1 when it could not
+ *  be spawned. */
 export function run(
 	args: string[],
 	pathDirs: string[] = [],

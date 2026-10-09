@@ -107,14 +107,14 @@
 - **Neither the startup reaper, `--cleanup` nor `--stop` acts on a harness daemon for its
   start-up `--session`.** `--stop` drops a session from a harness only through that session's
   own lease. The harness drops a gone session itself.
-- **The #205 and #239 suites run their long-lived daemons under node** (the #239 suite runs
+- **The #205 and #239 suites run their long-lived daemons under node** (the #239 suites run
   every daemon command under node; the #205 suite's one-shot `--stop` and `--restart` still run
   under the test runner's bun), and the #205 suite waits for the event it
   measures, with wall-time limits of 30 s, instead of a fixed sleep.
 
 ## Closer
 
-`tests/wtft-239-harness-lifecycle.test.ts`, then `tests/wtft-239-harness-races.test.ts` from the `--restart` race on:
+`tests/wtft-239-harness-lifecycle.test.ts`, then `tests/wtft-239-harness-races.test.ts` from the first 40,000-lease bullet on:
 
 - A root of 2,000 sessions and one being appended to, with the harness started for that one:
   no other session gets a tag, the harness holds one lease, the live session stays classified,

@@ -252,24 +252,28 @@ console.log("\nwtft restart over an id-less child line");
 	const settle = async (done: () => boolean) => {
 		for (const until = Date.now() + 30_000; Date.now() < until && !(done() && !readTagFileWithVerdict(restartTag).provisional.provisional);) await sleep(250);
 	};
-	const copies = () => fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length;
+	const copies = () => {
+		try { return fs.readFileSync(restartTag, "utf8").split("\n").filter(l => l.includes('"no id"') || (l.includes('"out":300') && !l.includes('"_'))).length; }
+		catch { return 0; }
+	};
 	let pid = 0;
-	let first = 0, second = 0;
+	let first = 0, second = 0, afterFirst = 0;
 	try {
 		pid = spawnDaemon(rootPath);
 		await settle(() => outOf() === 301);
 		first = outOf();
 		await stopDaemon(pid, rootPath);
 		pid = 0;
+		afterFirst = copies();
 		pid = spawnDaemon(rootPath);
-		await settle(() => copies() >= 2);
+		await settle(() => copies() > afterFirst);
 		second = outOf();
 	} finally {
 		if (pid > 0) await stopDaemon(pid, rootPath);
 	}
 	const appended = copies();
-	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${appended} copies on disk)`,
-		first === 301 && appended >= 2);
+	assert(`D5b fixture precondition: the first life billed it once, and the restart appended the line again (${afterFirst} copies after the first life, ${appended} after the restart)`,
+		first === 301 && afterFirst >= 1 && appended > afterFirst);
 	assert(`D5 a restart that re-appends an id-less child line bills it once (got ${second})`, second === 301);
 }
 

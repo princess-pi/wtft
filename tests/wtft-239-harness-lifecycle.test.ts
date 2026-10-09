@@ -78,9 +78,7 @@ try {
 			fs.writeFileSync(path.join(sub, `agent-${a}.jsonl`), body);
 		}
 		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
-		// 300 ms between slices makes reading the 20
-		// subagent transcripts outlast the first report by several 667 ms beats.
-		const slow = { ...envFor(root), WTFT_HARNESS_SCAN_SLICE_MS: "0", WTFT_HARNESS_SCAN_YIELD_MS: "300" };
+		const slow = { ...envFor(root), WTFT_HARNESS_SCAN_SLICE_MS: "0", WTFT_HARNESS_SCAN_YIELD_MS: "1000" };
 		const first = spawnSync("node", [cli, "--json", "-s", session], { encoding: "utf8", env: slow, timeout: 30_000 });
 		let doc: any = null;
 		try { doc = JSON.parse(first.stdout); } catch { /* checked below */ }

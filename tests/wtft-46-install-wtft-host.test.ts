@@ -13,11 +13,6 @@ import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon.ts";
 import { getDaemonPidPath } from "../extensions/lib/wtft-daemon-lib.ts";
 import { check, skip, REPO, INSTALLER, BUN_DIR, run, finish } from "./lib/install-wtft-suite.ts";
 
-// ---
-// 10. The `claude` PATH guard (#30, spec-194-p9-housekeeping.md § H3). A fake
-//    `claude` is never executed by install-wtft — only read (head + grep) —
-//    so its body need not be valid shell past the shebang line.
-// ---
 console.log("\n10. The claude-nsp-guard shim: ok, shadowed (exit 5), absent, mid-line non-match, precedence");
 {
 	const SENTINEL = "# nsp-guard-identity: 9a1c-claude-nsp-guard-sentinel";

@@ -40,12 +40,13 @@ function assert(label: string, ok: boolean) {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 const cleanupPids: number[] = [];
 const cleanupPidFiles: string[] = [];
 
 function spawnDaemon(sessionPath: string): number {
-	const child = spawn(process.execPath, [DAEMON_BIN, "--session", sessionPath], {
+	const child = spawn("node", [DAEMON_BIN, "--session", sessionPath], {
 		detached: true, stdio: "ignore",
 	});
 	child.unref();
@@ -57,7 +58,7 @@ function spawnDaemon(sessionPath: string): number {
 async function stopDaemon(pid: number, sessionPath: string) {
 	try { process.kill(pid, "SIGTERM"); } catch {}
 	const pidPath = getDaemonPidPath(sessionPath);
-	for (let i = 0; i < 20; i++) {
+	for (const until = Date.now() + 30_000; Date.now() < until;) {
 		await sleep(100);
 		try { process.kill(pid, 0); } catch { break; }
 	}
@@ -262,8 +263,10 @@ console.log("\nwtft restart over an id-less child line");
 		pid = spawnDaemon(rootPath);
 		await settle(() => outOf() === 301);
 		first = outOf();
+		const firstPid = pid;
 		await stopDaemon(pid, rootPath);
 		pid = 0;
+		assert("D5c fixture precondition: the first life has exited before the restart", !alive(firstPid));
 		afterFirst = copies();
 		pid = spawnDaemon(rootPath);
 		await settle(() => copies() > afterFirst);

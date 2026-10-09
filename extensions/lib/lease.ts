@@ -70,6 +70,12 @@ export function replaceLease(file: string, value: string, owner: string, expecte
 	}
 }
 
+/** Wait, up to `REPLACE_LOCK_WAIT_MS`, for a `replaceLease` of `file` in flight to finish. */
+export function awaitLeaseReplace(file: string, owner: string): void {
+	const lock = `${file}.lock`;
+	if (takeLock(lock, owner)) unlinkLeaseIf(lock, owner);
+}
+
 function takeLock(lock: string, owner: string): boolean {
 	const held = (holder: string) => pidAlive(leasePid(holder)) && lockAgeMs(lock) < REPLACE_LOCK_WAIT_MS;
 	for (const until = Date.now() + REPLACE_LOCK_WAIT_MS; ;) {

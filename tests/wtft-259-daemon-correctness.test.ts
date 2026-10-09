@@ -542,6 +542,63 @@ mock.module("node:fs", () => ({ ...realFs, truncateSync, default: { ...realFs, t
 		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
 	}
 
+	console.log("\n-F reports a newer harness's rebuilt tag, not a stale tag of the CLI's version");
+	{
+		const root = makeRoot("force-newer-stale");
+		const target = session(root, "stale-target");
+		const newerDir = path.join(root, "newer-build");
+		fs.mkdirSync(newerDir);
+		fs.writeFileSync(path.join(newerDir, "wtft-daemon.mjs"), read(DAEMON).replace(/var WTFT_TAGGER_VERSION = "[^"]*";/, 'var WTFT_TAGGER_VERSION = "999.0.0";'));
+		const newerTag = path.join(path.dirname(target), "wtft-tags", `${path.basename(target)}.wtft-tag.v999.0.0.jsonl`);
+		const fd = fs.openSync(path.join(root, "newer.err"), "a");
+		const child = spawn("node", [path.join(newerDir, "wtft-daemon.mjs"), "--harness", "claude", "--session", target], {
+			detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root),
+		});
+		child.unref();
+		fs.closeSync(fd);
+		if (child.pid) pids.push(child.pid);
+		check(await until(() => read(newerTag).includes('"stale-target"'), 15_000) !== Infinity, "fixture: the newer harness serves the target");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const costOf = (out: string) => { try { return JSON.parse(out)?.total?.costUsd ?? NaN; } catch { return NaN; } };
+		const oneTurn = costOf(spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 }).stdout);
+		const row = read(newerTag).split("\n").find(l => l.includes('"stale-target"')) ?? "";
+		const staleTag = getCurrentVersionTagPath(target);
+		fs.writeFileSync(staleTag, row + "\n" + row.replace('"stale-target"', '"stale-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "stale-bogus"), "fixture precondition: a tag of the CLI's version beside the transcript carries a row the transcript does not");
+		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(forced.status === 9, `-F reports the newer build's tag, provisional (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		check(oneTurn > 0 && Math.abs(costOf(forced.stdout) - oneTurn) < 1e-9, `-F's report counts the transcript's one row and not the stale tag's extra one ($${costOf(forced.stdout)}, one row $${oneTurn})`);
+		const later = spawnSync("node", [cli, "--json", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(Math.abs(costOf(later.stdout) - oneTurn) < 1e-9, `a later wtft reads the rebuilt tag too ($${costOf(later.stdout)})`);
+		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
+	console.log("\n-F on a session an older harness serves says the builds differ and touches nothing");
+	{
+		const root = makeRoot("force-older");
+		const target = session(root, "older-target");
+		const olderDir = path.join(root, "older-build");
+		fs.mkdirSync(olderDir);
+		fs.writeFileSync(path.join(olderDir, "wtft-daemon.mjs"), read(DAEMON).replace(/var WTFT_TAGGER_VERSION = "[^"]*";/, 'var WTFT_TAGGER_VERSION = "0.0.1";'));
+		const olderTag = path.join(path.dirname(target), "wtft-tags", `${path.basename(target)}.wtft-tag.v0.0.1.jsonl`);
+		const fd = fs.openSync(path.join(root, "older.err"), "a");
+		const child = spawn("node", [path.join(olderDir, "wtft-daemon.mjs"), "--harness", "claude", "--session", target], {
+			detached: true, stdio: ["ignore", "ignore", fd], env: envFor(root),
+		});
+		child.unref();
+		fs.closeSync(fd);
+		if (child.pid) pids.push(child.pid);
+		check(await until(() => read(olderTag).includes('"older-target"'), 15_000) !== Infinity, "fixture: the older harness serves the target");
+		const lease = getDaemonPidPath(target);
+		check(read(lease).trim() === String(child.pid), "fixture precondition: the older harness holds the target's lease");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const forced = spawnSync("node", [cli, "--json", "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(forced.status === 1 && forced.stderr.includes("install-wtft") && forced.stdout === "",
+			`-F exits 1 naming bin/install-wtft, with no report (exit ${forced.status}: ${forced.stderr.trim().slice(0, 300)})`);
+		check(alive(child.pid ?? 0) && read(lease).trim() === String(child.pid), "the older harness keeps running and keeps the lease");
+		if (child.pid) { try { process.kill(child.pid, "SIGTERM"); } catch { /* gone */ } }
+	}
+
 	console.log("\nAn older per-session build never takes over from a newer one");
 	{
 		const root = makeRoot("older");

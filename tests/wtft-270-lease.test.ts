@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { claimLease, unlinkLeaseIf, replaceLease, leaseHolder, leaseIdentity } from "../extensions/lib/lease.ts";
+import { awaitLeaseReplace, claimLease, unlinkLeaseIf, replaceLease, leaseHolder, leaseIdentity } from "../extensions/lib/lease.ts";
 import { trackSandbox } from "./lib/sandbox";
 
 let passed = 0;
@@ -121,6 +121,15 @@ console.log("\nPART R — replaceLease");
 	const replaced = replaceLease(f, "rebuild", ME);
 	const waited = Date.now() - began;
 	check(replaced && leaseHolder(f) === "rebuild" && waited >= 300 && waited < 2000 && !fs.existsSync(`${f}.lock`), `R11 an unconditional replace takes its turn under the lock too (waited ${waited} ms)`);
+}
+{
+	const f = fresh(ME);
+	const holder = spawn("sleep", ["0.4"]);
+	fs.writeFileSync(`${f}.lock`, String(holder.pid));
+	const began = Date.now();
+	awaitLeaseReplace(f, ME);
+	const waited = Date.now() - began;
+	check(leaseHolder(f) === ME && waited >= 300 && waited < 2000 && !fs.existsSync(`${f}.lock`), `W1 awaiting a replace waits while a live owner holds the lock, and leaves the lease and no lock (waited ${waited} ms)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

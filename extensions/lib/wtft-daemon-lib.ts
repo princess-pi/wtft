@@ -19,7 +19,7 @@ import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
 import { repaint, frameRows, eraseFrame, type RepaintFrame } from "./watch-repaint.js";
 import { tagRecords, parseTagLine, currentGeneration, sweepState, isDataRecord, type TagRecord } from "./tag-log.js";
-import { replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
+import { awaitLeaseReplace, replaceLease, unlinkLeaseIf, leaseHolder, claimLeaseForChild, leasePid } from "./lease.js";
 import { classifyPid, holdsLease, mayStop, processTable, stopHolder, stopHolderSync, verifiedKind, type StopOptions } from "./holder.js";
 import {
 	decideHealth, readHealthFacts, daemonReasonText, IDLE_THRESHOLD_MS,
@@ -410,7 +410,7 @@ export function seedClassifiedTagFile(tagPath: string): { interactions: Interact
 
 
 export { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
-import { WTFT_TAGGER_VERSION } from "./wtft-tagger-version.js";
+import { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
 	const split = splitOverheadCost(interaction, prevCtxTokens);
@@ -514,18 +514,21 @@ export function getDaemonPidPath(sessionPath: string): string {
 /**
  * `wtft -F`: rederive one session's tag from its transcript. A session a
  * harness daemon serves gets a `rebuild` lease, which that harness rebuilds as
- * soon as it sees it, so the harness and its other sessions keep running
- * ("rebuild"). Otherwise the lease and every version of the tag, beside the
+ * soon as it sees it, so the harness and its other sessions keep running, and
+ * every other version of the tag is deleted ("rebuild"); a harness of an older
+ * or unreadable tagger version is left alone ("older-harness"). Otherwise the lease and every version of the tag, beside the
  * transcript or in the sibling project a moved session's tag lives in, are
  * deleted, after stopping a live per-session daemon ("stopped") or with none
  * running ("deleted"); a daemon still running 2 s after the signal leaves
  * everything in place ("busy"); a
  * lease that cannot be read ("unreadable"), a rebuild lease that cannot be
  * written ("unwritable"), a daemon that cannot be signalled ("unsignalled"),
- * and a lease or tag that cannot be deleted ("undeletable") are failures.
+ * a lease or tag that cannot be deleted ("undeletable"), and, after the
+ * rebuild lease is written, a tag of another version that cannot be deleted
+ * ("stale-tags") are failures.
  * Unless busy or a failure, the caller then asks for the session.
  */
-export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable";
+export type ForceRebuildFailure = "unreadable" | "unwritable" | "unsignalled" | "undeletable" | "older-harness" | "stale-tags";
 
 /** What a failed `-F` could not do, as a sentence fragment, or null. */
 export function describeForceRebuildFailure(how: string): string | null {
@@ -534,6 +537,8 @@ export function describeForceRebuildFailure(how: string): string | null {
 		case "unwritable": return "the rebuild lease could not be written";
 		case "unsignalled": return "its log parser daemon could not be signalled";
 		case "undeletable": return "a lease or tag file could not be deleted, so it would be resumed rather than rebuilt";
+		case "stale-tags": return "the rebuild was requested, but a tag of another version could not be deleted, so a report may read that tag";
+		case "older-harness": return "the harness log parser daemon serving it is an older build than this wtft, or its version could not be read; run bin/install-wtft, then -F again";
 		default: return null;
 	}
 }
@@ -545,17 +550,7 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
 	const kind = verifiedKind(leasePid(initial));
 	if (kind === "harness" && processTable().inspectable()) {
-		try {
-			if (!replaceLease(leasePath, "rebuild", String(process.pid), initial)) {
-				let now = "";
-				try { now = fs.readFileSync(leasePath, "utf8").trim(); }
-				catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
-				if (now !== "rebuild" && (verifiedKind(leasePid(now)) !== "harness" || !replaceLease(leasePath, "rebuild", String(process.pid), now))) return "busy";
-			}
-		} catch {
-			return "unwritable";
-		}
-		return "rebuild";
+		return rebuildInHarness(sessionPath, leasePath, initial);
 	}
 	if (kind === "unverified") return "busy";
 	// Its shutdown flushes into the tag, so the tag goes only once it has
@@ -572,8 +567,7 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 	if (now !== "" && now !== initial) {
 		if (now === "rebuild") return "rebuild";
 		if (!processTable().inspectable() || verifiedKind(leasePid(now)) !== "harness") return "busy";
-		try { return replaceLease(leasePath, "rebuild", String(process.pid), now) ? "rebuild" : "busy"; }
-		catch { return "unwritable"; }
+		return rebuildInHarness(sessionPath, leasePath, now);
 	}
 	// Anything left behind would be resumed, not rebuilt, so any error but
 	// "already gone" fails the whole -F.
@@ -584,23 +578,66 @@ export function forceRebuildSession(sessionPath: string, stopOpts: StopOptions =
 		catch (err) { if (!gone(err)) return "unreadable"; }
 		if (after !== null) return after !== now ? "busy" : "undeletable";
 	}
+	if (!deleteTags(sessionPath)) return "undeletable";
+	return stopped ? "stopped" : "deleted";
+}
+
+/** Mark the lease `rebuild` for harness `holder`, or, when the lease has meanwhile passed to
+ *  another harness, once more for that one. */
+function rebuildInHarness(sessionPath: string, leasePath: string, holder: string, again = true): "rebuild" | "busy" | "older-harness" | "stale-tags" | "unwritable" | "unreadable" {
+	const owner = String(process.pid);
+	const version = harnessTaggerVersion(leasePid(holder));
+	let refused: "busy" | "older-harness";
+	if (taggerIsOlder(version, WTFT_TAGGER_VERSION)) {
+		awaitLeaseReplace(leasePath, owner);
+		refused = "older-harness";
+	} else {
+		try { if (replaceLease(leasePath, "rebuild", owner, holder)) return deleteTags(sessionPath, version) ? "rebuild" : "stale-tags"; }
+		catch { return "unwritable"; }
+		refused = "busy";
+	}
+	if (!again) return refused;
+	let now = "";
+	try { now = fs.readFileSync(leasePath, "utf8").trim(); }
+	catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable"; }
+	if (now === holder) return refused;
+	if (now === "rebuild") return "rebuild";
+	return verifiedKind(leasePid(now)) === "harness" ? rebuildInHarness(sessionPath, leasePath, now, false) : "busy";
+}
+
+/** Delete every version of the session's tag but `keep`, beside the transcript and in the sibling
+ *  project a moved session's tag lives in. False when one could not be deleted. */
+function deleteTags(sessionPath: string, keep?: string): boolean {
+	const gone = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
 	const prefix = path.basename(sessionPath) + ".wtft-tag.v";
 	const sibling = findSiblingTagPath(sessionPath);
 	for (const tagsDir of new Set([path.join(path.dirname(sessionPath), "wtft-tags"), path.dirname(getTagPath(sessionPath)), ...(sibling ? [path.dirname(sibling)] : [])])) {
 		let names: string[] = [];
-		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return "undeletable"; }
+		try { names = fs.readdirSync(tagsDir); } catch (err) { if (!gone(err)) return false; }
 		for (const f of names) {
-			if (!f.startsWith(prefix) || !f.endsWith(".jsonl")) continue;
-			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return "undeletable"; }
+			if (!f.startsWith(prefix) || !f.endsWith(".jsonl") || f === `${prefix}${keep}.jsonl`) continue;
+			try { fs.unlinkSync(path.join(tagsDir, f)); } catch (err) { if (!gone(err)) return false; }
 		}
 	}
-	return stopped ? "stopped" : "deleted";
+	return true;
 }
 
 function pathIsUnder(file: string, root: string): boolean {
 	const resolvedFile = path.resolve(file);
 	const resolvedRoot = path.resolve(root);
 	return resolvedFile === resolvedRoot || resolvedFile.startsWith(resolvedRoot + path.sep);
+}
+
+/** The tagger version harness `pid` wrote beside the root pid file it holds, "" when none can be
+ *  read. */
+export function harnessTaggerVersion(pid: number): string {
+	const suffix = `.pid.${pid}.version`;
+	let names: string[] = [];
+	try { names = fs.readdirSync(os.tmpdir()); } catch { return ""; }
+	const file = names.find(name => name.startsWith("wtft-harness-") && name.endsWith(suffix)
+		&& leaseHolder(path.join(os.tmpdir(), name.slice(0, -`.${pid}.version`.length))) === String(pid));
+	if (!file) return "";
+	try { return fs.readFileSync(path.join(os.tmpdir(), file), "utf8").trim(); } catch { return ""; }
 }
 
 /** A session under a harness root is served by that root's one daemon. */

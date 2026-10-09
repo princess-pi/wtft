@@ -131,7 +131,7 @@ import * as path from "node:path";
 import { trackSandbox } from "./lib/sandbox";
 import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { claimLeaseForChild, leaseHolder } from "../extensions/lib/lease.ts";
-import { forceRebuildSession, getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
+import { forceRebuildSession, getDaemonPidPath, restartDaemon, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 
 const sandbox = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-297-")));
 process.env.TMPDIR = sandbox;
@@ -221,20 +221,46 @@ describe("C3 restartDaemon", () => {
 	});
 });
 
+function harnessRoot(pid: number, version: string): void {
+	const root = path.join(sandbox, `wtft-harness-claude-root${pid}.pid`);
+	fs.writeFileSync(root, String(pid));
+	fs.writeFileSync(`${root}.${pid}.version`, version);
+}
+
 describe("C4 -F", () => {
-	it("a lease a harness took while -F stopped its per-session holder gets the rebuild token", () => {
+	for (const [version, outcome, holder] of [[WTFT_TAGGER_VERSION, "rebuild", "rebuild"], ["0.0.1", "older-harness", "703"]]) {
+		it(`a lease a harness of tagger ${version === WTFT_TAGGER_VERSION ? "this" : "an older"} version took while -F stopped its per-session holder: ${outcome}`, () => {
+			const t = fakeProcessTable();
+			const f = session();
+			t.daemon(704, ["--session", f.file]);
+			t.daemon(703, ["--harness", "claude"]);
+			harnessRoot(703, version);
+			fs.writeFileSync(f.lease, "704");
+			restore = useProcessTable({ ...t, signal(pid, sig) {
+				const sent = t.signal(pid, sig);
+				if (pid === 704 && sig === "SIGTERM") fs.writeFileSync(f.lease, "703");
+				return sent;
+			} });
+			assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), outcome);
+			assert.strictEqual(leaseHolder(f.lease), holder);
+		});
+	}
+	it("a harness lease an older harness took before the rebuild token landed is left to it", () => {
 		const t = fakeProcessTable();
 		const f = session();
-		t.daemon(704, ["--session", f.file]);
-		t.daemon(703, ["--harness", "claude"]);
-		fs.writeFileSync(f.lease, "704");
-		restore = useProcessTable({ ...t, signal(pid, sig) {
-			const sent = t.signal(pid, sig);
-			if (pid === 704 && sig === "SIGTERM") fs.writeFileSync(f.lease, "703");
-			return sent;
+		t.daemon(709, ["--harness", "claude"]);
+		t.daemon(710, ["--harness", "claude"]);
+		harnessRoot(709, WTFT_TAGGER_VERSION);
+		harnessRoot(710, "0.0.1");
+		fs.writeFileSync(f.lease, "709");
+		let moved = false;
+		restore = useProcessTable({ ...t, inspectable() {
+			if (!moved) { moved = true; fs.writeFileSync(f.lease, "710"); }
+			return t.inspectable();
 		} });
-		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "rebuild");
-		assert.strictEqual(leaseHolder(f.lease), "rebuild");
+		assert.strictEqual(forceRebuildSession(f.file, { termMs: 30, pollMs: 1 }), "older-harness");
+		assert.ok(moved);
+		assert.strictEqual(leaseHolder(f.lease), "710");
 	});
 	it("a lease a per-session daemon took while -F stopped the holder is left to it, busy", () => {
 		const t = fakeProcessTable();
@@ -255,6 +281,7 @@ describe("C4 -F", () => {
 		const f = session();
 		t.daemon(707, ["--harness", "claude"]);
 		t.daemon(708, ["--session", f.file]);
+		harnessRoot(707, WTFT_TAGGER_VERSION);
 		fs.writeFileSync(f.lease, "707");
 		let moved = false;
 		restore = useProcessTable({ ...t, inspectable() {
@@ -272,6 +299,12 @@ describe("C4 -F", () => {
 		const a = session();
 		t.daemon(701, ["--harness", "claude"]);
 		fs.writeFileSync(a.lease, "701");
+		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a harness whose tagger version cannot be read is left alone");
+		assert.strictEqual(leaseHolder(a.lease), "701");
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid.701.version"), WTFT_TAGGER_VERSION);
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid"), "799");
+		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a version file beside a root pid file that does not name the harness is not its");
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid"), "701");
 		assert.strictEqual(forceRebuildSession(a.file), "rebuild");
 		assert.strictEqual(leaseHolder(a.lease), "rebuild");
 		const b = session();

@@ -131,7 +131,7 @@ import * as path from "node:path";
 import { trackSandbox } from "./lib/sandbox";
 import { readHealthFacts } from "../extensions/lib/daemon-health.ts";
 import { claimLeaseForChild, leaseHolder } from "../extensions/lib/lease.ts";
-import { forceRebuildSession, getDaemonPidPath, restartDaemon } from "../extensions/lib/wtft-daemon-lib.ts";
+import { forceRebuildSession, getDaemonPidPath, restartDaemon, WTFT_TAGGER_VERSION } from "../extensions/lib/wtft-daemon-lib.ts";
 
 const sandbox = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-297-")));
 process.env.TMPDIR = sandbox;
@@ -228,6 +228,12 @@ describe("C4 -F", () => {
 		const a = session();
 		t.daemon(701, ["--harness", "claude"]);
 		fs.writeFileSync(a.lease, "701");
+		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a harness whose tagger version cannot be read is left alone");
+		assert.strictEqual(leaseHolder(a.lease), "701");
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid.701.version"), WTFT_TAGGER_VERSION);
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid"), "799");
+		assert.strictEqual(forceRebuildSession(a.file), "older-harness", "a version file beside a root pid file that does not name the harness is not its");
+		fs.writeFileSync(path.join(sandbox, "wtft-harness-claude-0123456789ab.pid"), "701");
 		assert.strictEqual(forceRebuildSession(a.file), "rebuild");
 		assert.strictEqual(leaseHolder(a.lease), "rebuild");
 		const b = session();

@@ -39,7 +39,7 @@ export async function runForceRebuild(finalSessionPath: string, daemonDir: strin
 	}
 	const failure = describeForceRebuildFailure(how);
 	if (failure) {
-		console.error(`❌ Force re-parse of ${path.basename(finalSessionPath)}: ${failure}. Nothing was rebuilt.`);
+		console.error(`❌ Force re-parse of ${path.basename(finalSessionPath)}: ${failure}.${how === "stale-tags" ? "" : " Nothing was rebuilt."}`);
 		process.exit(1);
 	}
 	if (!adopted) {

@@ -128,14 +128,14 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   does not rewrite a lease that already names that harness. When it does point a lease at the
   harness, it does so only if the lease still reads what the start read, so a `-F` that lands
   after that read keeps its token. A `-F` that finds the lease handed to a harness between its read
-  and its write writes `rebuild` against that harness instead; any other change leaves the lease
-  alone, as busy.
+  and its write treats the session as that harness's, as above, once a hand-off in flight has
+  ended; any other change leaves the lease alone, as busy.
 - **Otherwise `-F` stops a live per-session daemon and deletes every version of the session's
   tag**, beside the transcript and in the sibling project where a moved session's tag lives. The
   CLI says whether a daemon was stopped. On Linux only a lease holder whose command line names
   `wtft-daemon` is signalled; off Linux the command line is read through `ps` instead, and a holder neither read can verify is not signalled: `-F` says busy (`verifiedKind`, `docs/spec-holder.md`). When the daemon is still running 2 s after the signal,
   or another daemon has claimed the lease meanwhile, nothing is deleted, and `-F` says so and
-  exits 1; on Linux a lease a harness took meanwhile gets `rebuild` instead. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
+  exits 1; on Linux a lease a harness took meanwhile is treated as that harness's session instead. So does a lease that cannot be read, a rebuild lease that cannot be written, a daemon that
   cannot be signalled, a lease or tag
   file that cannot be deleted, since what is left would be resumed
   rather than rebuilt, and a daemon that cannot be started. The CLI and the Pi widget share one implementation, so

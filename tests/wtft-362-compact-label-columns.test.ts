@@ -111,6 +111,21 @@ console.log("\nA surge-priced row keeps its bolt at single spacing (#505)");
 
 	const emoji = chart(pair, 180, false).filter(l => /^\d\d:00/.test(l));
 	check(emoji[0].includes("\u26A1"), `with emoji the single-spaced surge row draws \u26A1: ${JSON.stringify(emoji[0])}`);
+
+	const bare = (padRowsTo?: number) => {
+		const settings = { interval: "1h", limit: 100, width: 180, mode: "cumulative" as const, timezone: "UTC", disabledEmoji: true };
+		const opts = { ...settings, padRowsTo, showCostColumns: false, showTokenColumns: false };
+		return ((buildWtftLines(pair as any, settings, opts) as string[]) ?? []).map(strips);
+	};
+	const bareRows = bare().filter(l => /^\d\d:00/.test(l));
+	check(bareRows.length === 2, `fixture precondition: two rows with no number columns (${bareRows.length})`);
+	check(barAt(bareRows[0]) === barAt(bareRows[1]) && barAt(bareRows[0]) > 0, `with no number columns the two bars still start in the same column (${barAt(bareRows[0])}, ${barAt(bareRows[1])})`);
+
+	const settings = { interval: "1h", limit: 100, width: 180, mode: "cumulative" as const, timezone: "UTC", disabledEmoji: true };
+	const padded = ((buildWtftLines(pair as any, settings, { ...settings, padRowsTo: 4 }) as string[]) ?? []).map(strips).find(l => l.startsWith("-")) ?? "";
+	const columns = ["+$243.63", "$487.25", "+389.4M", "778.8M tok"].map(c => one[0].indexOf(c));
+	const dashes = [...padded].flatMap((c, i) => (c === "-" ? [i] : []));
+	check(JSON.stringify(dashes) === JSON.stringify([0, ...columns]), `the placeholder rows pad the same columns as the numbers: ${JSON.stringify(dashes)} vs ${JSON.stringify([0, ...columns])}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

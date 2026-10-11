@@ -409,7 +409,7 @@ export function renderWtftChart(input: {
 			pushCol(totalTokText(bin), costColor);
 		}
 		if (colored.length === 0) {
-			return surgeActive ? `${coloredLabel}${boltGap}${barStr}` : `${coloredLabel}${gap}${barStr}`;
+			return `${coloredLabel}${boltGap}${barStr}`;
 		}
 		if (colored.length === 1) return `${coloredLabel}${boltGap}${colored[0]}${gap}${barStr}`;
 		return `${coloredLabel}${gap}${colored[0]}${boltGap}${colored.slice(1).join(gap)}${gap}${barStr}`;
@@ -507,7 +507,9 @@ export function renderWtftChart(input: {
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
 
-	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join(gap).slice(1) + "\x1b[0m";
+	const placeholderParts = [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))];
+	if (boltSlot) placeholderParts.splice(columnWidths.length >= 2 ? 2 : 1, 0, "");
+	const placeholder = PLACEHOLDER_PREFIX + placeholderParts.join(gap).slice(1) + "\x1b[0m";
 	for (let n = displayedBins.length; n < Math.min(input.padRowsTo ?? 0, MAX_PADDED_ROWS); n++) widgetLines.push(placeholder);
 
 	if (otherWarning) widgetLines.push(otherWarning);

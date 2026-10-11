@@ -33,8 +33,9 @@ step.
 - **Surge bolt:** the ⚡ on a surge-priced row is two cells wide and fills a gap of two cells. At
 two-space spacing the gap is already that wide. At single spacing the layout reserves one cell at
 that gap — after the first number column, or after the label when fewer than two columns are shown —
-so the bolt is drawn there too. The row without the bolt reads that cell as a space, and every bar
-is one cell shorter while any displayed bin is surge-priced (#505). Colour and bolt never disagree:
-a row is orange only if it carries the bolt. The reserved cell is inside the label area, so it
-counts toward the 25% share the steps above are fitted to, and the placeholder rows pad it like any
-other column.
+so the bolt is drawn there too. The row without the bolt reads that cell as a space. The cell comes
+out of the bar, and because it sits inside the label area it also counts toward the 25% share the
+steps above are fitted to: while any displayed bin is surge-priced the fitted step can therefore be
+one further along, and the bar can lose more than that one cell (#505). Colour and bolt never
+disagree: a row is orange only if it carries the bolt. The placeholder rows pad the reserved cell
+like any other column.

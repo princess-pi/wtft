@@ -391,7 +391,6 @@ export function renderWtftChart(input: {
 		surgeInc: string,
 		costColor: string,
 		boltGap: string,
-		surgeActive: boolean,
 		barStr: string,
 		bin: Bin,
 	): string => {
@@ -466,7 +465,7 @@ export function renderWtftChart(input: {
 				drewDollar = true;
 			}
 
-			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, barStr, bin));
 		} else {
 			let barStr = "";
 			if (mode === "cumulative") {
@@ -502,7 +501,7 @@ export function renderWtftChart(input: {
 				}
 			}
 
-			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, barStr, bin));
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);

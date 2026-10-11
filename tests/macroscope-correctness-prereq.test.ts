@@ -29,11 +29,17 @@ for (const l of lines.slice(jobAt + 1)) {
 	block.push(l);
 }
 const direct = block.filter((l) => /^ {4}\S/.test(l) && !/^ {4}#/.test(l));
-check(!direct.some((l) => /^ {4}(strategy|uses|if):/.test(l)), `job '${CI_JOB}' has no matrix, reusable workflow or if:, so a check named by its name: line exists on every head`);
+check(!direct.some((l) => /^ {4}(strategy|uses|if|needs|continue-on-error):/.test(l)), `job '${CI_JOB}' has no matrix, reusable workflow, if:, needs: or continue-on-error:, so a check named by its name: line exists on every head`);
 const checkName = direct.find((l) => /^ {4}name: /.test(l))?.replace(/^ {4}name: /, "").trim() ?? CI_JOB;
 const trigger = lines.slice(0, jobsAt);
-check(!trigger.some((l) => /^\s+(paths|paths-ignore|branches-ignore|types):/.test(l)), "ci.yml triggers carry no path or type filter");
-check(trigger.some((l) => l === "  pull_request:"), "ci.yml runs on pull_request");
+const prAt = trigger.findIndex((l) => l === "  pull_request:");
+check(prAt >= 0, "ci.yml runs on pull_request");
+const prBlock: string[] = [];
+for (const l of trigger.slice(prAt + 1)) {
+	if (/^ {0,2}\S/.test(l) && !/^\s*#/.test(l)) break;
+	prBlock.push(l);
+}
+check(!prBlock.some((l) => /^\s+(paths|paths-ignore|branches|branches-ignore|types):/.test(l)), "the pull_request trigger carries no path, branch or type filter");
 
 // Exact text: any other key, list form, quoting or second block fails here instead of parsing differently from Macroscope.
 const expected = `---\nrequires:\n  - "${checkName}"\nwaitsForDiscoveryTimeout: 5\nwaitsForTimeout: 30\n---\n`;

@@ -1,9 +1,8 @@
 ---
 requires:
-  - git-channel
+  - "git-URL channel — install, build, typecheck, test"
 waitsForDiscoveryTimeout: 5
 waitsForTimeout: 30
 ---
 
-Review only heads whose `git-channel` job passed. A failing head is fixed before it is reviewed, so a
-billed review never lands on code that CI already rejects.
+Review only heads whose `git-URL channel — install, build, typecheck, test` check passed.

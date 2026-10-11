@@ -191,7 +191,7 @@ ENV/**
 **/*.grpc.reflection
 **/*.js.map
 
-# === Prose: reviewed by people, not billed per round ===
+# === Prose and non-shipped directories: not billed per round ===
 **/*.md
 **/*.mdx
 **/*.txt

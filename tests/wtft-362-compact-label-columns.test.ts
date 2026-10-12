@@ -82,5 +82,51 @@ console.log("\nNegative deltas stay abbreviated and round symmetrically");
 	check(wholeCost(-243.5) === "$-244" && wholeCost(243.5) === "$244", `-$243.50 and $243.50 round away from zero alike (${wholeCost(-243.5)}, ${wholeCost(243.5)})`);
 }
 
+console.log("\nA surge-priced row keeps its bolt at single spacing (#505)");
+{
+	const strips = (l: string) => l.replace(/\x1b\[[0-9;]*m/g, "");
+	const bin = (ts: number, cost: number, surge: boolean) => ({ ...ix(ts, cost, 389_400_000), surgePriced: surge || undefined });
+	const chart = (interactions: unknown[], width: number, disabledEmoji: boolean) => {
+		const settings = { interval: "1h", limit: 100, width, mode: "cumulative" as const, timezone: "UTC", disabledEmoji };
+		return ((buildWtftLines(interactions as any, settings, { ...settings }) as string[]) ?? []).map(strips);
+	};
+	const barAt = (row: string) => {
+		const at = [row.indexOf("\u2588"), row.indexOf("\u2728")].filter(i => i >= 0);
+		return at.length ? Math.min(...at) : -1;
+	};
+	const pair = [bin(day + 3 * HOUR, 243.62, false), bin(day + 4 * HOUR, 243.63, true)];
+	const rows = (width: number, disabledEmoji: boolean) => chart(pair, width, disabledEmoji).filter(l => /^\d\d:00/.test(l));
+
+	const wide = rows(200, true);
+	check(wide.length === 2, `fixture precondition: two rows at 200 (${wide.length})`);
+	check(wide[0].includes("!!") && !wide[1].includes("!!"), `at 200 (two-space gaps) only the surge row draws the bolt: ${JSON.stringify(wide)}`);
+
+	const one = rows(180, true);
+	check(labels(wide[0]).startsWith("04:00  ") && labels(one[0]).startsWith("04:00 "), `fixture precondition: 200 is two-space spaced and 180 is single-spaced: ${JSON.stringify([labels(wide[0]), labels(one[0])])}`);
+	check(one[0].includes("!!"), `at 180 (single spacing) the surge row still draws the bolt: ${JSON.stringify(one[0])}`);
+	check(!one[1].includes("!!"), `at 180 the row that was not surge-priced draws no bolt: ${JSON.stringify(one[1])}`);
+	check(barAt(one[0]) === barAt(one[1]) && barAt(one[0]) > 0, `the two bars start in the same column (${barAt(one[0])}, ${barAt(one[1])})`);
+	const noSurge = labels(rowAt(big, 180, "04:00")).length;
+	check(labels(one[0]).length === noSurge + 1 && labels(one[1]).length === noSurge + 1, `the reserved cell widens every row's label area by one, not just the surge row's (${noSurge} → ${labels(one[0]).length}, ${labels(one[1]).length})`);
+
+	const emoji = chart(pair, 180, false).filter(l => /^\d\d:00/.test(l));
+	check(emoji[0].includes("\u26A1"), `with emoji the single-spaced surge row draws \u26A1: ${JSON.stringify(emoji[0])}`);
+
+	const bare = (padRowsTo?: number) => {
+		const settings = { interval: "1h", limit: 100, width: 180, mode: "cumulative" as const, timezone: "UTC", disabledEmoji: true };
+		const opts = { ...settings, padRowsTo, showCostColumns: false, showTokenColumns: false };
+		return ((buildWtftLines(pair as any, settings, opts) as string[]) ?? []).map(strips);
+	};
+	const bareRows = bare().filter(l => /^\d\d:00/.test(l));
+	check(bareRows.length === 2, `fixture precondition: two rows with no number columns (${bareRows.length})`);
+	check(barAt(bareRows[0]) === barAt(bareRows[1]) && barAt(bareRows[0]) > 0, `with no number columns the two bars still start in the same column (${barAt(bareRows[0])}, ${barAt(bareRows[1])})`);
+
+	const settings = { interval: "1h", limit: 100, width: 180, mode: "cumulative" as const, timezone: "UTC", disabledEmoji: true };
+	const padded = ((buildWtftLines(pair as any, settings, { ...settings, padRowsTo: 4 }) as string[]) ?? []).map(strips).find(l => l.startsWith("-")) ?? "";
+	const columns = ["+$243.63", "$487.25", "+389.4M", "778.8M tok"].map(c => one[0].indexOf(c));
+	const dashes = [...padded].flatMap((c, i) => (c === "-" ? [i] : []));
+	check(JSON.stringify(dashes) === JSON.stringify([0, ...columns]), `the placeholder rows pad the same columns as the numbers: ${JSON.stringify(dashes)} vs ${JSON.stringify([0, ...columns])}`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

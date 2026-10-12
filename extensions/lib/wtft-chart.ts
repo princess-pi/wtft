@@ -207,6 +207,7 @@ export function renderWtftChart(input: {
 		return out;
 	};
 
+	const anySurge = displayedBins.some(b => b.surgePriced === true);
 	const maxBarValue = mode === "cumulative"
 		? (unit === "tokens" ? totalSessionTokens : totalSessionCost)
 		: Math.max(...displayedBins.map(b => unit === "tokens" ? (b.total_tokens ?? 0) : b.total_cost), 0);
@@ -226,9 +227,11 @@ export function renderWtftChart(input: {
 		if (tokens) shown.push(texts.incTok, texts.totalTok);
 		const widths = shown.map((text) => Math.max(...displayedBins.map((bin) => getVisualLength(text(bin))), 1));
 		const gap = compact >= 1 ? 1 : 2;
-		let prefix = labelWidth + gap;
+		const boltSlot = gap === 1 && anySurge ? 1 : 0;
+		let prefix = labelWidth + gap + (shown.length >= 2 ? 0 : boltSlot);
 		for (const columnWidth of widths) prefix += columnWidth + gap;
-		return { widths, prefix, gap, texts, bar: finalWidth - prefix - tickReserve };
+		if (shown.length >= 2) prefix += boltSlot;
+		return { widths, prefix, gap, boltSlot, texts, bar: finalWidth - prefix - tickReserve };
 	};
 	const fit = (cost: boolean, tokens: boolean) => {
 		let compact = 0;
@@ -247,6 +250,7 @@ export function renderWtftChart(input: {
 	}
 	const columnWidths = laid.widths;
 	const prefixWidth = laid.prefix;
+	const boltSlot = laid.boltSlot;
 	const maxBarWidth = Math.max(0, laid.bar);
 	const gap = " ".repeat(laid.gap);
 	const { incCost: incCostText, totalCost: totalCostText, incTok: incTokText, totalTok: totalTokText } = laid.texts;
@@ -387,7 +391,6 @@ export function renderWtftChart(input: {
 		surgeInc: string,
 		costColor: string,
 		boltGap: string,
-		surgeActive: boolean,
 		barStr: string,
 		bin: Bin,
 	): string => {
@@ -405,7 +408,7 @@ export function renderWtftChart(input: {
 			pushCol(totalTokText(bin), costColor);
 		}
 		if (colored.length === 0) {
-			return surgeActive ? `${coloredLabel}${boltGap}${barStr}` : `${coloredLabel}${gap}${barStr}`;
+			return `${coloredLabel}${boltGap}${barStr}`;
 		}
 		if (colored.length === 1) return `${coloredLabel}${boltGap}${colored[0]}${gap}${barStr}`;
 		return `${coloredLabel}${gap}${colored[0]}${boltGap}${colored.slice(1).join(gap)}${gap}${barStr}`;
@@ -428,8 +431,11 @@ export function renderWtftChart(input: {
 		const surgeInc = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[90m";
 		const costColor = surgeActive ? "\x1b[1;38;5;208m" : "\x1b[1;37m";
 		const coloredLabel = `${surgeLabel}${labelPart}\x1b[0m`;
-		// ⚡ is double-width — it fills the 2-char column gap on its own, numbers stay aligned.
-		const boltGap = surgeActive && gap.length === 2 ? `\x1b[1;38;5;208m${disabledEmoji ? "!!" : "\u26A1"}\x1b[0m` : gap;
+		// ⚡ is double-width — it fills the 2-char column gap on its own, or the single-space
+		// gap plus the cell layoutFor reserved there, so the numbers stay aligned.
+		const boltGap = surgeActive && (gap.length === 2 || boltSlot)
+			? `\x1b[1;38;5;208m${disabledEmoji ? "!!" : "\u26A1"}\x1b[0m`
+			: gap + (boltSlot ? " " : "");
 
 		if (unit === "tokens" && bin.tokens) {
 			const barMax = Math.max(0, maxBarWidth - 2);
@@ -459,7 +465,7 @@ export function renderWtftChart(input: {
 				drewDollar = true;
 			}
 
-			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, barStr, bin));
 		} else {
 			let barStr = "";
 			if (mode === "cumulative") {
@@ -495,12 +501,14 @@ export function renderWtftChart(input: {
 				}
 			}
 
-			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, surgeActive, barStr, bin));
+			widgetLines.push(rowWithColumns(coloredLabel, surgeInc, costColor, boltGap, barStr, bin));
 		}
 	}
 	if (missed(displayedBins[displayedBins.length - 1])) widgetLines.push(cacheMissLine);
 
-	const placeholder = PLACEHOLDER_PREFIX + [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))].join(gap).slice(1) + "\x1b[0m";
+	const placeholderParts = [padString("-", labelWidth), ...columnWidths.map(w => padString("-", w))];
+	if (boltSlot) placeholderParts.splice(columnWidths.length >= 2 ? 2 : 1, 0, "");
+	const placeholder = PLACEHOLDER_PREFIX + placeholderParts.join(gap).slice(1) + "\x1b[0m";
 	for (let n = displayedBins.length; n < Math.min(input.padRowsTo ?? 0, MAX_PADDED_ROWS); n++) widgetLines.push(placeholder);
 
 	if (otherWarning) widgetLines.push(otherWarning);

@@ -36,6 +36,6 @@ that gap — after the first number column, or after the label when fewer than t
 so the bolt is drawn there too. The row without the bolt reads that cell as a space. The cell comes
 out of the bar, and because it sits inside the label area it also counts toward the 25% share the
 steps above are fitted to: while any displayed bin is surge-priced the fitted step can therefore be
-one further along, and the bar can lose more than that one cell (#505). Colour and bolt never
+one further along, and the bar can lose more than that one cell. Colour and bolt never
 disagree: a row is orange only if it carries the bolt. The placeholder rows pad the reserved cell
 like any other column.

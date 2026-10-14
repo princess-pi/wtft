@@ -407,7 +407,7 @@ readable.
 had no `--json`, no `--porcelain`, and no documented exit-code table; every number it
 produced was prose. An exit code was the only surface that cost an agent zero tokens and
 zero inference. It carries one bit and deliberately did not preempt a structured mode,
-which was filed as **#26** (migrated from #510) and has since shipped: `wtft --json`
+which was filed as **#26** (migrated from duppypro/princess-pi-tools#510) and has since shipped: `wtft --json`
 carries `provisional` as a field alongside the totals — see
 [`docs/spec-26-json.md`](spec-26-json.md). The exit code was **not** retired by it. Both
 surfaces report the same verdict, so a consumer reading `$?` and one reading

@@ -4,7 +4,7 @@ Module: extensions/lib/wtft-cost.ts
 
 **State:** Code and Spec Approved
 
-**Issue:** #510
+Issue: https://github.com/princess-pi/wtft/issues/510.
 **Branch:** `510-claude-opus-5-5-is`
 
 ---

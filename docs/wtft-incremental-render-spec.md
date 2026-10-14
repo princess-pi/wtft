@@ -267,8 +267,8 @@ protocol; renderers still know only the harness-agnostic tag. If even the small 
 replacement fails, automatic replay cannot be recorded: the daemon still exits nonzero and
 writes a synchronous best-effort diagnostic requiring `wtft -F` after storage is restored.
 An ordinary stale numeric PID deliberately retains #124 incremental resume, because process
-death alone is not evidence of tag corruption. This relaxed contract supersedes #437's
-exact-rewind requirement and #512's retry-after-fragment requirement.
+death alone is not evidence of tag corruption. This relaxed contract supersedes duppypro/princess-pi-tools#437's
+exact-rewind requirement and duppypro/princess-pi-tools#512's retry-after-fragment requirement.
 
 A session with **no subagents** still gets the marker. "Nothing to sweep" and "swept"
 are the same state to a reader, and withholding it would strand every subagent-free
@@ -407,7 +407,7 @@ readable.
 had no `--json`, no `--porcelain`, and no documented exit-code table; every number it
 produced was prose. An exit code was the only surface that cost an agent zero tokens and
 zero inference. It carries one bit and deliberately did not preempt a structured mode,
-which was filed as **#26** (migrated from #510) and has since shipped: `wtft --json`
+which was filed as **#26** (migrated from duppypro/princess-pi-tools#510) and has since shipped: `wtft --json`
 carries `provisional` as a field alongside the totals — see
 [`docs/spec-26-json.md`](spec-26-json.md). The exit code was **not** retired by it. Both
 surfaces report the same verdict, so a consumer reading `$?` and one reading

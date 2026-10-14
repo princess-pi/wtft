@@ -6,7 +6,7 @@
 number of complete lines**, and no write ever *ends* mid-line.
 
 **One honest exception, and it is not hand-waved.** `appendTagFile` uses `fs.appendFileSync`,
-which can short-write when the disk fills. #512 already owns that case and it is terminal: the
+which can short-write when the disk fills. duppypro/princess-pi-tools#512 already owns that case and it is terminal: the
 daemon stops, poisons the singleton lease with a rebuild token, and the next owner rederives
 the tag from the transcript in full. So a failed append can leave a fragment, and it is
 resolved by rebuild rather than by parsing — which is Duppy's stated preference for
@@ -398,7 +398,7 @@ for a race to sit inside. All three sites now use it; no `statSync(tagPath).size
 
 `appendTagFile` makes every write this daemon *completes* leave whole lines. It says nothing
 about a write that never completed. A daemon killed inside `fs.appendFileSync` — SIGKILL, the
-OOM killer, power loss — cannot reach the #512 handler that sets the `rebuild` lease token, so
+OOM killer, power loss — cannot reach the duppypro/princess-pi-tools#512 handler that sets the `rebuild` lease token, so
 the next daemon reaps a plain numeric PID as merely stale, resumes incrementally, and appends
 its start heartbeat straight onto the fragment.
 
@@ -662,7 +662,7 @@ v2.7.2, so there is no v2.8.1 to match — but it is the wrong scope to publish.
 Recorded because "no finding" is most of the result and the reasoning is the deliverable: the
 `pwrite` is a real `pwrite` (the fd is `r+`, not `a` — under `O_APPEND` the position is ignored
 and every beat would weld); `first` is never 0 at the write (both call sites re-stamp it);
-`appendTagFile`'s #512 contract survives the in-place attempt's `catch` because the append is
+`appendTagFile`'s duppypro/princess-pi-tools#512 contract survives the in-place attempt's `catch` because the append is
 outside it; the torn-write argument holds; `lastSize` is correct on all five paths; the rebuild
 loses nothing a re-parse cannot restore; `seedClassifiedTagFile` is correct at all three edges;
 `allInteractions` has no stale capture; and `wtft-shared.ts` really is `export *`.

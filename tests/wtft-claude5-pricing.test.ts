@@ -139,8 +139,6 @@ describe("Claude Opus 5.5 pricing (#510)", () => {
 	});
 
 	it("resolves the exact entry, not the claude-opus-5 substring card", () => {
-		// "claude-opus-5-5" contains "claude-opus-5", so before the exact entry
-		// existed lookupModelPricing fuzzy-matched the Opus 5 card (~1.6x over).
 		assert.strictEqual(lookupModelPricing("claude-opus-5-5")!.input, 4.00);
 		assert.notStrictEqual(lookupModelPricing("claude-opus-5-5"), lookupModelPricing("claude-opus-5"));
 	});

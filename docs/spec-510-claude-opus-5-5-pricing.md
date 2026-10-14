@@ -13,13 +13,14 @@ Module: extensions/lib/wtft-cost.ts
 
 `MODEL_PRICING` has no `claude-opus-5-5` key. `lookupModelPricing("claude-opus-5-5")`
 fuzzy-matches the substring `claude-opus-5` and prices the turn at the Opus 5 card —
-$5.00 input, $25.00 output, $0.50 cacheRead, $6.25 cacheWrite (5m) — about 1.6x over
-Opus 5.5's list rates. Every Opus 5.5 session wtft prices is inflated by that factor:
-the CLI total, the `--watch` chart, and the spawn tree.
+$5.00 input, $25.00 output, $0.50 cacheRead, $6.25 cacheWrite (5m) — an overcharge that
+varies by token class: 1.25x on input, output and writes, 2.5x on cacheRead. Every
+Opus 5.5 session wtft prices is inflated accordingly: the CLI total, the `--watch`
+chart, and the spawn tree.
 
 The repro session (`2ae7e1ae-6209-4f5f-b0e2-e7cdc1afa139`) read $13.72 from wtft where
 the Claude Code status line read $8.78 at the same time; recomputed at Opus 5.5 rates it
-is $8.33.
+is $8.33 — a blended factor of 1.6x on that session's token mix.
 
 ## 2. Want
 

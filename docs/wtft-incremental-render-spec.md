@@ -1,6 +1,6 @@
 # WTFT `--watch` Live Render + Log Parser Daemon Health Monitoring + SURGE Timeline
 
-**Status:** Code and Spec Approved — updated 2026-08-01 with #124 additions
+**Status:** Code and Spec Approved — updated 2026-08-01 with princess-pi-tools#124 additions
 
 ## Goal
 
@@ -57,18 +57,18 @@ Provide a live-updating cost chart in wtft `--watch` mode, backed by a persisten
 | No new data for 24h | That session is dropped ("idle timeout"). A `--session` process exits. A harness daemon stays up. It decides from in-memory timestamps on a timer and does not stat the file. While that harness runs, a write within the next 24h adopts the session again; after that only a request does. |
 | Daemon just spawned (< 60s) | Idle drop suppressed (startup grace period) |
 | Session file deleted | A `--session` process exits ("session removed") unless the transcript moved. A harness daemon drops that session and stays up. |
-| Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (#124). Past the wait cap, a `--session` process exits ("session never written") and a harness daemon drops the slot. |
+| Session file not yet created | Waits, and writes a heartbeat when this process is the per-session daemon or the session is the one a consumer is displaying, so the widget can show "waiting for session .jsonl..." (princess-pi-tools#124). Past the wait cap, a `--session` process exits ("session never written") and a harness daemon drops the slot. |
 | Press `r` in `--watch` | Stops the lease holder when `mayStop` allows it (`docs/spec-holder.md` §2) with SIGTERM, then SIGKILL after 2 s, and waits up to 2 s more; then spawns fresh and claims the lease for it, unless the lease holds `rebuild` or names a live daemon. `● restart failed` if the old holder outlives both waits (EPERM included) or the spawn throws |
 | **New activity after idle timeout** | Pi's `agent_end` handler calls `ensureDaemonRunning`, which spawns a daemon unless it spawned one for this session before and a live process holds the lease |
 
-## Sub-Agent Transcript Read Path (princess-pi-tools#270 / #420 / #97)
+## Sub-Agent Transcript Read Path (princess-pi-tools#270 / princess-pi-tools#420 / #97)
 
 Two kinds of sub-agent transcript exist. They are DISCOVERED differently and READ identically — which is the point, and was not true before princess-pi-tools#270:
 
 | Kind | Discovery | Read | Per-file state |
 |---|---|---|---|
-| Task/agent/workflow sub-agents (#82) | `discoverSubagentSessionFiles` (`docs/spec-wtft-parser.md`), re-run every poll | `syncSubagentTranscript(file)` | `discoveredSubagentFiles: Map<transcriptPath, SubagentFileState>` (a `TaggerState` field, `extensions/lib/session-tagger.ts`) |
-| `claude -p` bash sub-agents (#138) | `discoverClaudeSubAgentFilesForTurn(commands, ts, ownCwd)` — one `discoverClaudeSubAgentSessionFiles(cwd, ts)` per distinct directory the turn's spawns name, with the session's own cwd standing in for a spawn that no `cd` precedes and whose own segment runs `claude` itself, never for a launcher that only names it in a flag (#107) — re-run every poll; once a file matches, until the bash turn's discovery window has closed. A turn that searched and found nothing, and one with nothing to search, both wait out the window and are then dropped (#107). An unreadable directory stays pending. Each matched PATH is then kept | `syncSubagentTranscript(file)` — the same function | `discoveredClaudeFiles: Set<path>` for the registry, plus the same `discoveredSubagentFiles` entry as any other transcript |
+| Task/agent/workflow sub-agents (princess-pi-tools#82) | `discoverSubagentSessionFiles` (`docs/spec-wtft-parser.md`), re-run every poll | `syncSubagentTranscript(file)` | `discoveredSubagentFiles: Map<transcriptPath, SubagentFileState>` (a `TaggerState` field, `extensions/lib/session-tagger.ts`) |
+| `claude -p` bash sub-agents (princess-pi-tools#138) | `discoverClaudeSubAgentFilesForTurn(commands, ts, ownCwd)` — one `discoverClaudeSubAgentSessionFiles(cwd, ts)` per distinct directory the turn's spawns name, with the session's own cwd standing in for a spawn that no `cd` precedes and whose own segment runs `claude` itself, never for a launcher that only names it in a flag (#107) — re-run every poll; once a file matches, until the bash turn's discovery window has closed. A turn that searched and found nothing, and one with nothing to search, both wait out the window and are then dropped (#107). An unreadable directory stays pending. Each matched PATH is then kept | `syncSubagentTranscript(file)` — the same function | `discoveredClaudeFiles: Set<path>` for the registry, plus the same `discoveredSubagentFiles` entry as any other transcript |
 
 ### Where the transcripts are on disk
 
@@ -123,7 +123,7 @@ princess-pi-tools#270 asks for this half explicitly: *"the tag-file staleness ne
 
 **The answer is the next daemon start, and it needs no `WTFT_TAGGER_VERSION` bump — for Task/agent sub-agents.** A fresh daemon process starts with an empty `discoveredSubagentFiles`, so it has no memory of what any previous daemon wrote; `discoverSubagentSessionFiles(sessionPath)` re-lists that session's transcripts from disk on the first poll regardless of the parent's read offset, so it reads every one from offset 0 and appends every line it derives, including exact re-statements of lines already on disk. The tag file then holds both the stale low-cost line and the fresh full-cost line for the same `message.id`, and `dedupeClassifiedById` (`extensions/lib/wtft-daemon-lib.ts`) collapses that pair to the max on every read. **Convergence is a property of the reader's collapse, not of the writer having been careful** — which is also why re-appending is safe rather than merely tolerable.
 
-**Already-finished `claude -p` sub-agent transcripts are reached by the resume, not by discovery** (PR review, then #259). Those are discovered from the other direction: a bash turn in the PARENT transcript is matched to a transcript path, and `pendingClaudeCommands` is fed from lines `parseNewLines` has just read (`extensions/lib/session-tagger.ts`, the `hasClaudeCommand(interaction)` push) and, on a restart, from the tag's open `spawnPending` records. On a restart where the tag file yields a `_meta` offset, `initClassified` resumes `lastSize` at that offset — the end of the last whole line consumed, so a record still being written when the marker was stamped is re-read whole and no other parent line is; instead `resumeTagger` re-registers each `claude -p` child the tag's generation records name that is not left to another holder or to discovery, listing `~/.claude/projects` for each id, and every child a settled lookup listed that no generation record already names and that is still on disk, and reads each again from its start as a new generation (`docs/spec-259-daemon-correctness.md` § Resume). A lookup settled with no `children` list, which only a pre-#259 daemon wrote, is the case the resume cannot see; that was **#456**.
+**Already-finished `claude -p` sub-agent transcripts are reached by the resume, not by discovery** (PR review, then #259). Those are discovered from the other direction: a bash turn in the PARENT transcript is matched to a transcript path, and `pendingClaudeCommands` is fed from lines `parseNewLines` has just read (`extensions/lib/session-tagger.ts`, the `hasClaudeCommand(interaction)` push) and, on a restart, from the tag's open `spawnPending` records. On a restart where the tag file yields a `_meta` offset, `initClassified` resumes `lastSize` at that offset — the end of the last whole line consumed, so a record still being written when the marker was stamped is re-read whole and no other parent line is; instead `resumeTagger` re-registers each `claude -p` child the tag's generation records name that is not left to another holder or to discovery, listing `~/.claude/projects` for each id, and every child a settled lookup listed that no generation record already names and that is still on disk, and reads each again from its start as a new generation (`docs/spec-259-daemon-correctness.md` § Resume). A lookup settled with no `children` list, which only a pre-#259 daemon wrote, is the case the resume cannot see; that was **princess-pi-tools#456**.
 
 Measured on princess-pi-tools#270's own specimen, session `7c0c2b7e` (15 Task subagents, finished 2026-08-13), restoring its genuine pre-fix v2.7.1 tag (1,132,374 bytes) byte-identical before each trial and killing every daemon for that session first:
 
@@ -266,7 +266,7 @@ extent is unknown. The lease is the existing producer-coordination seam, not a r
 protocol; renderers still know only the harness-agnostic tag. If even the small atomic lease
 replacement fails, automatic replay cannot be recorded: the daemon still exits nonzero and
 writes a synchronous best-effort diagnostic requiring `wtft -F` after storage is restored.
-An ordinary stale numeric PID deliberately retains #124 incremental resume, because process
+An ordinary stale numeric PID deliberately retains princess-pi-tools#124 incremental resume, because process
 death alone is not evidence of tag corruption. This relaxed contract supersedes duppypro/princess-pi-tools#437's
 exact-rewind requirement and duppypro/princess-pi-tools#512's retry-after-fragment requirement.
 
@@ -278,7 +278,7 @@ The marker is a zero-cost `_meta` row carrying no `message.id`, so it is consist
 with the soundness condition above rather than an exception to it.
 
 **What `swept` does NOT assert.** It says a sweep RAN AND REPORTED NO FAILURES, which
-is weaker than "no failures occurred". #457 is closed — an unreadable subagent transcript fails in `syncSubagentTranscript`'s
+is weaker than "no failures occurred". princess-pi-tools#457 is closed — an unreadable subagent transcript fails in `syncSubagentTranscript`'s
 stat, read, or attribution handler, which sets `pollHadFailure`, and is never mistaken
 for an empty one — which strengthened this marker for free, exactly as the pre-fix note
 here predicted. That holds for the nested attribution read too: `attributeClaudeSubAgentCosts`
@@ -326,9 +326,9 @@ CLI consumes it, but a reader tracking the code should not look for it at the
 
 | reason | returned by `readTagProvisional`? | condition |
 |---|---|---|
-| `stale-version` | yes | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
+| `stale-version` | yes | the resolved tag is not at `WTFT_TAGGER_VERSION` — `getTagPath` rule 3 falls back to "any-version tag, newest mtime" (princess-pi-tools#95), so a read can land on superseded semantics while the daemon builds a current-version tag beside it |
 | `unswept` | yes | a current-version tag holding classified data but no `_meta.swept` |
-| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: its discovery reported or threw a failure, or a listed subagent transcript could not be read, so the `--tokens` table may be missing uncounted billables even though the tag still reads settled (#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
+| `subagent-unreadable` | no — CLI-assigned | the CLI's own render-side degrade: its discovery reported or threw a failure, or a listed subagent transcript could not be read, so the `--tokens` table may be missing uncounted billables even though the tag still reads settled (princess-pi-tools#457). Assigned unconditionally on the CLI's own discovery failure — direct evidence that outranks any tag-derived reason, since a permanent unreadability also blocks the daemon's rebuild (round 7) |
 
 **There is no scan window.** The first version scanned only the last 8KB, justified as
 "matching `readLastMetaOffset`" — a justification that does not survive contact, since
@@ -362,7 +362,7 @@ always better than nothing. The exit code and the prose line address two differe
 readers, and 9 is distinct from 1 because "the run failed" and "the run succeeded but
 the number is not final" are different facts.
 
-The same exit is earned by a render-side degrade with the same shape (#457, round 5):
+The same exit is earned by a render-side degrade with the same shape (princess-pi-tools#457, round 5):
 under `--tokens`, an unreadable session or subagent transcript — one file (round 6: the failure
 is reported, not thrown, and the readable siblings still scan) or a whole unreadable
 directory of them — drops uncounted billables from the token table. A Pi sibling discovery
@@ -415,7 +415,7 @@ surfaces report the same verdict, so a consumer reading `$?` and one reading
 
 ## `attributeClaudeSubAgentCosts`: Per-Call, Not Global
 
-The docstring used to read: *"Sub-agent session IDs are tracked globally to prevent double-counting across multiple interactions that reference the same session."* — true only for a single call, since `seenSessionIds` (declared in `attributeClaudeSubAgentCosts`) is a local `Set` created fresh every time the function runs, with no lifetime beyond that one call. #420 review corrected the docstring itself to say this plainly rather than leaving the false "global" claim standing next to the code it describes; the paragraphs below are the fuller version of that correction.
+The docstring used to read: *"Sub-agent session IDs are tracked globally to prevent double-counting across multiple interactions that reference the same session."* — true only for a single call, since `seenSessionIds` (declared in `attributeClaudeSubAgentCosts`) is a local `Set` created fresh every time the function runs, with no lifetime beyond that one call. princess-pi-tools#420 review corrected the docstring itself to say this plainly rather than leaving the false "global" claim standing next to the code it describes; the paragraphs below are the fuller version of that correction.
 
 The invariant the function actually provides: within the array of interactions handed to it in one call, no nested `claude -p` session's cost is attributed twice. That holds for turns not yet attributed: a turn that already carries `claudeSubAgentFolds` is skipped, and its folds do not seed the set, so a later turn in the same array can fold the same child again. A turn whose only child was already counted earlier in the call is left with no folds, so a second call over the same objects attributes that child again. Both production callers hand it unattributed turns — the whole-file parse its fresh parse, the daemon clones of each turn's pre-fold base. It provides no protection across two separate calls — whether those calls are seconds apart in the same poll, or a beat apart across two polls.
 
@@ -462,7 +462,7 @@ The Pi `/wtft` widget also spawns a log parser daemon on `session_start`, using 
 
 The 24-hour timeline on the title line shows the model's surge schedule, when its card has one:
 - **Orange segments**: Local hours that fall within that card's windows. DeepSeek's four
-  cards share one schedule, weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (#495).
+  cards share one schedule, weekday-gated from `DEEPSEEK_WEEKEND_OFFPEAK_FROM` (princess-pi-tools#495).
   **The hours are deliberately not written here** — read them from the card, or from the
   generated manifest: they were hardcoded in four places plus four prose copies, and a
   schedule change had no way to fail when it missed one. The renderer asks `getPeakMultiplier`
@@ -475,7 +475,7 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
   (<code>🕐</code>–<code>🕛</code>, including <code>🕛</code> at the noon hour), and is
   additionally bold — which starts its own colour segment. Solar noon is a separate
   `☀️` glyph between hour 11 and hour 12, never a replacement for the noon hour's slot
-  (#7). There is no `◆` and has not been for some time; this line said there was (#503).
+  (#7). There is no `◆` and has not been for some time; this line said there was (princess-pi-tools#503).
 - **Surge badges**: Appended on a live view when the card has a schedule and now is in or near a window. The active badge prints that card's multiplier. The leads are `SURGE_APPROACH_MINUTES` and `SURGE_ENDING_MINUTES`, both 20:
   - `⚡ SURGE 2x` — inside a window that still bills, before the surge stops (DeepSeek's multiplier is 2)
   - `⚡ SURGE APPROACHING` — within `SURGE_APPROACH_MINUTES` before the window opens (blinking orange)
@@ -490,7 +490,7 @@ The 24-hour timeline on the title line shows the model's surge schedule, when it
 
 Handler calls `render()` directly. Daemon status indicator reflows — may move from inline to separate line or vice versa depending on available width.
 
-## Daemon Correctness Verification (#124)
+## Daemon Correctness Verification (princess-pi-tools#124)
 
 The `--debug` flag was extracted from wtft into a standalone diagnostic script:
 
@@ -521,11 +521,11 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 | No activity for the idle threshold | An idle status (`docs/spec-daemon-health.md` §2; the texts in `docs/manifests/wtft-status.json`) |
 | User presses `r` | Daemon restarts; while the old one exits (up to 4 s) the view keeps rendering what `health` finds, and a second `r` is ignored until the restart ends; `q` or Ctrl+C then exits once it has spawned. When the claim landed, the lease names the new child at once, so that is alive (`waiting for session`, `live` or `idle`). A holder that outlives SIGKILL or may not be signalled (EPERM), or a spawn that throws, shows `● restart failed` |
 | Tag file deleted/truncated | `fs.watch` handler re-reads from zero |
-| Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (#124) |
+| Daemon spawned before session file exists | Status per `docs/spec-daemon-health.md` §2. The daemon polls until the file is created (princess-pi-tools#124) |
 | Daemon never started | Status per `docs/spec-daemon-health.md` §2 and §3 |
-| Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (#124) |
+| Daemon restarts after crash | Reads `_meta` offset from tag file for exact resume position; falls back to full re-parse if no meta offset found (princess-pi-tools#124) |
 | One-shot read beats the daemon to a stale tag | The total prints in full, a `PROVISIONAL` warning names why, and `wtft` exits **9** rather than 0 — `readTagProvisional` reports `stale-version` or `unswept` (duppypro/princess-pi-tools#443). It does NOT wait: blocking a one-shot CLI on a repair proportional to subagent volume is the cost read-then-render avoids |
-| `--tokens` blind-spot scan loses a subtree | An unreadable session or subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
+| `--tokens` blind-spot scan loses a subtree | An unreadable session or subagent transcript — one file (reported, not thrown, since round 6; the readable siblings still scan) or a whole unreadable directory — drops uncounted billables from the token table (a Pi sibling discovery cannot read is not listed and sets nothing); the parser warned (latched), the CLI sets `provisional` with reason `subagent-unreadable` and exits **9** (princess-pi-tools#457, round 5; assigned unconditionally on the CLI's own discovery failure since round 7 — never already-provisional-superseded) — a machine reader never sees a complete-looking report |
 | Daemon encounters transient error | Error logged (debug mode), daemon continues on next poll cycle — does not crash |
 | Terminal too narrow for inline status | Status wraps to separate line between title and legend |
 | Session file gone | Status per `docs/spec-daemon-health.md` §2. The chart keeps the last-known data |
@@ -542,5 +542,5 @@ Clears alt screen, restores cursor, prints final chart + summary line.
 8. Terminal resize → width auto-fits; status reflows correctly (inline vs. separate line)
 9. Idle for 2m2s with a remote model (Claude/DeepSeek) → status shows `(cache expires in Nmin)`
 10. Kill daemon, restart Pi, send prompt → daemon auto-revives on agent_end (ensureDaemonRunning)
-11. Start Pi in a git repo on `main` branch → git-guardrails shows warning notification on session_start (#124)
-12. Run `node debug/verify-daemon-parse.mjs --session <path>` → reports tag-vs-direct cost match/mismatch (#124)
+11. Start Pi in a git repo on `main` branch → git-guardrails shows warning notification on session_start (princess-pi-tools#124)
+12. Run `node debug/verify-daemon-parse.mjs --session <path>` → reports tag-vs-direct cost match/mismatch (princess-pi-tools#124)

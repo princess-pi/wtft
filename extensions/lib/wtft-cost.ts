@@ -124,6 +124,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-fable-5":    { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
 	"claude-mythos-5":   { input: 10.00, output: 50.00, cacheRead: 1.00, cacheWrite: 12.50 },
 	"claude-opus-5":     { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
+	"claude-opus-5-5":   { input: 4.00, output: 20.00, cacheRead: 0.20, cacheWrite: 5.00 },
 	"claude-opus-4-8":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-7":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-6":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },

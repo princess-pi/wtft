@@ -145,6 +145,18 @@
       ]
     },
     {
+      "model": "claude-opus-5-5",
+      "rates": [
+        {
+          "condition": "",
+          "input": 4,
+          "output": 20,
+          "cacheRead": 0.2,
+          "cacheWrite": 5
+        }
+      ]
+    },
+    {
       "model": "claude-sonnet-4-5",
       "rates": [
         {

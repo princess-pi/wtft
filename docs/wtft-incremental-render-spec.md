@@ -266,9 +266,9 @@ extent is unknown. The lease is the existing producer-coordination seam, not a r
 protocol; renderers still know only the harness-agnostic tag. If even the small atomic lease
 replacement fails, automatic replay cannot be recorded: the daemon still exits nonzero and
 writes a synchronous best-effort diagnostic requiring `wtft -F` after storage is restored.
-An ordinary stale numeric PID deliberately retains #124 incremental resume, because process
-death alone is not evidence of tag corruption. This relaxed contract supersedes #437's
-exact-rewind requirement and #512's retry-after-fragment requirement.
+An ordinary stale numeric PID deliberately retains duppypro/princess-pi-tools#124 incremental resume, because process
+death alone is not evidence of tag corruption. This relaxed contract supersedes duppypro/princess-pi-tools#437's
+exact-rewind requirement and duppypro/princess-pi-tools#512's retry-after-fragment requirement.
 
 A session with **no subagents** still gets the marker. "Nothing to sweep" and "swept"
 are the same state to a reader, and withholding it would strand every subagent-free

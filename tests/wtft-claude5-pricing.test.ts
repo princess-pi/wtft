@@ -109,6 +109,41 @@ describe("Claude 5 family pricing (#139)", () => {
 	});
 });
 
+// --- #510: Claude Opus 5.5 list rates ---
+
+describe("Claude Opus 5.5 pricing (#510)", () => {
+	it("prices claude-opus-5-5 at $4/$20/$0.20/$5.00 per MTok", () => {
+		assert.strictEqual(calculateClaudeCost("claude-opus-5-5", { input_tokens: MTOK }), 4.00);
+		assert.strictEqual(calculateClaudeCost("claude-opus-5-5", { output_tokens: MTOK }), 20.00);
+		assert.strictEqual(calculateClaudeCost("claude-opus-5-5", { cache_read_input_tokens: MTOK }), 0.20);
+		// Flat cache_creation (no TTL split) bills at the 5m rate.
+		assert.strictEqual(calculateClaudeCost("claude-opus-5-5", { cache_creation_input_tokens: MTOK }), 5.00);
+	});
+
+	it("bills claude-opus-5-5 1h-TTL cache writes at 2x base input ($8.00/MTok)", () => {
+		const cost = calculateClaudeCost("claude-opus-5-5", {
+			cache_creation_input_tokens: MTOK,
+			cache_creation: { ephemeral_1h_input_tokens: MTOK },
+		});
+		assert.strictEqual(cost, 8.00);
+	});
+
+	it("Closer: 1M cache-read + 1M 1h-write + 1M output bills $28.20", () => {
+		const cost = calculateClaudeCost("claude-opus-5-5", {
+			cache_read_input_tokens: MTOK,
+			cache_creation_input_tokens: MTOK,
+			cache_creation: { ephemeral_1h_input_tokens: MTOK },
+			output_tokens: MTOK,
+		});
+		assert.strictEqual(cost, 28.20);
+	});
+
+	it("resolves the exact entry, not the claude-opus-5 substring card", () => {
+		assert.strictEqual(lookupModelPricing("claude-opus-5-5")!.input, 4.00);
+		assert.notStrictEqual(lookupModelPricing("claude-opus-5-5"), lookupModelPricing("claude-opus-5"));
+	});
+});
+
 // --- #148: Sonnet 5 intro pricing (dated rate window) ---
 
 describe("Sonnet 5 intro pricing (#148)", () => {

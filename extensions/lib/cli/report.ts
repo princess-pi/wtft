@@ -89,9 +89,10 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		({ interactions, provisional, folded } = readTagFileWithVerdict(tagPath));
 	}
 
-	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
+	// Memoised lineage.
 	// Keyed by mode: the pending tree excludes nothing and must never serve a full arm.
 	const spawnTreeCache = new Map<boolean, SpawnTree>();
+	const collected = new Map<boolean, { turns: Interaction[]; files: string[] }>();
 	// `pending`: the session log is absent, so nothing of it is in SELF to exclude.
 	const sessionSpawnTree = (opt: { pending?: boolean } = {}): SpawnTree => {
 		const pending = opt.pending === true;
@@ -99,18 +100,37 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		if (cached) return cached;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
 		// SELF is the tag, so the ids to exclude are the ones the tag recorded folding.
+		const collect = { turns: [] as Interaction[], files: [] as string[] };
 		const tree = computeSpawnTree(sessionId, {
 			alreadyAttributed: pending ? new Set<string>() : folded,
+			collect,
 			unrecorded: pending
 				? { turns: [], rootCwd: null }
 				: { turns: interactions, rootCwd: resolveLastCwd(finalSessionPath), rootFile: finalSessionPath },
 		});
 		spawnTreeCache.set(pending, tree);
+		collected.set(pending, collect);
 		// The tree never replaces a reason already set.
 		if (!provisional.provisional && tree.edges.some(e => e.live)) {
 			provisional = { provisional: true, reason: "descendant-live" };
 		}
 		return tree;
+	};
+
+	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
+	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
+		if (opts.self) return { turns: [], files: [] };
+		if (chartCollect) return chartCollect;
+		if (opts.tokens) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
+		const collect = { turns: [] as Interaction[], files: [] as string[] };
+		try {
+			computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });
+			chartCollect = collect;
+		} catch (err) {
+			console.error(`\x1b[33m⚠ spawn tree not walked (${err instanceof Error ? err.message : String(err)}); charting this session's own turns\x1b[0m`);
+			chartCollect = { turns: [], files: [] };
+		}
+		return chartCollect;
 	};
 
 	// ---
@@ -224,6 +244,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		const spawned = sessionSpawnTree({ pending: opt.pending });
 		const doc = buildSessionJson({
 			interactions,
+			descendantTurns: collected.get(opt.pending === true)!.turns,
 			session: {
 				path: finalSessionPath,
 				harness: opt.pending ? null : detectSessionHarness(finalSessionPath),
@@ -317,7 +338,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// ---
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		for (const m of collectUnpricedModels(interactions)) {
+		for (const m of collectUnpricedModels([...interactions, ...(sessionSpawnTree(), collected.get(false)!.turns)])) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 		}
@@ -335,9 +356,12 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 
-	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files]);
+	if (opts.tokens) sessionSpawnTree();
+	const tree = descendantTurns();
+	const chartInteractions = [...interactions, ...tree.turns];
+	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files, ...tree.files]);
 	const outputLines = chartLines({
-		interactions,
+		interactions: chartInteractions,
 		asked: askedOf(opts),
 		fallback: { width: paddedWidth, interval: sessionInterval, limit: sessionLimit, mode: sessionMode, timezone: sessionTimezone, disabledEmoji: isEmojiDisabled() },
 		unit,
@@ -353,7 +377,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 
 	if (opts.other) {
 		console.log("");
-		const dedupedInteractions = deduplicateInteractions(interactions);
+		const dedupedInteractions = deduplicateInteractions(chartInteractions);
 		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(paddedWidth, 1023));
 		for (const line of otherOutput.split("\n")) {
 			console.log(padStr + line);
@@ -372,7 +396,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// ---
 	// UNPRICED-MODEL WARNING — re-derived from tag model ids (costs live in the daemon).
 	// ---
-	for (const m of collectUnpricedModels(interactions)) {
+	for (const m of collectUnpricedModels(chartInteractions)) {
 		console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 	}
 

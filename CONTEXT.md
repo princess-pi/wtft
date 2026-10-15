@@ -450,7 +450,7 @@ _Avoid_: menu
 
 **JSON mode** (#26):
 `--json` — the CLI's machine-readable mode. Writes exactly one JSON object (schema
-`wtft/session@8`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
+`wtft/session@9`) to stdout and nothing else: no ANSI, no `3.6k` abbreviation, no chart.
 Human prose goes to stderr, and every sentence that would otherwise have been on stdout is
 repeated in the object's `notices[]`, where `code` is the contract and `text` is disposable.
 With an interactive terminal it still shows the scoped session picker (#89) whenever the
@@ -460,11 +460,11 @@ session in view — see `docs/spec-26-json.md` Amendment 3. Its
 aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
 totals; `session`, `provisional`, `uncounted`, `spawned`, the `subagents` listing and `notices` come from
-the run instead (`subagents[].total` is the same aggregation over each subagent's lines), and `tree` is `total` plus `spawned.total` over the six token and cost fields,
+the run instead (`subagents[].total` is the same aggregation over each subagent's lines), `treeCategories` is the same aggregation over self plus every counted descendant's turns (spec-517), and `tree` is `total` plus `spawned.total` over the six token and cost fields,
 so it carries no `untaggedCostUsd` (see **Self / tree**). `total` also
 carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
-`total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's running total within float
 accumulation error.
 Suppresses the well-formed rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:
@@ -540,7 +540,8 @@ That sum can include a `claude -p` child's share that `spawned.total` also count
 ledger records the child too). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when the walk found no
 edge (none from this session, nor from a session already inside its total) AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
-"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
+"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ. The chart in `wtft`, `--watch` and the Pi widget shows the tree's turns by default, each
+descendant turn classified and binned as a self turn is; `--self` charts self only (spec-517).
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):

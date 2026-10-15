@@ -427,7 +427,7 @@ function cli(args: string[]): { out: string; status: number | null } {
 	const withRecord = JSON.parse(cli(["--json"]).out);
 	check(withRecord.spawned.descendants === 1 && withRecord.spawned.unrecorded.length === 0,
 		`E1 with the record the child is an edge, and the list is empty (got ${withRecord.spawned.descendants} descendants, ${withRecord.spawned.unrecorded?.length} rows)`);
-	check(withRecord.schema === "wtft/session@8" && withRecord.spawned.schema === "wtft/spawn-tree@4",
+	check(withRecord.schema === "wtft/session@9" && withRecord.spawned.schema === "wtft/spawn-tree@4",
 		"E2 both schemas carry the new key's bump");
 
 	fs.writeFileSync(cliLedger, "");

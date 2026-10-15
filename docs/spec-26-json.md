@@ -50,11 +50,11 @@ pinned consumer cannot see is still a rename. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@8`
+### Schema `wtft/session@9`
 
 ```json
 {
-  "schema": "wtft/session@8",
+  "schema": "wtft/session@9",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -109,6 +109,10 @@ contract.
     "inputTokens": 3600, "outputTokens": 270,
     "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0
   },
+  "treeCategories": [
+    { "category": "overhead", "costUsd": 0, "inputTokens": 0, "outputTokens": 0,
+      "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
+  ],
   "subagents": [
     { "transcript": "…/subagents/agent-a641e532bfaae9903.jsonl",
       "meta": { "agentType": "general-purpose", "spawnDepth": 1,
@@ -126,12 +130,12 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@8"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6); `@8` is #180's `spawned.descendantUntagged[]` (Amendment 7). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@9"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6); `@8` is #180's `spawned.descendantUntagged[]` (Amendment 7); `@9` is `treeCategories` (Amendment 8). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary. Not necessarily the version in `tagPath`: a stale-version read lands on an older tag. |
 | `session.tagPath` | string | The classified tag file path resolved for this run: read when it exists, and on the `pending-session` and `no-data` arms the *expected* path — not evidence that a file was opened. |
-| `provisional.provisional` | bool | **This run's** verdict — may a number in this report still change? Usually `readTagProvisional`'s answer, but the blind-spot scan and the spawn-tree walk can set it too (see below and Amendment 4), so do not read it as "what the tag file says". For `descendant-live` only `spawned` and `tree` can move; `total` is settled. |
+| `provisional.provisional` | bool | **This run's** verdict — may a number in this report still change? Usually `readTagProvisional`'s answer, but the blind-spot scan and the spawn-tree walk can set it too (see below and Amendment 4), so do not read it as "what the tag file says". For `descendant-live` only `spawned`, `tree` and `treeCategories` can move; `total` is settled. |
 | `provisional.reason` | string \| null | A **closed four-value vocabulary**, enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"` · `"descendant-live"` (#133, Amendment 4), or `null` when settled. `--json` did not widen it; #133 did. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
 | `total.*` | number | Exact totals for **this session as the daemon tagged it** — its own turns AND the Task subagents blended into its tag file. The spawn walk marks an edge to any session the tag's fold records name `in-self-total` and never adds it: `tree` would bill it twice. The same holds for a `claude -p` session that a `claude -p` child of this session folded in, at any depth. The tag's fold records name each such session, and those records are what the walk reads (`docs/spec-178-135-180-fold-records.md`). **Launcher-spawned descendants are not in here** (#116) — those are `spawned`, and `tree` is the sum. Cost is USD, the rest are token counts. |
 | `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@4`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
@@ -147,6 +151,7 @@ contract.
 | `spawned.ledgerError` | string \| null | The ledger read FAILED, with the message. Without this field an unreadable ledger would serialise identically to "read it, this session spawned nothing" — the silent gap #116 exists to end, reintroduced inside its own fix. An *absent* ledger is not an error. |
 | `spawned.descendantUntagged[]` | array | `{child, untaggedInteractions, untaggedCostUsd}`, one per counted descendant (a `resolved` edge) whose own parse holds untagged turns — no model id, as `untaggedInteractions` counts them for this session (#180, Amendment 7). Their cost is **not** in that edge's `total`, and it is added to neither `spawned.total` nor `tree`, as this session's own untagged cost is not in `total.costUsd` — except for the overlap below. `untaggedCostUsd` is often `0`; the entry is there because the turns exist. It is computed from everything priced into that edge: the descendant's own transcript, the subagent transcripts it prices, and the `claude -p` children those fold (`docs/spec-230-231-232-spawn-tree-gaps.md`). An untagged turn that spawned a `claude -p` child carries that child's share; such a child is not marked folded, so if the ledger also records it, its cost is in `spawned.total` as well. `[]` when no counted descendant has any. |
 | `spawned.unrecorded[]` | array | Sessions other than this one that look like this session's launcher children and that **no ledger edge names** — when `spawned.ledgerError` is set no edge is known, so a recorded child may be listed — (#128, Amendment 5): `{child, path, cwd, ts, tier, basis, total, skip?}`. `tier` is `named` (the child's `cwd` contains this session's id — certain) or `inferred` (started by a program, in this repo's worktree fan-out or a temp sandbox, inside a launch span — a guess). `basis` is `cwd-names-parent`, `worktree` or `tmp`. `total` is the child's own cost, `null` with `skip: "unreadable"` when it could not be parsed. **Never in `spawned.total`, `tree` or `total`**, and never a reason for exit 9. `[]` means looked and found none, or that the session ran no command and so had nothing to look near; a directory read error in the scan fails the run (exit 1) instead of emitting `[]`; a path that is gone is skipped, and so is a transcript whose head the scan cannot read. A session already counted — in `total` through the tag's fold records, or inside another row — is not listed either. A `named` row is listed whoever started it; outside `named`, a human-started session never is. |
+| `treeCategories` | array | `@9`. `categories` over the tree's turns; see Amendment 8. |
 | `tree.*` | number | **SELF + RESOLVED descendants**, as a field, so a consumer never adds two numbers and has to work out whether it double-counted. A **floor** whenever anything was not counted, under any of FIVE conditions: `spawned.unattributed` is non-empty, `spawned.depthCapped` is non-zero, `spawned.ledgerError` is non-null, `spawned.malformedLedgerLines` is non-zero, or `spawned.descendantUntagged` is non-empty. `ledgerError` and `malformedLedgerLines` are the traps — an unreadable ledger sets none of the others, so a consumer checking only those reads a zeroed tree as a complete lineage; and a malformed line WAS a record, so its edge is lost with the count as its only trace. Checking `unattributed` alone reads a depth-truncated tree as complete. |
 | `models[]` | array | One row per model id, **sorted by `costUsd` descending** — the same order and the same numbers as the rendered `--tokens` table's rows, un-abbreviated. `model` is the full id, never shortened. |
 | `models[].priced` | bool | `isModelPriced(model)` — the `?` marker in the rendered table. `false` means **no rate card**, not "wtft guessed this row": a harness-native per-turn cost is used unchanged wherever the transcript records one, so a marked row's cost can mix provenance. |
@@ -157,7 +162,7 @@ contract.
 | `subagents[].meta` | object \| null | The `.meta.json` the harness writes beside a **Claude Code Task** transcript: `agentType` and `spawnDepth` always, and optionally `description`, `toolUseId`, `model`, `parentAgentId`, `isFork`. **`null` is a GAP, not a missing subagent** — the transcript is LISTED either way; it simply has no label. **Being listed here is not evidence that its cost is in `total`.** Discovery is a live filesystem read; counting is the tag file's business, written asynchronously by the daemon, and the two are independent. A transcript the daemon has not tagged yet appears here and is not yet in any total, and `meta` has no bearing on either. Pi children (which have no such file), and any harness release that stops writing one, land here — as does a file that exists but cannot be READ — that one also adds a `subagent-meta-unreadable` notice naming the file (#146), so an absent meta and an unreadable one can be told apart. A meta that reads but does not PARSE, or that omits `agentType`/`spawnDepth`, is `null` too and adds no notice — it stays indistinguishable from an absent one, because only the read failure is observable as a failure. `meta.model` is itself optional, so a null there is a gap too. Only `agentType` and `spawnDepth` are universal; `description` and `toolUseId` are absent on the Dynamic Workflow children, and a meta carrying just the two universal fields is still a meta. Counts move whenever a session spawns a subagent — `docs/spec-137-subagent-meta.md` carries one dated census rather than repeating ratios here. |
 | `uncounted` | object | The #149 blind spot: events the harness bills and writes no `usage` for. Counted, never priced, and deliberately **not** in `total`. Scanned on **every** `--json` run, so a zero means "looked, found none" rather than "nobody looked" — with one narrower gap: the scan drops unparseable session lines silently, so a zero can also mean "could not read part of it". (A no-op only on the `pending-session` arm, where there is no file yet; the `no-data` arm has a real session file and can find real billables in it.) Along with `spawned` and the `subagents[]` listing, one of the parts of the document that do not come from the aggregation; `subagents[].total` does, over each subagent's own lines. |
 | `compaction` | object | Compaction events seen and the tokens they freed — the rendered table's `Compaction:` line. Counted over **every** deduped interaction, tagged or not: it describes context freed, not spend, so the model-tag exclusion below does not apply to it. |
-| `total.untaggedCostUsd` | number | `@4` (#119). The cost EXCLUDED from `total.costUsd` because it belongs to an untagged interaction (`untaggedInteractions` below) — sourced from the same per-interaction figures the bar chart bins for those turns. `total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float accumulation error, the same tolerance "The one arithmetic guarantee", below, gives `costUsd`. |
+| `total.untaggedCostUsd` | number | `@4` (#119). The cost EXCLUDED from `total.costUsd` because it belongs to an untagged interaction (`untaggedInteractions` below) — sourced from the same per-interaction figures the bar chart bins for those turns. `total.costUsd + total.untaggedCostUsd` equals the `--self` chart's running total within float accumulation error, the same tolerance "The one arithmetic guarantee", below, gives `costUsd`. |
 | `untaggedInteractions` | int | Interactions excluded from `total.costUsd`/`models`/`categories` because they carry no model id (`(unknown)` or `<synthetic>`) — the rendered table's "(N untagged interactions skipped)", or, when *every* interaction is untagged, its "No model-tagged interactions found (N untagged)." Its cost is `total.untaggedCostUsd`, not zero. |
 | `notices[]` | array | `{ code, text }`. `code` is API; `text` is prose. Codes: `pending-session`, `no-data`, `unpriced-model`, `provisional`, `subagent-meta-unreadable` (#146: one per `.meta.json` that exists and could not be read; an absent meta adds none). `auto-selected-session` was retired in `@4` (#89) — see Amendment 3: a machine caller now gets exit 10 instead of a silent auto-pick. |
 
@@ -199,12 +204,12 @@ tokens**: server-side tool calls are billed per request, on a meter with no toke
 counts on it (#73), so the five token fields are untouched and their exact
 equality is unaffected.
 
-**The chart's total is still a different number, legitimately, for ONE reason:**
+**The `--self` chart's total is still a different number, legitimately:**
 the bar chart bins *every* interaction, so it includes the untagged spend this
 `total` excludes. That divergence predates #26 and remains — but as of `@4`
 a machine consumer **can size it**: `total.untaggedCostUsd` carries exactly the
-excluded cost, so `total.costUsd + total.untaggedCostUsd` equals the chart's own
-running total. **#119**, closed by Amendment 3, is what added the field;
+excluded cost, so `total.costUsd + total.untaggedCostUsd` equals the `--self` chart's
+running total (the default chart is the tree's: spec-517). **#119**, closed by Amendment 3, is what added the field;
 `untaggedInteractions` stays a plain count of how many turns contributed to it.
 
 **`total.costUsd` changed meaning under an unchanged `schema`.** `wtft/session@1`
@@ -222,8 +227,8 @@ single aggregation — the only *implementation* of the arithmetic, not the only
 *call*. `renderTokenSummary` formats its result for a human; `buildSessionJson`
 in `extensions/lib/wtft-json.ts` serialises the same result for a machine.
 Neither reimplements it, so the prose and the JSON cannot report different
-**numbers**. Since #116 a run calls it N+1 times — once for this session and
-once per resolved descendant, inside `computeSpawnTree` — which is the same
+**numbers**. Since #116 a run calls it once for this session, once per resolved
+descendant inside `computeSpawnTree`, and under `--json` once more for `treeCategories` — which is the same
 function over different inputs, and is what lets `self` and `tree` be added.
 
 Some things the human table prints have no direct JSON counterpart, because they
@@ -250,14 +255,15 @@ denominator is `--thinking-budget`, an input flag the document does not carry
 and which `--json` ignores outright when it is well-formed. A consumer gets `reasoningTokens` and
 supplies its own budget.
 
-`buildSessionJson` is otherwise a thin serialiser, with three departures, all
+`buildSessionJson` is otherwise a thin serialiser, with four departures, all
 deliberate: `uncounted` is a separate scan of the session files and is passed in;
-`spawned` is the ledger walk and is passed in; and `tree` is the one piece of
-arithmetic the function performs itself, `treeTotals(summary.total,
+`spawned` is the ledger walk and is passed in; and `tree` is arithmetic the
+function performs itself, `treeTotals(summary.total,
 input.spawned)` — an addition of `total` and `spawned.total`, each already
-computed, which is why it is not a fourth way of counting. `notices` is the only input with a
+computed, so it is not a new way of counting. `notices` is the only input with a
 default; `uncounted` and `spawned` are required-not-defaulted, so an empty one
-always means "looked, found none".
+always means "looked, found none". The fourth: `treeCategories` is a second
+`computeSessionSummary` call, over self plus the required `descendantTurns` (Amendment 8).
 
 ### Exit codes
 
@@ -367,7 +373,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@8" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@9" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -443,7 +449,7 @@ file-level scope says fix or file, and the Action column says which.
 | `CONTEXT.md` | no term for the new output mode; CLI entry listed two CLI-only modes | `--json` is a third | ✅ `wtft-75-doc-claims.test.ts` | Fixed: **JSON mode** and **Provisional** entries added |
 
 **#90 was filed here and has since been FIXED** (direction A, 2026-09-16):
-`computeSessionSummary` adds `serverToolCost`, so the chart's running total, the
+`computeSessionSummary` adds `serverToolCost`, so the `--self` chart's running total, the
 `--tokens` TOTAL row and `total.costUsd` are one number. Gate:
 `tests/wtft-90-total-includes-server-tool-cost.test.ts`, which drives all three
 surfaces through the CLI — the comparison whose absence let the divergence
@@ -552,7 +558,7 @@ be zero. `docs/spec-89-scoped-picker.md` U2 records the same reasoning.
 **Closer:** on a fixture with one `<synthetic>` turn among tagged ones — the
 exact shape `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5
 built and, at the time, could not assert against —
-`total.costUsd + total.untaggedCostUsd` equals the chart's own running total,
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's running total,
 to within half a cent: the comparison scrapes the chart's own two-decimal
 `formatCost` display, the same tolerance `tests/wtft-90-…`'s own chart/TOTAL
 comparisons use. `tests/wtft-119-untagged-cost.test.ts` is
@@ -590,8 +596,7 @@ means they are not. The marker is binary. It does not estimate how much is still
   already provisional for another reason. Exit 9, the stderr line, the field and the
   `provisional` notice, as for every other reason. The notice is now built in `emitSessionJson`, so
   the empty arms carry it too, for every reason; before `@5` only the populated arm did.
-- **Mode.** Only runs that compute the spawn tree can see a descendant: `--json` and `--tokens`.
-  A plain `wtft` run never reads the ledger, so a live descendant does not make it provisional.
+- **Mode.** Only `--json` and `--tokens` set it. A plain `wtft` run does not.
 - **Two bumps.** `spawned` carries its own schema, so `wtft/spawn-tree@1` becomes `@2`, and the
   document becomes `wtft/session@5`.
 
@@ -636,3 +641,12 @@ total; the reported untagged cost can overlap `spawned.total`, as the field row 
   rows when the list is non-empty: `N descendant(s) with untagged turns — $X left out of their edge totals (#180)`.
 
 **Closer:** `tests/wtft-180-descendant-untagged.test.ts`. Full record: `docs/spec-194-p9-housekeeping.md` § H1.
+
+## Amendment 8 — `wtft/session@9`: `treeCategories` (2026-10-15)
+
+- **`treeCategories`** has the shape and order of `categories`, summed over this session's own
+  turns plus every counted descendant's turns ([spec-517](spec-517-tree-default.md)). Each
+  descendant turn is classified as a self turn is. `sum(treeCategories[].costUsd)` equals
+  `tree.costUsd` within float error when no two sessions share a message id.
+- No existing key changes meaning. `total` and `categories` stay self; `--self` has no effect on
+  `--json`.

@@ -24,6 +24,7 @@ import {
 	resolveMovedSession,
 	getCurrentVersionTagPath,
 	getDaemonPidPath,
+	servesLease,
 	daemonLaunchArgs,
 	isSessionIdBasename,
 	loadExternalHarnesses,
@@ -663,8 +664,7 @@ function adoptSession(): boolean {
   slot.state.tagPath = getCurrentVersionTagPath(slot.state.sessionPath);
   try { fs.mkdirSync(path.dirname(slot.state.tagPath), { recursive: true }); } catch { /* exists */ }
   slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
-  const leaseName = path.basename(slot.pidPath);
-  if (!takeOverLease(slot.pidPath, String(process.pid), session => path.basename(getDaemonPidPath(session)) === leaseName)) return false;
+  if (!takeOverLease(slot.pidPath, String(process.pid), servesLease(slot.pidPath))) return false;
   if (takeRebuildOwed(slot.pidPath)) slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
@@ -939,9 +939,6 @@ function pointSessionAt(livePid: number, file: string): boolean {
   held = holder === livePid;
   // The spawner claimed this lease for this process; it is handed on, not held.
   const mine = holder === process.pid;
-  // A rebuild token stays for the harness to read when it adopts, and a lease
-  // another live daemon holds is left for the harness's adoption to take by
-  // its own rules (never from a harness; a per-session daemon is stopped first).
   if (leaseText !== "rebuild" && !held && (mine || !procIsDaemon(holder))) {
     publishLease(lease, String(livePid), String(process.pid), leaseText);
   }
@@ -2028,11 +2025,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   const tagsDir = path.dirname(tagPath);
   try { fs.mkdirSync(tagsDir, { recursive: true }); } catch (_) {}
 
-  // PID lease keyed on transcript basename so a worktree move does not spawn a second daemon.
-  const sessionHash = createHash("sha256").update(
-    isSessionIdBasename(sessionPath) ? sessionBase : sessionPath
-  ).digest("hex").slice(0, 12);
-  const pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+  const pidPath = getDaemonPidPath(sessionPath);
   slot.pidPath = pidPath;
 
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).

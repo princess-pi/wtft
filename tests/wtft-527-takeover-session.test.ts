@@ -4,6 +4,7 @@
  */
 
 import * as assert from "node:assert";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,6 +12,7 @@ import { afterEach, describe, it } from "node:test";
 
 import { useProcessTable } from "../extensions/lib/holder.ts";
 import { leaseHolder, takeOverLease } from "../extensions/lib/lease.ts";
+import { getDaemonPidPath, isSessionIdBasename, servesLease } from "../extensions/lib/wtft-daemon-lib.ts";
 import { fakeProcessTable } from "./lib/fake-process-table.ts";
 
 const MINE = "/p/mine.jsonl";
@@ -81,4 +83,32 @@ describe("takeOverLease", () => {
 		assert.strictEqual(t.signals.length, 20);
 		assert.strictEqual(leaseHolder(file), String(HOLDER));
 	});
+});
+
+describe("servesLease, the predicate adoption passes", () => {
+	const id = crypto.randomUUID();
+	const notes = `notes-${id.replaceAll("-", "")}.jsonl`;
+	const cases: { name: string; lease: string; holder: string; signalled: boolean }[] = [
+		{ name: "a session-id transcript, moved to another project", lease: `/a/${id}.jsonl`, holder: `/b/${id}.jsonl`, signalled: true },
+		{ name: "another session-id transcript", lease: `/a/${id}.jsonl`, holder: `/a/${crypto.randomUUID()}.jsonl`, signalled: false },
+		{ name: "the same non-id path", lease: `/p/${notes}`, holder: `/p/${notes}`, signalled: true },
+		{ name: "a non-id file of the same name elsewhere", lease: `/p/${notes}`, holder: `/q/${notes}`, signalled: false },
+	];
+	for (const c of cases) {
+		it(`${c.name}: ${c.signalled ? "signalled" : "left running"}`, () => {
+			assert.strictEqual(isSessionIdBasename(c.lease), !c.lease.includes("notes-"), "precondition: the fixture names the lease kind it means");
+			const t = fakeProcessTable();
+			restore = useProcessTable(t);
+			t.daemon(HOLDER, ["--session", c.holder]);
+			const file = getDaemonPidPath(c.lease);
+			fs.writeFileSync(file, String(HOLDER));
+			try {
+				assert.strictEqual(takeOverLease(file, "100", servesLease(file), noWait), true);
+				assert.deepStrictEqual(t.signals.length > 0, c.signalled);
+				assert.strictEqual(leaseHolder(file), "100");
+			} finally {
+				fs.rmSync(file, { force: true });
+			}
+		});
+	}
 });

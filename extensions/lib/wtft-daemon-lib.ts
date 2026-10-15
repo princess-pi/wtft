@@ -512,6 +512,12 @@ export function getDaemonPidPath(sessionPath: string): string {
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
 }
 
+/** Whether a daemon started with `--session <session>`, as written, holds `pidPath`. */
+export function servesLease(pidPath: string): (session: string) => boolean {
+	const name = path.basename(pidPath);
+	return session => path.basename(getDaemonPidPath(session)) === name;
+}
+
 /**
  * `wtft -F`: rederive one session's tag from its transcript. A session a
  * harness daemon serves gets a `rebuild` lease, which that harness rebuilds as

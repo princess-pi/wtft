@@ -464,7 +464,7 @@ the run instead (`subagents[].total` is the same aggregation over each subagent'
 so it carries no `untaggedCostUsd` (see **Self / tree**). `total` also
 carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so
-`total.costUsd + total.untaggedCostUsd` equals the chart's own running total within float
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's running total within float
 accumulation error.
 Suppresses the well-formed rendering flags, but not the commands that run instead of a report
 (`--help`/`--why`/`--version`, `--watch`, the daemon-management group). Contract:

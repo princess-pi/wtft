@@ -4,7 +4,7 @@ import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFileStrict, discoverSubagentSessionFiles, canonicalTranscriptPath, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
-import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
+import { IDLE_THRESHOLD_MS, withOverheadSplit } from "./wtft-daemon-lib.js";
 import { listUnrecordedSpawns, type UnrecordedSpawn } from "./wtft-unrecorded.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -486,14 +486,18 @@ function walkLedger(
 			}
 
 			if (options.collect) {
-				for (const interaction of deduplicateInteractions(parsed)) {
-					let turn = interaction;
-					if (isModelTagged(interaction)) {
-						for (const fold of interaction.claudeSubAgentFolds ?? []) {
-							if (subtracted.has(fold.id.replace(/\.jsonl$/i, ""))) turn = withoutShare(turn, fold.share);
+				for (const part of descendant.parts) {
+					let prevCtx = 0;
+					for (const interaction of deduplicateInteractions(part)) {
+						let turn = interaction;
+						if (isModelTagged(interaction)) {
+							for (const fold of interaction.claudeSubAgentFolds ?? []) {
+								if (subtracted.has(fold.id.replace(/\.jsonl$/i, ""))) turn = withoutShare(turn, fold.share);
+							}
 						}
+						for (const split of withOverheadSplit(turn, prevCtx)) options.collect.turns.push({ ...split, cacheMiss: undefined });
+						if (!interaction.isSidechain) prevCtx = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
 					}
-					options.collect.turns.push(turn);
 				}
 				options.collect.files.push(...descendant.files);
 			}

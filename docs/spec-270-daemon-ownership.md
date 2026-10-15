@@ -110,7 +110,7 @@ and `restartDaemon` unlinked unconditionally. S2 left one implementation, `unlin
 ### 1d. Spawn ledger `$XDG_STATE_HOME/wtft/spawns.jsonl`
 
 Writer: `wtft spawn-record`, called by launchers. Readers: `computeSpawnTree` (CLI report,
-widget), `listUnrecordedSpawns` (exclusion set). Format: `docs/spec-116-spawn-ledger.md`.
+`--watch`, widget), `listUnrecordedSpawns` (exclusion set). Format: `docs/spec-116-spawn-ledger.md`.
 
 ### 1e. Reap log `$XDG_STATE_HOME/wtft/reap.log`
 
@@ -122,7 +122,7 @@ Session `.jsonl`, `<id>/subagents/agent-*.jsonl` and `.meta.json`, Pi sibling fi
 `claude -p` children under the projects root. Read by the daemon (`parseNewLines`,
 `syncSubagentTranscript`, discovery), by the CLI (`scanSessionUncounted`,
 `collectSubagentJson`, `computeSpawnTree` → `parseDescendant`), by the widget
-(`readInteractions` → discovery and `loadSubagentInteractionsChecked`, and `/wtft --tokens` → `computeSpawnTree` → `parseDescendant`), and by `readHealthFacts` (the session
+(`readInteractions` → discovery and `loadSubagentInteractionsChecked`, and every widget refresh → `computeSpawnTree` → `parseDescendant`), and by `readHealthFacts` (the session
 file's mtime, and the whole file for a model only when an idle answer needs a TTL and the tag tail
 named none).
 

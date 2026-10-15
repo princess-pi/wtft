@@ -418,8 +418,13 @@ export { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 import { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
+	return withOverheadSplit(interaction, prevCtxTokens).map(i => serializeClassified(i)).join("");
+}
+
+/** The turn as the tag stores it: whole, or a work remainder plus an Ovrhd or Cmpct line. */
+export function withOverheadSplit(interaction: Interaction, prevCtxTokens: number): Interaction[] {
 	const split = splitOverheadCost(interaction, prevCtxTokens);
-	if (!split) return serializeClassified(interaction);
+	if (!split) return [interaction];
 	const remainder: Interaction = {
 		...interaction,
 		cost: Math.max(0, interaction.cost - split.overheadCost),
@@ -444,7 +449,7 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 		files: [], commands: [], texts: [],
 		_cat: split.kind,
 	};
-	return serializeClassified(remainder) + serializeClassified(overheadLine);
+	return [remainder, overheadLine];
 }
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;

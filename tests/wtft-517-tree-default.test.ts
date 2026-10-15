@@ -36,7 +36,7 @@ process.env.XDG_CONFIG_HOME = path.join(dir, "config");
 const T0 = Date.UTC(2026, 9, 14, 5, 0, 0);
 const uuid = (n: number) => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
-function turnLine(id: string, tsMs: number, outputTokens: number, opts: { spawnCwd?: string; write?: string } = {}): string {
+function turnLine(id: string, tsMs: number, outputTokens: number, opts: { spawnCwd?: string; write?: string; cacheWrite?: number } = {}): string {
 	const iso = new Date(tsMs).toISOString();
 	const content = opts.spawnCwd
 		? [{ type: "toolCall", name: "bash", arguments: { command: `cd ${opts.spawnCwd} && claude -p "go"` } }]
@@ -48,7 +48,7 @@ function turnLine(id: string, tsMs: number, outputTokens: number, opts: { spawnC
 		timestamp: iso,
 		message: {
 			role: "assistant", id, model: "claude-sonnet-4-6", timestamp: iso,
-			usage: { input_tokens: 1000, output_tokens: outputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+			usage: { input_tokens: 1000, output_tokens: outputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: opts.cacheWrite ?? 0 },
 			content,
 		},
 	}) + "\n";
@@ -78,7 +78,7 @@ console.log("\nPART A — a counted descendant's turns are collected, each at it
 {
 	const ROOT = uuid(1), CHILD = uuid(2);
 	const childPath = putSession(CHILD, [
-		turnLine("c1", T0 + 60_000, 200, { write: "docs/spec-x.md" }),
+		turnLine("c1", T0 + 60_000, 200, { write: "docs/spec-x.md", cacheWrite: 50_000 }),
 		turnLine("c2", T0 + 3_600_000, 400, { write: "src/x.ts" }),
 	]);
 	const collect = { turns: [] as Interaction[], files: [] as string[] };
@@ -92,6 +92,8 @@ console.log("\nPART A — a counted descendant's turns are collected, each at it
 	check(collect.turns.map(t => classifyInteraction(t)).sort().join() === "code,spec",
 		`A4 each turn is classified by the self classifier (got ${collect.turns.map(t => classifyInteraction(t)).join()})`);
 	check(collect.files.includes(childPath), "A5 the child's transcript is in collect.files");
+	check(parseSessionFile(childPath).some(t => t.cacheMiss), "A6 fixture precondition: the child's own parse marks a cache miss");
+	check(collect.turns.every(t => !t.cacheMiss), "A7 no collected turn draws a Cache Miss divider: the divider is parent-only");
 }
 
 console.log("\nPART B — a child already inside self contributes no turns");

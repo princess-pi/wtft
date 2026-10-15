@@ -257,9 +257,10 @@ function widgetChart(
 	const settings = getSettings(ctx);
 	const { sessionFile, model, ...asked } = opts ?? {};
 	const transcript: string | undefined = ctx.sessionManager.getSessionFile?.();
-	if (transcript !== uncountedSessionFile) {
+	const latchKey = `${transcript}\0${_widgetSelf}`;
+	if (latchKey !== uncountedSessionFile) {
 		uncountedLatch = createUncountedLatch();
-		uncountedSessionFile = transcript;
+		uncountedSessionFile = latchKey;
 	}
 
 	return chartLines({
@@ -415,6 +416,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
 			if (opts.hideCostColumns) widgetHideCostColumns = true;
+			_widgetSelf = opts.self;
 			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
 
 			if (forceReparse) {
@@ -484,13 +486,11 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (other) {
 				const interactions = readInteractions(ctx);
-				const deduped = deduplicateInteractions(interactions);
+				const deduped = deduplicateInteractions([...interactions, ...widgetTree(ctx, interactions).turns]);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
 				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
-
-			_widgetSelf = opts.self;
 
 			const columnFlags = {
 				showCostColumns: !widgetHideCostColumns,

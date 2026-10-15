@@ -176,7 +176,7 @@ The numbers come from the same aggregation the rendered `--tokens` table formats
 so those two cannot report different totals. The **bar chart's** total is a
 different figure on purpose: it bins every interaction, including ones carrying
 no model id. As of `@4` a consumer can size that divergence itself:
-`total.costUsd + total.untaggedCostUsd` equals the chart's total
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's total
 ([#119](https://github.com/princess-pi/wtft/issues/119)).
 
 `--json` suppresses the well-formed rendering flags. It does **not** apply to the commands
@@ -220,7 +220,7 @@ retired in `@4`.
   `descendant-live` (a counted descendant is still writing its transcript or
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
-  `--tokens` and `--json`, the runs that read the spawn tree.
+  `--tokens` and `--json`.
 - **2** — the call was wrong, and stdout carries nothing: an unknown flag, a bare word, a
   flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
   cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr says why.

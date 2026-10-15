@@ -13,6 +13,7 @@ import {
 	classifyInteraction,
 } from "./wtft-shared.js";
 import { askedOf, chartLines } from "./chart-call.js";
+import { safeSpawnText } from "./wtft-renderer.js";
 import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged, discoverSubagentSessionFiles } from "./wtft-parser.js";
 import { createUncountedLatch } from "./uncounted-latch.ts";
@@ -805,7 +806,7 @@ export const TREE_REFRESH_MS = 10_000;
 
 /** One line per live descendant, for `--watch` under the chart. */
 export function renderLiveDescendants(live: TreeView["live"]): string[] {
-	return live.map(e => `\x1b[36m▸\x1b[0m ${e.label ?? e.child.slice(0, 8)} \x1b[90m${e.mechanism}\x1b[0m $${e.costUsd.toFixed(2)} \x1b[33mlive\x1b[0m`);
+	return live.map(e => `\x1b[36m▸\x1b[0m ${safeSpawnText(e.label ?? e.child.slice(0, 8))} \x1b[90m${safeSpawnText(e.mechanism)}\x1b[0m $${e.costUsd.toFixed(2)} \x1b[33mlive\x1b[0m`);
 }
 
 export async function watchTagFile(

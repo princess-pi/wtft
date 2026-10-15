@@ -180,5 +180,12 @@ console.log("\nPART G — --watch names a live child, and drops it once quiet (#
 	check(quiet.live.length === 0 && quiet.turns.length === 1, `G2 ten minutes quiet, the line is gone and the turn stays (live ${quiet.live.length})`);
 }
 
+console.log("\nPART H — a spawner's label and mechanism cannot write to the terminal");
+{
+	const [line] = renderLiveDescendants([{ child: uuid(61), label: "ok\n$0.00 forged\x1b]0;x\x07", mechanism: "m\x1b[2J", costUsd: 1 }]);
+	check(!line.includes("\n") && !line.includes("\x1b]") && !line.includes("\x1b[2J") && line.includes("\uFFFD"),
+		`H1 control characters become U+FFFD (got ${JSON.stringify(line)})`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

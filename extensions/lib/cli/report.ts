@@ -122,10 +122,10 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
 	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
 		if (opts.self) return { turns: [], files: [] };
-		if (opts.tokens || opts.json) { sessionSpawnTree(); return collected.get(false)!; }
 		if (chartCollect) return chartCollect;
 		const collect = { turns: [] as Interaction[], files: [] as string[] };
 		try {
+			if (opts.tokens || opts.json) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
 			computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });
 			chartCollect = collect;
 		} catch (err) {

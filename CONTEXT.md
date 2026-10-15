@@ -460,7 +460,7 @@ session in view — see `docs/spec-26-json.md` Amendment 3. Its
 aggregate numbers come from `computeSessionSummary` (`extensions/lib/wtft-renderer.ts`),
 the same aggregation the `--tokens` table formats, so those two cannot report different
 totals; `session`, `provisional`, `uncounted`, `spawned`, the `subagents` listing and `notices` come from
-the run instead (`subagents[].total` is the same aggregation over each subagent's lines), and `tree` is `total` plus `spawned.total` over the six token and cost fields,
+the run instead (`subagents[].total` is the same aggregation over each subagent's lines), `treeCategories` is the same aggregation over self plus every counted descendant's turns (spec-517), and `tree` is `total` plus `spawned.total` over the six token and cost fields,
 so it carries no `untaggedCostUsd` (see **Self / tree**). `total` also
 carries `untaggedCostUsd` beside `costUsd` (#119) — the cost of every interaction the
 chart bins but `total`'s own `costUsd` excludes for lacking a model id, so

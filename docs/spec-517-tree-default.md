@@ -111,7 +111,7 @@ children's transcripts more often; a few seconds to a minute is the useful range
 
 `tests/wtft-517-tree-default.test.ts`:
 
-- `computeSpawnTree` with `collect` on a fixture ledger with one `claude -p` child: the turns' summed
+- `computeSpawnTree` with `collect` on a fixture ledger with one launcher child: the turns' summed
   cost equals `tree.total.costUsd`, and each turn keeps its own timestamp and category.
 - A child already in self (`alreadyAttributed`) contributes no turns.
 - A descendant turn folding a session already in self has that share subtracted.

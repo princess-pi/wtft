@@ -147,14 +147,19 @@ function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 }
 
 function withoutShare(interaction: Interaction, share: TokenTotals): Interaction {
+	const turnTotals: TokenTotals = {
+		costUsd: interaction.cost, inputTokens: interaction.inputTokens, outputTokens: interaction.outputTokens,
+		reasoningTokens: interaction.reasoningTokens, cacheReadTokens: interaction.cacheReadTokens, cacheWriteTokens: interaction.cacheWriteTokens,
+	};
+	subtractTotals(turnTotals, share);
 	return {
 		...interaction,
-		cost: Math.max(0, interaction.cost - share.costUsd),
-		inputTokens: Math.max(0, interaction.inputTokens - share.inputTokens),
-		outputTokens: Math.max(0, interaction.outputTokens - share.outputTokens),
-		reasoningTokens: Math.max(0, interaction.reasoningTokens - share.reasoningTokens),
-		cacheReadTokens: Math.max(0, interaction.cacheReadTokens - share.cacheReadTokens),
-		cacheWriteTokens: Math.max(0, interaction.cacheWriteTokens - share.cacheWriteTokens),
+		cost: turnTotals.costUsd,
+		inputTokens: turnTotals.inputTokens,
+		outputTokens: turnTotals.outputTokens,
+		reasoningTokens: turnTotals.reasoningTokens,
+		cacheReadTokens: turnTotals.cacheReadTokens,
+		cacheWriteTokens: turnTotals.cacheWriteTokens,
 	};
 }
 

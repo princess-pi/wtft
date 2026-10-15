@@ -1485,7 +1485,7 @@ export function renderSpawnTree(self: TokenTotals, spawned?: SpawnTree): string 
 /** Every untrusted string on this surface goes through one sanitiser. A
  *  newline forges report lines and an ESC starts an OSC sequence. U+FFFD
  *  rather than deletion, so a reader sees something was removed. */
-const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+export const safeSpawnText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 
 /** The unrecorded-spawn list. Printed after SPAWNED, and on its own when nothing was
  *  recorded: its rows are the ones the ledger does not know. A `named` row is

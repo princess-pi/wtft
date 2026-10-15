@@ -44,7 +44,7 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
 ## Not in this change
 
 The `--watch` rendering in #133's decision (one line per in-flight child) needs the watch loop to
-compute the spawn tree; [spec-517](spec-517-tree-default.md) does that for [#198](https://github.com/princess-pi/wtft/issues/198).
+compute the spawn tree; [spec-517](spec-517-tree-default.md) does that.
 
 ## Closer
 

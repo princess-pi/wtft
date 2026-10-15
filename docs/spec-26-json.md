@@ -642,7 +642,7 @@ total; the reported untagged cost can overlap `spawned.total`, as the field row 
 
 **Closer:** `tests/wtft-180-descendant-untagged.test.ts`. Full record: `docs/spec-194-p9-housekeeping.md` § H1.
 
-## Amendment 8 — `wtft/session@9`: `treeCategories` (#517, 2026-10-15)
+## Amendment 8 — `wtft/session@9`: `treeCategories` (2026-10-15)
 
 - **`treeCategories`** has the shape and order of `categories`, summed over this session's own
   turns plus every counted descendant's turns ([spec-517](spec-517-tree-default.md)). Each

@@ -3,6 +3,9 @@
  */
 
 import * as assert from "node:assert";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, it } from "node:test";
 
 import { createUncountedLatch, type UncountedLatchIo } from "../extensions/lib/uncounted-latch.ts";
@@ -25,10 +28,10 @@ class FakeIo implements UncountedLatchIo {
 		const c = this.files.get(p);
 		return c === undefined ? null : Buffer.from(c).length;
 	}
-	readFrom(p: string, offset: number): Buffer | null {
+	readFrom(p: string, offset: number, length: number): Buffer | null {
 		const c = this.files.get(p);
 		if (c === undefined) return null;
-		const out = Buffer.from(c).subarray(offset);
+		const out = Buffer.from(c).subarray(offset, offset + length);
 		this.bytesRead += out.length;
 		return out;
 	}
@@ -74,6 +77,24 @@ describe("createUncountedLatch", () => {
 		assert.strictEqual(latch.seen(["/s/a.jsonl"]), false);
 		io.files.set("/s/a.jsonl", whole);
 		assert.strictEqual(latch.seen(["/s/a.jsonl"]), true);
+	});
+
+	it("reads in chunks, finds a line spanning them, and stops at the first match", () => {
+		const io = new FakeIo();
+		const after = turn("m2").repeat(50);
+		io.files.set("/s/a.jsonl", turn("m1") + compaction + after);
+		assert.strictEqual(createUncountedLatch(io, 16).seen(["/s/a.jsonl"]), true);
+		assert.ok(io.bytesRead < Buffer.byteLength(turn("m1") + compaction) + 16, `read ${io.bytesRead} bytes`);
+	});
+
+	it("does not iterate paths once latched", () => {
+		const io = new FakeIo();
+		io.files.set("/s/a.jsonl", compaction);
+		const latch = createUncountedLatch(io);
+		assert.strictEqual(latch.seen(["/s/a.jsonl"]), true);
+		let iterated = false;
+		assert.strictEqual(latch.seen((function* () { iterated = true; yield "/s/a.jsonl"; })()), true);
+		assert.strictEqual(iterated, false);
 	});
 
 	it("sees a Pi compaction entry", () => {
@@ -124,5 +145,19 @@ describe("the chart's floor marker", () => {
 
 	it("draws no ≥ without the flag", () => {
 		assert.ok(draw().every((l) => !l.includes("≥")));
+	});
+
+	it("draws ≥ from a transcript holding a compact_boundary, and none from one without", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtft-515-"));
+		try {
+			const withCompaction = path.join(dir, "with.jsonl");
+			const without = path.join(dir, "without.jsonl");
+			fs.writeFileSync(withCompaction, turn("m1") + compaction);
+			fs.writeFileSync(without, turn("m1"));
+			assert.ok(rows(draw(createUncountedLatch().seen([withCompaction])))[0].includes("≥"));
+			assert.ok(draw(createUncountedLatch().seen([without])).every((l) => !l.includes("≥")));
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

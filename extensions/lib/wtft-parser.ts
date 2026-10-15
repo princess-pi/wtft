@@ -364,7 +364,7 @@ export function splitOverheadCost(
 
 /** Bytes read per chunk: a transcript is never held whole, so a re-parse
  *  peaks at one chunk and one line, not at the file several times over. */
-const PARSE_CHUNK_BYTES = 1024 * 1024;
+export const PARSE_CHUNK_BYTES = 1024 * 1024;
 
 /** Every line of a file, in order, read in chunks — the same lines
  *  `readFileSync(...).split("\n")` gives, including a last one with no newline. */

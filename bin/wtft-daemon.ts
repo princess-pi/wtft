@@ -711,7 +711,7 @@ function wake(file: string, displayed: boolean) {
   // A `rebuild` lease (wtft -F), or a rebuild owed on a lease handed back to
   // us, is adopted afresh, which honours it. Any other lease that is not ours
   // drops the session in serviceSession, as --stop means.
-  if (slot && slot.pidPath && (leaseHolder(slot.pidPath) === "rebuild" || rebuildIsOwed(slot.pidPath))) {
+  if (slot && slot.pidPath && (leaseHolder(slot.pidPath) === "rebuild" || (leaseStillOurs(slot) && rebuildIsOwed(slot.pidPath)))) {
     displayed = displayed || slot.displayed;
     dropHarnessSlot(key);
     slot = undefined;

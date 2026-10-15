@@ -126,6 +126,10 @@ try {
 		claimLease(lease, "4243", () => false);
 		check(!takeRebuildOwed(lease), "displacing a stale pid owes no rebuild");
 		check(claimLease(lease, "4244", () => true) === "busy" && !takeRebuildOwed(lease), "a busy claim over a pid owes none");
+		fs.writeFileSync(lease, "rebuild");
+		fs.mkdirSync(`${lease}.rebuild`);
+		check(claimLease(lease, "4245", () => false) === "busy" && read(lease).trim() === "rebuild",
+			"a claim that cannot leave the rebuild owed is busy and leaves the token");
 	}
 
 	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {

@@ -70,9 +70,10 @@ non-session-id path names a different lease (#320 H). Transient siblings exist w
 `lease.ts` works: `<lease>.claim-<pid>`, `<lease>.replace-<pid>`, and `<lease>.lock`, which a
 replace takes first, claimed like a lease and taken over once its owner is dead or it is
 older than `REPLACE_LOCK_WAIT_MS`. `<lease>.rebuild` marks a rebuild owed: `claimLease` writes it
-before it unlinks a stale `rebuild` token, and the next daemon to take the lease removes it with
-`takeRebuildOwed` and rebuilds the tag; a harness serving the session re-adopts it when
-`rebuildIsOwed`.
+before it unlinks a stale `rebuild` token, and leaves the token and answers busy when it cannot,
+and the next daemon to take the lease removes it with
+`takeRebuildOwed` and rebuilds the tag; a harness serving the session, still holding its lease,
+re-adopts it when `rebuildIsOwed`.
 
 | Writer | Moment | Effect |
 |---|---|---|

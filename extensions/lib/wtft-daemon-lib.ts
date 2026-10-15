@@ -909,17 +909,9 @@ export async function watchTagFile(
 	}
 
 	const uncountedLatch = createUncountedLatch();
-	let discovered: { sessionSize: number | null; files: string[] } | null = null;
 	function* transcripts(): Generator<string> {
 		yield sessionPath;
-		let sessionSize: number | null = null;
-		try { sessionSize = fs.statSync(sessionPath).size; } catch {}
-		if (!discovered || discovered.sessionSize !== sessionSize) {
-			let files: string[] = [];
-			try { files = discoverSubagentSessionFiles(sessionPath, { quietSession: true }).files; } catch {}
-			discovered = { sessionSize, files };
-		}
-		yield* discovered.files;
+		try { yield* discoverSubagentSessionFiles(sessionPath, { quietSession: true }).files; } catch {}
 	}
 
 	const render = () => {

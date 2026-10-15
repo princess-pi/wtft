@@ -34,24 +34,31 @@ const nodeIo: UncountedLatchIo = {
 	},
 };
 
-/** True once any of the given transcripts holds a compaction or a recap: docs/spec-515-floor-marker.md § 3.
- *  `paths` is iterated only while nothing has been seen. */
+/** True once any of the given transcripts holds a compaction or a recap: docs/spec-515-floor-marker.md § 3. */
 export function createUncountedLatch(io: UncountedLatchIo = nodeIo, chunkBytes: number = PARSE_CHUNK_BYTES): UncountedLatch {
-	const progress = new Map<string, { offset: number; tail: Buffer }>();
+	if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+		throw new RangeError(`createUncountedLatch: chunkBytes must be a positive safe integer, got ${chunkBytes}`);
+	}
+	const progress = new Map<string, { offset: number; carry: Buffer[] }>();
 	let latched = false;
 	const scan = (path: string): boolean => {
 		const size = io.size(path);
 		if (size === null) return false;
-		let at = progress.get(path) ?? { offset: 0, tail: Buffer.alloc(0) };
-		if (size < at.offset) at = { offset: 0, tail: Buffer.alloc(0) };
+		let at = progress.get(path) ?? { offset: 0, carry: [] };
+		if (size < at.offset) at = { offset: 0, carry: [] };
+		progress.set(path, at);
 		while (at.offset < size) {
 			const chunk = io.readFrom(path, at.offset, Math.min(chunkBytes, size - at.offset));
 			if (chunk === null || chunk.length === 0) break;
-			const bytes = Buffer.concat([at.tail, chunk]);
-			const end = bytes.lastIndexOf(0x0a) + 1;
-			at = { offset: at.offset + chunk.length, tail: bytes.subarray(end) };
-			progress.set(path, at);
-			for (const line of bytes.subarray(0, end).toString("utf8").split("\n")) {
+			at.offset += chunk.length;
+			const end = chunk.lastIndexOf(0x0a) + 1;
+			if (end === 0) {
+				at.carry.push(chunk);
+				continue;
+			}
+			const complete = Buffer.concat([...at.carry, chunk.subarray(0, end)]);
+			at.carry = [chunk.subarray(end)];
+			for (const line of complete.toString("utf8").split("\n")) {
 				if (!line.trim()) continue;
 				let entry: unknown;
 				try { entry = JSON.parse(line); } catch { continue; }

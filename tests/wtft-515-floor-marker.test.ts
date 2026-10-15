@@ -26,12 +26,12 @@ class FakeIo implements UncountedLatchIo {
 	bytesRead = 0;
 	size(p: string): number | null {
 		const c = this.files.get(p);
-		return c === undefined ? null : Buffer.from(c).length;
+		return c === undefined ? null : Buffer.byteLength(c);
 	}
 	readFrom(p: string, offset: number, length: number): Buffer | null {
 		const c = this.files.get(p);
 		if (c === undefined) return null;
-		const out = Buffer.from(c).subarray(offset, offset + length);
+		const out = Buffer.from((typeof c === "string" ? Buffer.from(c) : c).subarray(offset, offset + length));
 		this.bytesRead += out.length;
 		return out;
 	}
@@ -85,6 +85,19 @@ describe("createUncountedLatch", () => {
 		io.files.set("/s/a.jsonl", turn("m1") + compaction + after);
 		assert.strictEqual(createUncountedLatch(io, 16).seen(["/s/a.jsonl"]), true);
 		assert.ok(io.bytesRead < Buffer.byteLength(turn("m1") + compaction) + 16, `read ${io.bytesRead} bytes`);
+	});
+
+	it("reads a line of many chunks in linear time", () => {
+		const io = new FakeIo();
+		const long = JSON.stringify({ type: "user", content: "x".repeat(4 * 1024 * 1024) }) + "\n";
+		io.files.set("/s/a.jsonl", Buffer.from(long + compaction));
+		const started = Date.now();
+		assert.strictEqual(createUncountedLatch(io, 256).seen(["/s/a.jsonl"]), true);
+		assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+	});
+
+	it("rejects a chunk size that is not a positive integer", () => {
+		assert.throws(() => createUncountedLatch(new FakeIo(), 0), RangeError);
 	});
 
 	it("does not iterate paths once latched", () => {

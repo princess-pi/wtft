@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { renderSpawnTree, emptyTotals, renderOtherHistogram, renderTokenSummary, renderSubagentBlock, deduplicateInteractions, scanUncountedBillables, scanUncountedBillablesChecked, newUncountedBillables, addUncountedBillables, discoverSubagentSessionFiles, readSubagentMetaChecked, readTagProvisional, readTagFileWithVerdict, detectSessionHarness, buildSessionJson, type WtftSubagentJson, renderSessionJson, type WtftNotice, type UncountedBillables, getTagPath, awaitDaemonUp, IDLE_THRESHOLD_MS, WTFT_TAGGER_VERSION, taggerIsOlder, describeProvisionalReason, isModelPriced, describeFallbackPricing, getUserPricingPath, getCurrentVersionTagPath, resolveLastCwd, type Interaction, getTerminalWidth } from "../wtft-shared.js";
 import { computeSpawnTree, type SpawnTree } from "../wtft-spawn-tree.js";
+import { createUncountedLatch } from "../uncounted-latch.ts";
 import { subagentRows, type SubagentRow } from "../wtft-subagent-block.js";
 import { readConfig } from "@princess-pi/libs/config";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
@@ -334,7 +335,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 
-	const uncounted = scanSessionUncounted();
+	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files]);
 	const outputLines = chartLines({
 		interactions,
 		asked: askedOf(opts),
@@ -342,7 +343,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		unit,
 		sessionFile: finalSessionPath,
 		padRows: true,
-		floor: uncounted.compaction + uncounted.recap > 0,
+		floor,
 	});
 
 	console.log(padStr + `\x1b[90m${finalSessionPath}\x1b[0m`);

@@ -9,7 +9,7 @@ Also: `extensions/lib/wtft-renderer.ts` — passes `floor` to the chart.
 Also: `extensions/lib/chart-call.ts` — passes `floor` to the renderer.
 Also: `extensions/lib/wtft-daemon-lib.ts` — `--watch` asks the latch.
 Also: `extensions/wtft.ts` — the Pi widget asks the latch.
-Also: `extensions/lib/cli/report.ts` — the one-shot report reuses its `scanSessionUncounted`, which `--tokens` and `--json` already read, so a `--tokens` run reads the transcripts once.
+Also: `extensions/lib/cli/report.ts` — the one-shot report asks the latch. It does not reuse `scanSessionUncounted`, whose subagent-unreadable verdict a plain run must not set (README exit 9).
 
 ## 1. Problem
 
@@ -25,8 +25,8 @@ says in one glyph that it is a floor.
 - **Where:** the total-cost cell of the newest displayed row, in either mode and under either unit:
   `≥$218`. The other rows' totals carry no `≥`; the column is one cell wider for it. The marker is
   absent whenever the cost columns are not shown, and from `--json`.
-- **Surfaces:** the CLI chart (including the chart a `--tokens` run prints above its summary),
-  `--watch` and the Pi widget.
+- **Surfaces:** every chart wtft draws: the CLI chart (including the one a `--tokens` run prints
+  above its summary), `--watch`, the Pi widget and its pager.
 
 ## 3. The latch
 

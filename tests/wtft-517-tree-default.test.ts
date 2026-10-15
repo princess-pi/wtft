@@ -1,8 +1,4 @@
 #!/usr/bin/env -S bun
-/**
- * The spawn tree is the default report: computeSpawnTree collects every counted
- * descendant's turns (#517).
- */
 
 import * as fs from "node:fs";
 import * as os from "node:os";

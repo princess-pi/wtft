@@ -35,8 +35,7 @@ transcripts they were read from:
 collect?: { turns: Interaction[]; files: string[] };
 ```
 
-- **Same set as `tree.total`.** Only edges that count (`resolved: true`) contribute, each
-  descendant's turns deduplicated the way its edge total is.
+- **Same set as `tree.total`.** Only edges that count (`resolved: true`) contribute.
 - **Fold shares come out of the turn that carries them.** Where a descendant's turn folds a session
   already in some total, the walk subtracts that share from the edge total; with `collect`, it
   subtracts the same share from that turn's cost and token fields, so the turns and the totals

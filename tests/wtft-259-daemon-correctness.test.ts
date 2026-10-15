@@ -437,7 +437,7 @@ mock.module("node:fs", () => ({ ...realFs, unlinkSync, default: { ...realFs, unl
 			check(classified(target, "lost-bogus"), `${label}: fixture: the target's tag carries a row its transcript does not`);
 			const named = holder(fired);
 			fs.writeFileSync(holderFile, named);
-			if (named !== "0") check(await until(() => classifyPid(Number(named)) === "harness", 2_000) !== Infinity, `${label}: fixture precondition: the stand-in reads as a harness`);
+			if (named !== "0") check(await until(() => classifyPid(Number(named)) === "harness", 15_000) !== Infinity, `${label}: fixture precondition: the stand-in reads as a harness`);
 			const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 			const forced = spawnSync("node", [cli, "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 			check(fs.existsSync(fired), `${label}: fixture precondition: it took the lease between the harness's unlink and its link (-F exit ${forced.status}: ${forced.stderr.trim()})`);

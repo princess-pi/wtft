@@ -55,7 +55,6 @@ const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — 
 // The tag's own verdict, which the widget's discovery cannot see (daemon-side).
 let _tagProvisional: { verdict: TagProvisional; tagPath: string } | null = null;
 
-/** One line per cause: the two have different remedies. */
 function provisionalLines(): string[] {
 	const lines: string[] = [];
 	if (_tagProvisional?.verdict.provisional) {

@@ -228,7 +228,7 @@ single aggregation — the only *implementation* of the arithmetic, not the only
 in `extensions/lib/wtft-json.ts` serialises the same result for a machine.
 Neither reimplements it, so the prose and the JSON cannot report different
 **numbers**. Since #116 a run calls it once for this session, once per resolved
-descendant inside `computeSpawnTree`, and since #517 once more for `treeCategories` — which is the same
+descendant inside `computeSpawnTree`, and under `--json` once more for `treeCategories` — which is the same
 function over different inputs, and is what lets `self` and `tree` be added.
 
 Some things the human table prints have no direct JSON counterpart, because they

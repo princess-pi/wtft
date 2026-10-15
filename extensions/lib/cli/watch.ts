@@ -11,12 +11,7 @@ import { treeView, type TreeView } from "../wtft-spawn-tree.js";
 /** The tree `--watch` charts: excluding what the session's tag already folded, as the report does. */
 function watchTree(sessionPath: string, tagPath: string): TreeView {
 	return treeView(path.basename(sessionPath).replace(/\.jsonl$/i, ""), () => {
-		let content: string;
-		try { content = fs.readFileSync(tagPath, "utf8"); } catch (err) {
-			if ((err as NodeJS.ErrnoException).code === "ENOENT") return new Set<string>();
-			throw err;
-		}
-		return foldedSessionIdsFromContent(content);
+		return foldedSessionIdsFromContent(fs.readFileSync(tagPath, "utf8"));
 	});
 }
 

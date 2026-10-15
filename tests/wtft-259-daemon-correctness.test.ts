@@ -385,6 +385,7 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 		// Between the harness's unlink of `rebuild` and its link, another claim takes the lease: one
 		// naming no live process, which a later attempt displaces, or a harness, which ends the
 		// adoption until a retry.
+		const standIns: ReturnType<typeof spawn>[] = [];
 		const holders: Array<{ label: string; holder: (fired: string) => string }> = [
 			{ label: "a holder no process answers to", holder: () => "0" },
 			{ label: "a harness that exits a moment after it takes the lease", holder: (fired) => {
@@ -392,7 +393,7 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); fs.writeFileSync(process.argv[3] + ".held", ""); setTimeout(() => process.exit(0), 700); } }, 20);
 setTimeout(() => process.exit(0), 120_000);`;
 				const standIn = spawn("node", standInDaemonArgs(code, "--harness", fired), { stdio: "ignore" });
-				if (standIn.pid) pids.push(standIn.pid);
+				standIns.push(standIn);
 				return String(standIn.pid ?? 0);
 			} },
 		];
@@ -447,6 +448,7 @@ mock.module("node:fs", () => ({ ...realFs, unlinkSync, default: { ...realFs, unl
 			try { process.kill(child.pid ?? 0, "SIGTERM"); } catch { /* gone */ }
 			await until(() => !alive(child.pid ?? 0), 5_000);
 		}
+		for (const standIn of standIns) if (standIn.exitCode === null && standIn.signalCode === null) standIn.kill("SIGTERM");
 	}
 
 	console.log("\n-F landing inside a harness start's own lease hand-off is not lost");

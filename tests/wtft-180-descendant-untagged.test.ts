@@ -135,9 +135,10 @@ const doc = buildSessionJson({
 	provisional: { provisional: false } as any,
 	uncounted: { webFetchRequests: 0 } as any,
 	spawned: tree,
+	descendantTurns: [],
 });
-check(doc.schema === WTFT_JSON_SCHEMA && WTFT_JSON_SCHEMA === "wtft/session@8",
-	`J1 the session schema is wtft/session@8 (got ${doc.schema})`);
+check(doc.schema === WTFT_JSON_SCHEMA && WTFT_JSON_SCHEMA === "wtft/session@9",
+	`J1 the session schema is wtft/session@9 (got ${doc.schema})`);
 check(Array.isArray((doc.spawned as any).descendantUntagged) && (doc.spawned as any).descendantUntagged.length === 2,
 	"J2 spawned.descendantUntagged reaches the document");
 check(Math.abs(doc.tree.costUsd - edgeSum) < 1e-9 && doc.tree.costUsd < 0.25,

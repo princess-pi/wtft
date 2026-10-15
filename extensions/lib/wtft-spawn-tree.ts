@@ -4,7 +4,7 @@ import { readSpawnLedger, type SpawnLedger } from "./wtft-spawn-ledger.js";
 import { getDiscoveries } from "./harness/registry.js";
 import { parseSessionFileStrict, discoverSubagentSessionFiles, canonicalTranscriptPath, deduplicateInteractions, isModelTagged, type Interaction } from "./wtft-parser.js";
 import { computeSessionSummary, emptyTotals, type TokenTotals } from "./wtft-renderer.js";
-import { IDLE_THRESHOLD_MS } from "./wtft-daemon-lib.js";
+import { IDLE_THRESHOLD_MS, withOverheadSplit } from "./wtft-daemon-lib.js";
 import { listUnrecordedSpawns, type UnrecordedSpawn } from "./wtft-unrecorded.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -126,6 +126,8 @@ export interface SpawnTreeOptions {
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
 	unrecorded?: { turns: Interaction[]; rootCwd: string | null; rootFile?: string };
+	/** Receives every counted descendant's turns and every transcript read. */
+	collect?: { turns: Interaction[]; files: string[] };
 }
 
 const SUBTRACT_TOLERANCE = 1e-9;
@@ -141,6 +143,23 @@ function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 		}
 		into[key] = Math.max(0, next);
 	}
+}
+
+function withoutShare(interaction: Interaction, share: TokenTotals): Interaction {
+	const turnTotals: TokenTotals = {
+		costUsd: interaction.cost, inputTokens: interaction.inputTokens, outputTokens: interaction.outputTokens,
+		reasoningTokens: interaction.reasoningTokens, cacheReadTokens: interaction.cacheReadTokens, cacheWriteTokens: interaction.cacheWriteTokens,
+	};
+	subtractTotals(turnTotals, share);
+	return {
+		...interaction,
+		cost: turnTotals.costUsd,
+		inputTokens: turnTotals.inputTokens,
+		outputTokens: turnTotals.outputTokens,
+		reasoningTokens: turnTotals.reasoningTokens,
+		cacheReadTokens: turnTotals.cacheReadTokens,
+		cacheWriteTokens: turnTotals.cacheWriteTokens,
+	};
 }
 
 /** Add every numeric field of `from` into `into`.
@@ -456,16 +475,35 @@ function walkLedger(
 			}
 			// A session this parse folded is either already in some total — take its
 			// share back out — or it lands here, and a gap reported for it is closed.
+			const subtracted = new Set<string>();
 			for (const [id, share] of foldsInTotal(parsed)) {
 				const prior = outcomeOf.get(id);
 				if (prior === "in-self" || prior === "counted" || prior === "folded") {
 					subtractTotals(total, share);
+					subtracted.add(id);
 					continue;
 				}
 				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== id);
 				outcomeOf.set(id, "folded");
 				// Folded in where this child's own children stand.
 				enqueue(id, depth + 2);
+			}
+
+			if (options.collect) {
+				for (const [k, part] of descendant.parts.entries()) {
+					let prevCtx = 0;
+					for (const interaction of deduplicateInteractions(part)) {
+						let turn = interaction;
+						if (isModelTagged(interaction)) {
+							for (const fold of interaction.claudeSubAgentFolds ?? []) {
+								if (subtracted.has(fold.id.replace(/\.jsonl$/i, ""))) turn = withoutShare(turn, fold.share);
+							}
+						}
+						for (const split of k === 0 ? withOverheadSplit(turn, prevCtx) : [turn]) options.collect.turns.push({ ...split, cacheMiss: undefined });
+						if (!interaction.isSidechain) prevCtx = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
+					}
+				}
+				options.collect.files.push(...descendant.files);
 			}
 
 			tree.descendants++;
@@ -486,4 +524,21 @@ export function treeTotals(self: TokenTotals, tree: SpawnTree): TokenTotals {
 	addTotals(out, self);
 	addTotals(out, tree.total);
 	return out;
+}
+
+/** What a chart adds for the tree: descendant turns, their transcripts, and the live edges. */
+export interface TreeView {
+	turns: Interaction[];
+	files: string[];
+	live: { child: string; label?: string; mechanism: string; costUsd: number }[];
+}
+
+/** One walk of `rootSessionId`'s tree, shaped for a chart. */
+export function treeView(rootSessionId: string, alreadyAttributed: SpawnTreeOptions["alreadyAttributed"], options: Pick<SpawnTreeOptions, "ledgerPath" | "now"> = {}): TreeView {
+	const collect = { turns: [] as Interaction[], files: [] as string[] };
+	const tree = computeSpawnTree(rootSessionId, { ...options, alreadyAttributed, collect });
+	const live = tree.edges.filter(e => e.live && e.total).map(e => ({
+		child: e.child, ...(e.label !== undefined ? { label: e.label } : {}), mechanism: e.mechanism, costUsd: e.total!.costUsd,
+	}));
+	return { ...collect, live };
 }

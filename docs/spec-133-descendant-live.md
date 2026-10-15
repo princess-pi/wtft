@@ -37,14 +37,14 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
   has been quiet for 122 s. Both take the number from `IDLE_THRESHOLD_MS`.
 - **Schema.** `spawned.edges[].live` is a new nested key, and the reason set widens, so
   `wtft/session@4` becomes `wtft/session@5` and `spawned`'s own `wtft/spawn-tree@1` becomes `@2`.
-- **Where it applies.** Only CLI runs that compute the spawn tree: `--tokens` and `--json`. A
-  plain `wtft` run never reads the ledger, so a live descendant does not make it provisional. The Pi
-  widget's `/wtft --tokens` renders the tree but does not read `live`; that rendering is #198.
+- **Where it applies.** Only `--tokens` and `--json` set it. A plain `wtft` run, which charts the
+  tree since spec-517, does not. The Pi
+  widget's `/wtft --tokens` renders the tree but does not read `live`.
 
 ## Not in this change
 
 The `--watch` rendering in #133's decision (one line per in-flight child) needs the watch loop to
-compute the spawn tree, which it does not do today: [#198](https://github.com/princess-pi/wtft/issues/198).
+compute the spawn tree; [spec-517](spec-517-tree-default.md) does that for [#198](https://github.com/princess-pi/wtft/issues/198).
 
 ## Closer
 

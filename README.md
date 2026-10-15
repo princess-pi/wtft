@@ -168,7 +168,7 @@ wtft --json | jq .total.costUsd
 `wtft --json` writes **exactly one JSON object** to stdout and nothing else —
 no chart, no ANSI, and no `3.6k`-style abbreviation, which is lossy. Human prose
 goes to stderr, and the object's `notices[]` carries the report's notice
-sentences. The schema is `wtft/session@8`; field names
+sentences. The schema is `wtft/session@9`; field names
 and exit codes are versioned API, the prose inside `notices[].text` is not. Full
 contract: [`docs/spec-26-json.md`](./docs/spec-26-json.md).
 
@@ -176,7 +176,7 @@ The numbers come from the same aggregation the rendered `--tokens` table formats
 so those two cannot report different totals. The **bar chart's** total is a
 different figure on purpose: it bins every interaction, including ones carrying
 no model id. As of `@4` a consumer can size that divergence itself:
-`total.costUsd + total.untaggedCostUsd` equals the chart's total
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's total
 ([#119](https://github.com/princess-pi/wtft/issues/119)).
 
 `--json` suppresses the well-formed rendering flags. It does **not** apply to the commands
@@ -220,7 +220,7 @@ retired in `@4`.
   `descendant-live` (a counted descendant is still writing its transcript or
   one of its subagent transcripts,
   [#133](https://github.com/princess-pi/wtft/issues/133)) is set only by
-  `--tokens` and `--json`, the runs that read the spawn tree.
+  `--tokens` and `--json`.
 - **2** — the call was wrong, and stdout carries nothing: an unknown flag, a bare word, a
   flag with no value (`wtft --stop`, `wtft --stop --json`), or a value a flag
   cannot use (`--limit abc`, `-i 9x`, `--harness bogus`). stderr says why.
@@ -331,6 +331,11 @@ A session's built-in (Task) subagents get their own `SUBAGENTS` block under
 its model and the cost `TOTAL` already holds for it. Those rows are **inside**
 `TOTAL`, never added to it; `--json` carries the same figure as
 `subagents[].total`.
+
+The chart shows the spawn tree by default: this session's own turns plus every
+counted descendant's, each in its own category at its own time. `wtft --self`
+charts the session's own turns only, for summing spend across sessions without
+counting a child twice ([`docs/spec-517-tree-default.md`](./docs/spec-517-tree-default.md)).
 
 `wtft --tokens` shows the spawn tree as a `SPAWNED` / `TREE` block below
 `TOTAL`. It prints nothing when the walk found no edge — none from this session,

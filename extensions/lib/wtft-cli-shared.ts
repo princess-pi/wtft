@@ -57,6 +57,8 @@ export interface WtftCliOptions {
 	 *  rendering. CLI-only: the Pi extension parses it and ignores it, because a
 	 *  TUI widget has no stdout to write an object to. */
 	json: boolean;
+	/** `--self`: chart this session's own turns, not its spawn tree. */
+	self: boolean;
 	/** The first argument the parser could not read, named in one sentence; `undefined` when it read them all. */
 	usageError: string | undefined;
 }
@@ -116,6 +118,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 	let daemonStop: string | undefined = undefined;
 	let thinkingBudget: number | undefined = undefined;
 	let json = false;
+	let self = false;
 	let usageError: string | undefined = undefined;
 	const refuse = (why: string) => { usageError ??= why; };
 
@@ -206,6 +209,8 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 			}
 		} else if (arg === "--json") {
 			json = true;
+		} else if (arg === "--self") {
+			self = true;
 		} else if (arg === "--list") {
 			daemonList = true;
 		} else if (arg === "--cleanup") {
@@ -274,6 +279,7 @@ export function parseWtftCliArgs(argv: string[]): WtftCliOptions {
 		daemonList, daemonCleanup, daemonRestart, daemonStop,
 		thinkingBudget,
 		json,
+		self,
 		usageError,
 	};
 }

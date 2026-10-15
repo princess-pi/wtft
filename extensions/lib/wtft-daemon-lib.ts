@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { Interaction, Category } from "./wtft-parser.js";
+import type { TreeView } from "./wtft-spawn-tree.js";
 import { getVisualLength, getTerminalWidth } from "./wtft-shared.js";
 import {
 	parseEntryToInteraction,
@@ -12,6 +13,7 @@ import {
 	classifyInteraction,
 } from "./wtft-shared.js";
 import { askedOf, chartLines } from "./chart-call.js";
+import { safeSpawnText } from "./wtft-renderer.js";
 import { isPlaceholderRow } from "./wtft-chart.js";
 import { splitOverheadCost, isModelTagged, discoverSubagentSessionFiles } from "./wtft-parser.js";
 import { createUncountedLatch } from "./uncounted-latch.ts";
@@ -47,6 +49,9 @@ export interface WatchSettings {
 	hasTimezone?: boolean;
 	disabledEmoji?: boolean;
 	defaultDisabledEmoji?: boolean;
+	/** The spawn tree's descendant turns, the transcripts they came from, and its live edges.
+	 *  Absent under `--self`. Called at most once per `TREE_REFRESH_MS`. */
+	tree?: (tagPath: string) => TreeView;
 }
 
 
@@ -424,8 +429,13 @@ export { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 import { WTFT_TAGGER_VERSION, taggerIsOlder } from "./wtft-tagger-version.js";
 
 export function serializeClassifiedWithOverheadSplit(interaction: Interaction, prevCtxTokens: number): string {
+	return withOverheadSplit(interaction, prevCtxTokens).map(i => serializeClassified(i)).join("");
+}
+
+/** The turn as the tag stores it: whole, or a work remainder plus an Ovrhd or Cmpct line. */
+export function withOverheadSplit(interaction: Interaction, prevCtxTokens: number): Interaction[] {
 	const split = splitOverheadCost(interaction, prevCtxTokens);
-	if (!split) return serializeClassified(interaction);
+	if (!split) return [interaction];
 	const remainder: Interaction = {
 		...interaction,
 		cost: Math.max(0, interaction.cost - split.overheadCost),
@@ -450,7 +460,7 @@ export function serializeClassifiedWithOverheadSplit(interaction: Interaction, p
 		files: [], commands: [], texts: [],
 		_cat: split.kind,
 	};
-	return serializeClassified(remainder) + serializeClassified(overheadLine);
+	return [remainder, overheadLine];
 }
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -807,6 +817,13 @@ export function waitingForDataLine(sessionPath: string): string {
 	return "Waiting for session data...";
 }
 
+export const TREE_REFRESH_MS = 10_000;
+
+/** One line per live descendant, for `--watch` under the chart. */
+export function renderLiveDescendants(live: TreeView["live"]): string[] {
+	return live.map(e => `\x1b[36m▸\x1b[0m ${safeSpawnText(e.label ?? e.child.slice(0, 8))} \x1b[90m${safeSpawnText(e.mechanism)}\x1b[0m $${e.costUsd.toFixed(2)} \x1b[33mlive\x1b[0m`);
+}
+
 export async function watchTagFile(
 	sessionPath: string,
 	tagPathHint: string,
@@ -923,6 +940,18 @@ export async function watchTagFile(
 	} catch {
 	}
 
+	let tree: TreeView = { turns: [], files: [], live: [] };
+	let treeAt = -Infinity;
+	let treeError: string | null = null;
+	const refreshTree = () => {
+		if (!settings.tree || Date.now() - treeAt < TREE_REFRESH_MS) return;
+		treeAt = Date.now();
+		try { tree = settings.tree(tagPath); treeError = null; } catch (err) {
+			tree = { turns: [], files: [], live: [] };
+			treeError = err instanceof Error ? err.message : String(err);
+		}
+	};
+
 	const uncountedLatch = createUncountedLatch();
 	let liveSessionPath = sessionPath;
 	function* transcripts(): Generator<string> {
@@ -931,6 +960,7 @@ export async function watchTagFile(
 		}
 		yield liveSessionPath;
 		try { yield* discoverSubagentSessionFiles(liveSessionPath, { quietSession: true }).files; } catch {}
+		yield* tree.files;
 	}
 
 	const render = () => {
@@ -942,7 +972,8 @@ export async function watchTagFile(
 		const paddedWidth = width - 2 * actualPad;
 		const finalWidth = Math.min(paddedWidth, 1023);
 
-		const deduped = dedupeClassifiedById(allInteractions);
+		refreshTree();
+		const deduped = [...dedupeClassifiedById(allInteractions), ...tree.turns];
 		interactionCount = deduped.length;
 
 		const lines = chartLines({
@@ -966,7 +997,7 @@ export async function watchTagFile(
 
 		const buf: string[] = [];
 		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
-		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
+		totalCost = deduplicateInteractions(deduped).reduce((sum, i) => sum + i.cost + (i.serverToolCost || 0), 0);
 
 		if (lines && lines.length > 0) {
 			const daemonStatusStr = daemonStatus
@@ -984,6 +1015,8 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
+			for (const l of renderLiveDescendants(tree.live)) buf.push(l);
+			if (treeError) buf.push(`\x1b[33m⚠ spawn tree not walked (${treeError}); charting this session's own turns\x1b[0m`);
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}

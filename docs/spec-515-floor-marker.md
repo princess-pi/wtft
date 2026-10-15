@@ -9,7 +9,7 @@ Also: `extensions/lib/wtft-renderer.ts` — passes `floor` to the chart.
 Also: `extensions/lib/chart-call.ts` — passes `floor` to the renderer.
 Also: `extensions/lib/wtft-daemon-lib.ts` — `--watch` asks the latch.
 Also: `extensions/wtft.ts` — the Pi widget asks the latch.
-Also: `extensions/lib/cli/report.ts` — the one-shot report asks the latch over the session and the subagent transcripts discovery finds (discovery may warn on stderr). It does not reuse `scanSessionUncounted`, whose subagent-unreadable verdict a plain run must not set (README exit 9).
+Also: `extensions/lib/cli/report.ts` — the one-shot report asks the latch over the session, the subagent transcripts discovery finds, and in tree mode every counted descendant's transcripts (spec-517) (discovery may warn on stderr). It does not reuse `scanSessionUncounted`, whose subagent-unreadable verdict a plain run must not set (README exit 9).
 
 ## 1. Problem
 

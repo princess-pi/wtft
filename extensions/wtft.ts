@@ -27,7 +27,7 @@ import { loadUserPricing } from "./lib/wtft-pricing-config.js";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { chartLines, chartUnit } from "./lib/chart-call.js";
-import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
+import { computeSpawnTree, treeView, type SpawnTree, type TreeView } from "./lib/wtft-spawn-tree.js";
 import { createUncountedLatch } from "./lib/uncounted-latch.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -55,13 +55,13 @@ const PROVISIONAL_LINE = "\x1b[33m⚠ some transcripts could not be counted — 
 // The tag's own verdict, which the widget's discovery cannot see (daemon-side).
 let _tagProvisional: { verdict: TagProvisional; tagPath: string } | null = null;
 
-/** One line per cause: the two have different remedies. */
 function provisionalLines(): string[] {
 	const lines: string[] = [];
 	if (_tagProvisional?.verdict.provisional) {
 		lines.push(`\x1b[33m⚠ ${describeProvisionalReason(_tagProvisional.verdict, _tagProvisional.tagPath)} — total is provisional\x1b[0m`);
 	}
 	if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
+	if (_widgetTreeError) lines.push(`\x1b[33m⚠ spawn tree not walked (${_widgetTreeError}): this view shows the session's own turns only\x1b[0m`);
 	return lines;
 }
 
@@ -161,11 +161,8 @@ function getSettings(_ctx: any) {
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
-/** `computeSpawnTree` reports a ledger it could not read as `ledgerError`
- *  rather than throwing, so the widget shows that failure instead of hiding it.
- *  The catch has no reachable case left; it stays because a widget refresh
- *  running every turn must not take the panel down. */
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
+	_widgetTreeError = null;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
 	try {
@@ -175,11 +172,29 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
 			alreadyAttributed: () => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles),
 		});
-	} catch {
+	} catch (err) {
+		_widgetTreeError = err instanceof Error ? err.message : String(err);
 		return undefined;
 	}
 }
 
+/** The widget's tree turns; empty under `/wtft --self`. A refresh must not take the panel down. */
+function widgetTree(ctx: any, interactions: Interaction[]): TreeView {
+	const none: TreeView = { turns: [], files: [], live: [] };
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	_widgetTreeError = null;
+	if (_widgetSelf || !sessionFile) return none;
+	try {
+		return treeView(path.basename(sessionFile).replace(/\.jsonl$/i, ""),
+			() => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles));
+	} catch (err) {
+		_widgetTreeError = err instanceof Error ? err.message : String(err);
+		return none;
+	}
+}
+
+let _widgetSelf = false;
+let _widgetTreeError: string | null = null;
 let uncountedLatch = createUncountedLatch();
 let uncountedSessionFile: string | undefined;
 
@@ -238,17 +253,19 @@ function widgetChart(
 		showTokenColumns?: boolean;
 	},
 	interactions: Interaction[] = readInteractions(ctx),
+	tree: TreeView = widgetTree(ctx, interactions),
 ): string[] | null {
 	const settings = getSettings(ctx);
 	const { sessionFile, model, ...asked } = opts ?? {};
 	const transcript: string | undefined = ctx.sessionManager.getSessionFile?.();
-	if (transcript !== uncountedSessionFile) {
+	const latchKey = `${transcript}\0${_widgetSelf}`;
+	if (latchKey !== uncountedSessionFile) {
 		uncountedLatch = createUncountedLatch();
-		uncountedSessionFile = transcript;
+		uncountedSessionFile = latchKey;
 	}
 
 	return chartLines({
-		interactions,
+		interactions: [...interactions, ...tree.turns],
 		asked: {
 			...asked,
 			showCostColumns: asked.showCostColumns ?? !widgetHideCostColumns,
@@ -259,7 +276,7 @@ function widgetChart(
 		sessionFile,
 		model,
 		live: true,
-		floor: transcript ? uncountedLatch.seen([transcript, ..._subagentFiles]) : false,
+		floor: transcript ? uncountedLatch.seen([transcript, ..._subagentFiles, ...tree.files]) : false,
 	});
 }
 
@@ -298,9 +315,10 @@ function updateWtftWidget(
 	const width = getTerminalWidth(true, false);
 	// Read once: fitWidget may render several times. The read sets what provisionalLines reports.
 	const interactions = readInteractions(ctx);
+	const tree = widgetTree(ctx, interactions);
 	const tail = provisionalLines();
 	const lines = fitWidget(
-		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions),
+		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions, tree),
 		parserStatusStr, width, tail, opts?.limit ?? current.limit,
 	);
 	if (!lines) {
@@ -399,6 +417,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				hasMode, mode, hasTimezone, timezone, pager } = opts;
 
 			if (opts.hideCostColumns) widgetHideCostColumns = true;
+			_widgetSelf = opts.self;
 			if (opts.hideTokenColumns) widgetHideTokenColumns = true;
 
 			if (forceReparse) {
@@ -468,7 +487,7 @@ export default function wtftExtension(pi: ExtensionAPI) {
 
 			if (other) {
 				const interactions = readInteractions(ctx);
-				const deduped = deduplicateInteractions(interactions);
+				const deduped = deduplicateInteractions([...interactions, ...widgetTree(ctx, interactions).turns]);
 				const output = renderOtherHistogram(deduped, Math.max(current.width, 40));
 				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;

@@ -47,7 +47,7 @@ function cli(source: string, args: string[]): string {
 
 /** Same helper shape as tests/wtft-90…: the chart's newest cumulative running total. */
 function chartTotal(session: string): number {
-	const out = cli(session, ["--interval", "1h", "--cumulative"]);
+	const out = cli(session, ["--interval", "1h", "--cumulative", "--self"]);
 	const row = out.split("\n").find(l => /^\s*\d\d:\d\d\s+\+\$/.test(l));
 	if (!row) throw new Error(`no cumulative bin row in:\n${out}`);
 	const figures = [...row.matchAll(/\$([0-9.]+)/g)].map(m => Number(m[1]));
@@ -67,7 +67,7 @@ console.log("\n=== U1/U4: schema bump, field shape ===\n");
 	const allTagged = path.join(dir, "all-tagged.jsonl");
 	fs.writeFileSync(allTagged, [usageLine({ id: "a", ts: "2026-07-01T12:00:00Z" })].join("\n") + "\n");
 	const doc = json(allTagged);
-	check(doc.schema === "wtft/session@8", `U4: schema is wtft/session@8 (${doc.schema})`);
+	check(doc.schema === "wtft/session@9", `U4: schema is wtft/session@9 (${doc.schema})`);
 	check(typeof doc.total.untaggedCostUsd === "number", "U1: total.untaggedCostUsd is a number");
 	check(doc.total.untaggedCostUsd === 0, "U1: an all-tagged session has zero untagged cost");
 	check(!doc.notices.some((n: any) => n.code === "auto-selected-session"),

@@ -120,25 +120,19 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// The chart's tree walk: the full one when --tokens already needs it, else one without the
 	// unrecorded listing, and never a provisional verdict (spec-133 scopes that to --tokens and --json).
 	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
-	let treeFailed = false;
 	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
 		if (opts.self) return { turns: [], files: [] };
 		if (chartCollect) return chartCollect;
+		if (opts.tokens || opts.json) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
 		const collect = { turns: [] as Interaction[], files: [] as string[] };
 		try {
-			if (opts.tokens || opts.json) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
 			computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });
 			chartCollect = collect;
 		} catch (err) {
 			console.error(`\x1b[33m⚠ spawn tree not walked (${err instanceof Error ? err.message : String(err)}); charting this session's own turns\x1b[0m`);
 			chartCollect = { turns: [], files: [] };
-			treeFailed = true;
 		}
 		return chartCollect;
-	};
-	const tokensSpawnTree = (): SpawnTree | undefined => {
-		descendantTurns();
-		return treeFailed ? undefined : sessionSpawnTree();
 	};
 
 	// ---
@@ -364,6 +358,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 
+	if (opts.tokens) sessionSpawnTree();
 	const tree = descendantTurns();
 	const chartInteractions = [...interactions, ...tree.turns];
 	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files, ...tree.files]);
@@ -394,7 +389,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	if (opts.tokens) {
 		const subagents = collectSubagentJson();
 		for (const n of subagents?.notices ?? []) warnNotice(n);
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), tokensSpawnTree(), subagents?.block);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), subagents?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}

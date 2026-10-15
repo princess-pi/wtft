@@ -491,7 +491,7 @@ function walkLedger(
 			}
 
 			if (options.collect) {
-				for (const part of descendant.parts) {
+				for (const [k, part] of descendant.parts.entries()) {
 					let prevCtx = 0;
 					for (const interaction of deduplicateInteractions(part)) {
 						let turn = interaction;
@@ -500,7 +500,7 @@ function walkLedger(
 								if (subtracted.has(fold.id.replace(/\.jsonl$/i, ""))) turn = withoutShare(turn, fold.share);
 							}
 						}
-						for (const split of withOverheadSplit(turn, prevCtx)) options.collect.turns.push({ ...split, cacheMiss: undefined });
+						for (const split of k === 0 ? withOverheadSplit(turn, prevCtx) : [turn]) options.collect.turns.push({ ...split, cacheMiss: undefined });
 						if (!interaction.isSidechain) prevCtx = interaction.inputTokens + interaction.cacheReadTokens + interaction.cacheWriteTokens;
 					}
 				}

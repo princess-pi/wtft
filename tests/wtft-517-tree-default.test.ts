@@ -189,7 +189,7 @@ console.log("\nPART H — a spawner's label and mechanism cannot write to the te
 		`H1 control characters become U+FFFD (got ${JSON.stringify(line)})`);
 }
 
-console.log("\nPART I — a spawn walk that throws under --tokens warns once and still prints the token table");
+console.log("\nPART I — a spawn walk that throws: a plain run warns and charts self; --tokens fails before printing");
 {
 	const { WTFT_TAGGER_VERSION } = await import("../bin/wtft.mjs");
 	const ROOT = uuid(71);
@@ -205,13 +205,35 @@ console.log("\nPART I — a spawn walk that throws under --tokens warns once and
 	fs.writeFileSync(path.join(parentDir, "wtft-tags", `${ROOT}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
 		JSON.stringify({ t: T0, c: 0.25, cat: "code", f: [], cmd: [], id: "msg-r", m: "claude-sonnet-4-6", in: 100, out: 50, cr: 0, cw: 0, rs: 0 })
 		+ "\n" + JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
-	const r = spawnSync(process.execPath, [cliWithoutDaemon(), "-s", session, "--tokens"], {
+	const run = (...args: string[]) => spawnSync(process.execPath, [cliWithoutDaemon(), "-s", session, ...args], {
 		cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), ".."), encoding: "utf8", timeout: 60_000,
 		stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_CLAUDE_PROJECTS_DIR: notADir },
 	});
-	const warnings = (r.stderr.match(/spawn tree not walked/g) ?? []).length;
-	check(warnings === 1, `I1 the failed walk warns exactly once (got ${warnings}; stderr ${JSON.stringify(r.stderr.slice(0, 400))})`);
-	check(r.status === 0 && /\$0\.25/.test(r.stdout), `I2 the run exits 0 and the token table prints self's $0.25 (exit ${r.status})`);
+	const plain = run();
+	const warnings = (plain.stderr.match(/spawn tree not walked/g) ?? []).length;
+	check(warnings === 1, `I0 fixture precondition: the walk fails, and a plain run warns once (got ${warnings})`);
+	check(plain.status === 0 && plain.stdout.includes(session), `I1 the plain run charts self and exits 0 (exit ${plain.status})`);
+	for (const args of [["--tokens"], ["--self", "--tokens"]]) {
+		const r = run(...args);
+		check(r.status !== 0 && r.status !== null && r.stdout === "",
+			`I2 ${args.join(" ")} exits non-zero with nothing on stdout (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
+	}
+}
+
+console.log("\nPART J — a descendant's subagent lines stay whole, as a tag keeps them");
+{
+	const ROOT = uuid(81), CHILD = uuid(82);
+	const childPath = putSession(CHILD, [turnLine("c", T0, 100)]);
+	const subDir = path.join(childPath.replace(/\.jsonl$/, ""), "subagents");
+	fs.mkdirSync(subDir, { recursive: true });
+	const recache = (id: string, at: number) => JSON.parse(turnLine(id, at, 50, { cacheWrite: 50_000 }));
+	const lines = [recache("s1", T0 + 1_000), recache("s2", T0 + 2_000)].map(l => { l.message.usage.input_tokens = 10; return JSON.stringify(l) + "\n"; });
+	fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), lines.join(""));
+	const collect = { turns: [] as Interaction[], files: [] as string[] };
+	computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), collect });
+	const sub = collect.turns.filter(t => t.timestamp >= T0 + 1_000);
+	check(collect.files.some(f => f.endsWith("agent-a.jsonl")), "J0 fixture precondition: the subagent transcript is read");
+	check(sub.length === 2 && sub.every(t => t.cacheWriteTokens === 50_000), `J1 both subagent turns stay whole (got ${sub.length} lines)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -72,7 +72,10 @@ collect?: { turns: Interaction[]; files: string[] };
   chart and in `treeCategories`, while `tree.total` counts each; the identities above hold when no
   two sessions share a message id.
 - **Descendant turns are shaped as a tag stores them:** a recache or post-compaction cache write
-  splits into an Ovrhd or Cmpct line, and no descendant turn draws a Cache Miss divider.
+  in the descendant's own transcript splits into an Ovrhd or Cmpct line, its subagent lines stay
+  whole, and no descendant turn draws a Cache Miss divider.
+- **A tree walk that throws** fails `--tokens` and `--json` before anything is printed. A plain run,
+  `--watch` and the Pi widget say so on one line and chart self.
 - **`--self` is not saved** to the wtft config, in the CLI or in Pi. In the Pi widget, `/wtft --self`
   draws self only, and any later `/wtft` call without it draws the tree again.
 

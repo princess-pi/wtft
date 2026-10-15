@@ -118,7 +118,7 @@ describe("the chart's floor marker", () => {
 	it("puts ≥ before the newest row's total cost and nowhere else", () => {
 		const lines = rows(draw(true));
 		assert.ok(lines.length >= 2, "the fixture draws at least two rows");
-		assert.match(lines[0], /≥\$\d/);
+		assert.match(lines[0], /^\S+ \+\$[\d.]+ +≥\$[\d.]+ /);
 		for (const l of lines.slice(1)) assert.doesNotMatch(l, /≥/);
 	});
 

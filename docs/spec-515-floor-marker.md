@@ -9,13 +9,13 @@ Also: `extensions/lib/wtft-renderer.ts` — passes `floor` to the chart.
 Also: `extensions/lib/chart-call.ts` — passes `floor` to the renderer.
 Also: `extensions/lib/wtft-daemon-lib.ts` — `--watch` asks the latch.
 Also: `extensions/wtft.ts` — the Pi widget asks the latch.
-Also: `extensions/lib/cli/report.ts` — the one-shot report asks the latch. It does not reuse `scanSessionUncounted`, whose subagent-unreadable verdict a plain run must not set (README exit 9).
+Also: `extensions/lib/cli/report.ts` — the one-shot report asks the latch over the session and the subagent transcripts discovery finds (discovery may warn on stderr). It does not reuse `scanSessionUncounted`, whose subagent-unreadable verdict a plain run must not set (README exit 9).
 
 ## 1. Problem
 
-wtft prices only recorded `usage`. Claude Code also bills compactions and away-recaps, and writes no
-usage for either (spec-149 §4–§5). On session `0e9925e4` (2026-10-14) the chart showed $218 while
-Claude Code's status bar showed $230. Duppy's decision: the total stays usage-derived, and the chart
+wtft prices only recorded `usage`. Claude Code bills compactions and away-recaps, and Pi bills compactions, and neither writes
+usage for them (spec-149 §4–§5). On session `0e9925e4` (2026-10-14) the chart showed $218 while
+Claude Code's status line showed $230. Duppy's decision: the total stays usage-derived, and the chart
 says in one glyph that it is a floor.
 
 ## 2. The marker
@@ -23,10 +23,11 @@ says in one glyph that it is a floor.
 - **When:** a transcript the surface reads for this session holds an entry that
   `readUncountedBillableClass` classifies: a compaction or a recap.
 - **Where:** the total-cost cell of the newest displayed row, in either mode and under either unit:
-  `≥$218`. The other rows' totals carry no `≥`; the column is one cell wider for it. The marker is
+  `≥$218`. The other rows' totals carry no `≥`; the label area widens for it, which can move the
+  compaction step (spec-362). The marker is
   absent whenever the cost columns are not shown, and from `--json`.
-- **Surfaces:** every chart wtft draws: the CLI chart (including the one a `--tokens` run prints
-  above its summary), `--watch`, the Pi widget and its pager.
+- **Surfaces:** the CLI chart (including the one a `--tokens` run prints
+  above its summary), `--watch`, the Pi widget and its pager. The wtft.html demos and the fair page pass no `floor`.
 
 ## 3. The latch
 

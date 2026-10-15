@@ -672,25 +672,33 @@ function adoptSession(): boolean {
   slot.state.tagPath = getCurrentVersionTagPath(slot.state.sessionPath);
   try { fs.mkdirSync(path.dirname(slot.state.tagPath), { recursive: true }); } catch { /* exists */ }
   slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
-  if (!takeOverLease(slot.pidPath)) return false;
-  if (displacedHolder === "rebuild") slot.rebuildTagOnStartup = true;
+  const taken = takeOverLease(slot.pidPath);
+  if (!taken.claimed) return false;
+  if (taken.rebuild) slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
 }
 
-function takeOverLease(pidPath: string): boolean {
+/** `rebuild` is true when any attempt displaced a `rebuild` token. */
+function takeOverLease(pidPath: string): { claimed: boolean; rebuild: boolean } {
+  let rebuild = false;
+  const claim = (): boolean => {
+    const claimed = claimPidFile(pidPath) === "claimed";
+    if (displacedHolder === "rebuild") rebuild = true;
+    return claimed;
+  };
   for (let attempt = 0; attempt < 20; attempt++) {
-    if (claimPidFile(pidPath) === "claimed") return true;
+    if (claim()) return { claimed: true, rebuild };
     const holder = leasePid(leaseHolder(pidPath));
-    if (holder === process.pid) return true;
+    if (holder === process.pid) return { claimed: true, rebuild };
     if (procIsDaemon(holder)) {
       // A harness serves other sessions too; one that is stopping lets go itself.
-      if (procIsHarness(holder)) return false;
+      if (procIsHarness(holder)) return { claimed: false, rebuild };
       processTable().signal(holder, "SIGTERM");
     }
     sleepMs(50);
   }
-  return claimPidFile(pidPath) === "claimed";
+  return { claimed: claim(), rebuild };
 }
 
 function scheduleFlush(key: string) {

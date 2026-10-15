@@ -131,13 +131,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 	"claude-opus-4-5":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-opus-4-1":   { input: 5.00, output: 25.00, cacheRead: 0.50, cacheWrite: 6.25 },
 	"claude-sonnet-5-5": { input: 2.00, output: 10.00, cacheRead: 0.10, cacheWrite: 2.50 },
-	"claude-sonnet-5":   {
-		input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75,
-		dateTiers: [
-			{ effectiveBefore: 1788220800000 /* 2026-09-01T00:00:00Z */,
-			  input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
-		],
-	},
+	"claude-sonnet-5":   { input: 2.00, output: 10.00, cacheRead: 0.20, cacheWrite: 2.50 },
 	"claude-sonnet-4-6": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-sonnet-4-5": { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
 	"claude-haiku-4-5":  { input: 1.00, output: 5.00, cacheRead: 0.10, cacheWrite: 1.25 },

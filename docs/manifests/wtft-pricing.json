@@ -185,13 +185,6 @@
       "rates": [
         {
           "condition": "",
-          "input": 3,
-          "output": 15,
-          "cacheRead": 0.3,
-          "cacheWrite": 3.75
-        },
-        {
-          "condition": "before 2026-09-01T00:00:00Z",
           "input": 2,
           "output": 10,
           "cacheRead": 0.2,

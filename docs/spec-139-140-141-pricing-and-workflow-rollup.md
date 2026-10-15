@@ -1,6 +1,7 @@
 # Spec: wtft pricing correctness + workflow subagent rollup (#139, #140, #141)
 
 **Status:** Code and Spec Approved (tested; reconciled to shipped code)
+**Superseded in part:** the `claude-sonnet-5` rates here are replaced by [spec-521](spec-521-sonnet-5-standard-rate.md).
 **Issues:** [#139](https://github.com/duppypro/princess-pi-tools/issues/139),
 [#140](https://github.com/duppypro/princess-pi-tools/issues/140),
 [#141](https://github.com/duppypro/princess-pi-tools/issues/141)

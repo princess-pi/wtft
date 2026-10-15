@@ -382,6 +382,17 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 	}
 }
 
+export function readAppended(tagPath: string, offset: number, size: number): Buffer {
+	const fd = fs.openSync(tagPath, "r");
+	try {
+		const buf = Buffer.alloc(size - offset);
+		fs.readSync(fd, buf, 0, buf.length, offset);
+		return buf;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
 /** The tag file a watch on `watchedPath` (inode `watchedIno`) should move to: the same path
  *  recreated, or the session's current tag file when the watched one is gone. `lost` (the
  *  watcher saw a rename or unlink) accepts a file at the same path even with the same inode,
@@ -1039,10 +1050,7 @@ export async function watchTagFile(
 				}
 
 				{
-					const fd = fs.openSync(tagPath, "r");
-					const buf = Buffer.alloc(stat.size - lastReadOffset);
-					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
-					fs.closeSync(fd);
+					const buf = readAppended(tagPath, lastReadOffset, stat.size);
 
 					const lastNl = buf.lastIndexOf(0x0a);
 					if (lastNl !== -1) {
@@ -1070,8 +1078,6 @@ export async function watchTagFile(
 					}
 				}
 
-				// In-place modification (heartbeat overwrite): file didn't grow
-				// but the idle timestamp changed.
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();

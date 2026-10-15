@@ -911,7 +911,9 @@ export async function watchTagFile(
 	const uncountedLatch = createUncountedLatch();
 	let liveSessionPath = sessionPath;
 	function* transcripts(): Generator<string> {
-		if (!fs.existsSync(liveSessionPath)) liveSessionPath = resolveMovedSession(sessionPath) ?? liveSessionPath;
+		if (!fs.existsSync(liveSessionPath)) {
+			liveSessionPath = fs.existsSync(sessionPath) ? sessionPath : resolveMovedSession(sessionPath) ?? liveSessionPath;
+		}
 		yield liveSessionPath;
 		try { yield* discoverSubagentSessionFiles(liveSessionPath, { quietSession: true }).files; } catch {}
 	}

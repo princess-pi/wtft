@@ -85,7 +85,7 @@ collect?: { turns: Interaction[]; files: string[] };
 two sessions share a message id. The
 schema becomes `wtft/session@9`; no existing key changes meaning.
 
-### 2.5 `--watch`: live children (#198)
+### 2.5 `--watch`: live children
 
 In tree mode, `--watch` prints one line per counted descendant whose edge is `live`, under the
 chart: its label (else the first 8 characters of its session id), its mechanism, and its edge
@@ -120,7 +120,7 @@ children's transcripts more often; a few seconds to a minute is the useful range
 - `buildSessionJson`: `sum(treeCategories[].costUsd)` equals `tree.costUsd`.
 - `parseWtftCliArgs(["--self"])` sets `self`.
 - `treeView` with a fresh child transcript lists it live and `renderLiveDescendants` names it;
-  ten minutes quiet, the line is gone (#198).
+  ten minutes quiet, the line is gone.
 - A walk that throws: a plain run warns once and charts self; `--tokens` exits non-zero, naming the error.
 - A recache in a descendant's own transcript splits; one in its subagent transcript stays whole.
 

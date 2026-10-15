@@ -15,7 +15,7 @@ describe("#518 the docs say what --watch and the Pi widget do", () => {
 		assert.match(watchLib, /fs\.watch\(tagPath/);
 		assert.match(watchLib, /requires a real terminal \(TTY\)/);
 		assert.match(watchFlag.desc, /tag file/);
-		assert.match(watchFlag.desc, /TTY/);
+		assert.match(watchFlag.desc, /not a terminal/);
 		assert.match(watchFlag.desc, /\br asks for a fresh log parser daemon/);
 	});
 

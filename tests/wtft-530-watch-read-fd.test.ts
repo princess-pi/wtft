@@ -32,6 +32,8 @@ check(fdsOn(tag) === 0, "a successful read leaves no fd open on the tag file");
 
 const unreadable = path.join(dir, "a-directory");
 fs.mkdirSync(unreadable);
+const probe = fs.openSync(unreadable, "r");
+fs.closeSync(probe);
 let throws = 0;
 for (let i = 0; i < 5; i++) {
 	try { readAppended(unreadable, 0, 8); } catch { throws++; }

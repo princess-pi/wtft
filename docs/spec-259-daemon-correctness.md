@@ -103,7 +103,8 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   it, and the `.display` marker once no lease is left, so no reader is told the session is served.
   A session it had dropped for idling goes back to being idle-dropped.
 - **A served session whose lease reads `rebuild` is adopted again**, whether a wake, the sweep or
-  a flush finds it, so the session is rebuilt at once. Any other lease that is not the harness's
+  a flush finds it, so the session is rebuilt at once, even when another claim takes the lease
+  between the harness removing the token and claiming it. Any other lease that is not the harness's
   drops the session, as `--stop` means.
 
 ### `wtft -F` (decision M)

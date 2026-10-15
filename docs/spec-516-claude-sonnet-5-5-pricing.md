@@ -23,7 +23,8 @@ One flat card, USD per 1M tokens, from https://platform.claude.com/docs/en/about
 |---|---:|---:|---:|---:|
 | `claude-sonnet-5-5` | 2.00 | 0.10 | 2.50 | 10.00 |
 
-- **Cache reads are 0.05 × input,** not the usual 0.1 ×; the pricing page footnotes it.
+- **Cache reads are 0.05 × input,** not the usual 0.1 ×. The pricing page's footnote 2: "Cache
+  hits and refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x the base input price."
 - **The 1h write** is derived as `2 × input` ($4.00), as for every Claude row.
 - **`WTFT_TAGGER_VERSION` bumps** a minor version, so tags written at the fallback card re-parse.
 
@@ -36,7 +37,9 @@ One flat card, USD per 1M tokens, from https://platform.claude.com/docs/en/about
 - A 1h-TTL cache write of 1,000,000 costs 4.00.
 - `lookupModelPricing("claude-sonnet-5-5")` returns the 5.5 card, not the `claude-sonnet-5` card.
 
-Smoke: session `0f069641` prices within 10% of $1.29.
+Smoke: session `0f069641` prices within 10% of Claude Code's status line. Measured 2026-10-15:
+wtft `total.costUsd` $1.224 against the status line's $1.287, 4.9% low. Its mix is cache-read
+heavy: 5.34M cache-read, 114k 1h-write, 23k output, 182 input tokens.
 
 `tests/wtft-pricing-manifest.test.ts` closes the manifest: `docs/manifests/wtft-pricing.json`
 equals `renderPricingManifest()`.

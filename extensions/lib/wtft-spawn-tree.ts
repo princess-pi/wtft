@@ -126,6 +126,9 @@ export interface SpawnTreeOptions {
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
 	unrecorded?: { turns: Interaction[]; rootCwd: string | null; rootFile?: string };
+	/** Receives every counted descendant's deduplicated turns, each less any
+	 *  fold share subtracted from its edge total, and every transcript read. */
+	collect?: { turns: Interaction[]; files: string[] };
 }
 
 const SUBTRACT_TOLERANCE = 1e-9;
@@ -141,6 +144,18 @@ function subtractTotals(into: TokenTotals, from: TokenTotals): void {
 		}
 		into[key] = Math.max(0, next);
 	}
+}
+
+function withoutShare(interaction: Interaction, share: TokenTotals): Interaction {
+	return {
+		...interaction,
+		cost: Math.max(0, interaction.cost - share.costUsd),
+		inputTokens: Math.max(0, interaction.inputTokens - share.inputTokens),
+		outputTokens: Math.max(0, interaction.outputTokens - share.outputTokens),
+		reasoningTokens: Math.max(0, interaction.reasoningTokens - share.reasoningTokens),
+		cacheReadTokens: Math.max(0, interaction.cacheReadTokens - share.cacheReadTokens),
+		cacheWriteTokens: Math.max(0, interaction.cacheWriteTokens - share.cacheWriteTokens),
+	};
 }
 
 /** Add every numeric field of `from` into `into`.
@@ -456,16 +471,31 @@ function walkLedger(
 			}
 			// A session this parse folded is either already in some total — take its
 			// share back out — or it lands here, and a gap reported for it is closed.
+			const subtracted = new Set<string>();
 			for (const [id, share] of foldsInTotal(parsed)) {
 				const prior = outcomeOf.get(id);
 				if (prior === "in-self" || prior === "counted" || prior === "folded") {
 					subtractTotals(total, share);
+					subtracted.add(id);
 					continue;
 				}
 				if (prior === "unresolved") tree.unattributed = tree.unattributed.filter(gap => gap.child !== id);
 				outcomeOf.set(id, "folded");
 				// Folded in where this child's own children stand.
 				enqueue(id, depth + 2);
+			}
+
+			if (options.collect) {
+				for (const interaction of deduplicateInteractions(parsed)) {
+					let turn = interaction;
+					if (isModelTagged(interaction)) {
+						for (const fold of interaction.claudeSubAgentFolds ?? []) {
+							if (subtracted.has(fold.id.replace(/\.jsonl$/i, ""))) turn = withoutShare(turn, fold.share);
+						}
+					}
+					options.collect.turns.push(turn);
+				}
+				options.collect.files.push(...descendant.files);
 			}
 
 			tree.descendants++;

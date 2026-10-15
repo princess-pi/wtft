@@ -109,6 +109,7 @@ function publish(file: string, value: string, owner: string, ready: () => boolea
  * Claim `file` for `owner` with an exclusive hard link. A lease already naming
  * `owner` is claimed. One naming a holder `holderIsLive` accepts is busy. Any
  * other holder is stale: it is unlinked, re-proved, and the claim retried once.
+ * A stale `rebuild` token is left owed first: see `takeRebuildOwed`.
  */
 export function claimLease(file: string, owner: string, holderIsLive: (holder: string) => boolean): "claimed" | "busy" {
 	const existing = leaseHolder(file);
@@ -128,6 +129,7 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 		const holder = leaseHolder(file);
 		if (holder === owner) return "claimed";
 		if (holder && holderIsLive(holder)) return "busy";
+		if (holder === "rebuild") fs.writeFileSync(owedPath(file), "");
 		// An empty lease is a stale one too: `unlinkLeaseIf` matches "" on an empty file.
 		unlinkLeaseIf(file, holder);
 		try {
@@ -142,8 +144,23 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 	}
 }
 
+/**
+ * True once after a claim on `file` unlinked a `rebuild` token, whichever
+ * process made that claim and whether it won the lease. A holder that takes the
+ * lease calls this and rebuilds when it is true.
+ */
 export function takeRebuildOwed(file: string): boolean {
-	return false;
+	try {
+		fs.unlinkSync(owedPath(file));
+		return true;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw err;
+	}
+}
+
+function owedPath(file: string): string {
+	return `${file}.rebuild`;
 }
 
 /** The pid a lease holder names, or 0 when it is not one. */

@@ -1078,8 +1078,6 @@ export async function watchTagFile(
 					}
 				}
 
-				// In-place modification (heartbeat overwrite): file didn't grow
-				// but the idle timestamp changed.
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();

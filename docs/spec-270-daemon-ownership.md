@@ -337,9 +337,9 @@ write (its exact cases: `docs/spec-270-daemon-health.md` §2).
   liveness predicate now records what it judged stale, and the daemon reads that after
   the claim (`displacedRebuild` for the harness, `displaced` in per-session `main`); a lease
   that vanishes between the judgement and the link still counts as judged, so a rebuild may
-  run once for nothing. A `rebuild` token a harness adoption displaced is owed to the session
-  even when another holder wins the link: the next adoption that claims the lease, a retry
-  included, rebuilds the tag. Within one claim a later stale holder does not overwrite a
+  run once for nothing. A `rebuild` token a harness adoption displaced is owed to the lease
+  in that harness's memory even when another holder wins the link: its next adoption that claims the lease, a retry
+  included, rebuilds the tag; another process, or the next harness, never learns of it (#524). Within one claim a later stale holder does not overwrite a
   displaced `rebuild`, in the harness and in per-session `main`. The version takeover, which replaces rather than claims, replaces only
   the value it read and re-reads once on a miss. *Road not taken:* a richer `claimLease`
   return carrying the displaced value, which would have widened the interface for one caller.

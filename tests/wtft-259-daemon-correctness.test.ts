@@ -392,6 +392,7 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); setTimeout(() => process.exit(0), 700); } }, 20);
 setTimeout(() => process.exit(0), 30_000);`;
 				const standIn = spawn("node", standInDaemonArgs(code, "--harness", fired), { stdio: "ignore" });
+				if (standIn.pid) pids.push(standIn.pid);
 				return String(standIn.pid ?? 0);
 			} },
 		];

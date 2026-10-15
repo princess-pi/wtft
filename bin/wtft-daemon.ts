@@ -654,7 +654,7 @@ function claimPidFile(file: string): "claimed" | "busy" {
   });
 }
 
-/** Sessions whose `rebuild` token an adoption displaced without then claiming the lease. */
+/** Leases whose `rebuild` token an adoption displaced without then claiming the lease. */
 const rebuildOwed = new Set<string>();
 
 function harnessRoot(which: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -675,9 +675,9 @@ function adoptSession(): boolean {
   slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
   displacedRebuild = false;
   const claimed = takeOverLease(slot.pidPath);
-  if (displacedRebuild) rebuildOwed.add(slot.state.sessionPath);
+  if (displacedRebuild) rebuildOwed.add(slot.pidPath);
   if (!claimed) return false;
-  if (rebuildOwed.delete(slot.state.sessionPath)) slot.rebuildTagOnStartup = true;
+  if (rebuildOwed.delete(slot.pidPath)) slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
 }

@@ -2,7 +2,7 @@
 
 Module: extensions/lib/wtft-cost.ts
 
-**State:** Spec Approved
+**State:** Code and Spec Approved
 
 Issue: https://github.com/princess-pi/wtft/issues/516.
 

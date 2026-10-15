@@ -81,15 +81,6 @@ describe("Claude 5 family pricing (#139)", () => {
 		assert.strictEqual(calculateClaudeCost("claude-opus-5", { cache_creation_input_tokens: MTOK }), 6.25);
 	});
 
-	it("prices claude-sonnet-5 at $3/$15/$0.30/$3.75 per MTok (no timestamp — base/standard fallback)", () => {
-		// No timestamp arg deliberately: this is the #148 "missing timestamp
-		// never reads Date.now()" fallback (base = standard rate), not an
-		// omission. See the dedicated "Sonnet 5 intro pricing (#148)" block
-		// below for the dated-window assertions.
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { input_tokens: MTOK }), 3.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { output_tokens: MTOK }), 15.00);
-	});
-
 	it("prices claude-haiku-4-5 (dated ID) at $1/$5 per MTok via fuzzy match", () => {
 		assert.strictEqual(calculateClaudeCost("claude-haiku-4-5-20251001", { input_tokens: MTOK }), 1.00);
 		assert.strictEqual(calculateClaudeCost("claude-haiku-4-5-20251001", { output_tokens: MTOK }), 5.00);
@@ -166,51 +157,25 @@ describe("Claude Sonnet 5.5 pricing (#516)", () => {
 	});
 });
 
-// --- #148: Sonnet 5 intro pricing (dated rate window) ---
-
-describe("Sonnet 5 intro pricing (#148)", () => {
-	// Fixed instants, never Date.now() (#96 test hazard) — see spec-148 §3.
-	const PRE_CUTOFF = new Date("2026-08-15T00:00:00Z").getTime();
-	const EXACT_CUTOFF = new Date("2026-09-01T00:00:00Z").getTime();
-	const POST_CUTOFF = new Date("2026-09-15T00:00:00Z").getTime();
-
-	it("bills intro rate $2/$10/$0.20/$2.50 for an interaction before 2026-09-01", () => {
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { input_tokens: MTOK }, PRE_CUTOFF), 2.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { output_tokens: MTOK }, PRE_CUTOFF), 10.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_read_input_tokens: MTOK }, PRE_CUTOFF), 0.20);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_creation_input_tokens: MTOK }, PRE_CUTOFF), 2.50);
-	});
-
-	it("derives intro 1h-TTL cache writes at 2x intro input ($4.00/MTok, consistent with #146)", () => {
-		const cost = calculateClaudeCost("claude-sonnet-5", {
-			cache_creation_input_tokens: MTOK,
-			cache_creation: { ephemeral_1h_input_tokens: MTOK },
-		}, PRE_CUTOFF);
-		assert.strictEqual(cost, 4.00);
-	});
-
-	it("bills standard rate $3/$15/$0.30/$3.75 exactly at the 2026-09-01T00:00:00Z boundary", () => {
-		// Boundary is inclusive of standard, exclusive of intro (strict <).
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { input_tokens: MTOK }, EXACT_CUTOFF), 3.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { output_tokens: MTOK }, EXACT_CUTOFF), 15.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_read_input_tokens: MTOK }, EXACT_CUTOFF), 0.30);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_creation_input_tokens: MTOK }, EXACT_CUTOFF), 3.75);
-	});
-
-	it("bills standard rate $3/$15/$0.30/$3.75 for an interaction on or after 2026-09-01", () => {
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { input_tokens: MTOK }, POST_CUTOFF), 3.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { output_tokens: MTOK }, POST_CUTOFF), 15.00);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_read_input_tokens: MTOK }, POST_CUTOFF), 0.30);
-		assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_creation_input_tokens: MTOK }, POST_CUTOFF), 3.75);
-	});
-
-	it("derives standard 1h-TTL cache writes at 2x standard input ($6.00/MTok, unchanged from #146)", () => {
-		const cost = calculateClaudeCost("claude-sonnet-5", {
-			cache_creation_input_tokens: MTOK,
-			cache_creation: { ephemeral_1h_input_tokens: MTOK },
-		}, POST_CUTOFF);
-		assert.strictEqual(cost, 6.00);
-	});
+describe("Sonnet 5 standard rate (#521)", () => {
+	const instants: [string, number | undefined][] = [
+		["2026-08-15", Date.UTC(2026, 7, 15)],
+		["2026-09-01T00:00:00Z", Date.UTC(2026, 8, 1)],
+		["2026-10-01", Date.UTC(2026, 9, 1)],
+		["no timestamp", undefined],
+	];
+	for (const [label, at] of instants) {
+		it(`bills $2/$10/$0.20/$2.50 and a $4.00 1h write at ${label}`, () => {
+			assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { input_tokens: MTOK }, at), 2.00);
+			assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { output_tokens: MTOK }, at), 10.00);
+			assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_read_input_tokens: MTOK }, at), 0.20);
+			assert.strictEqual(calculateClaudeCost("claude-sonnet-5", { cache_creation_input_tokens: MTOK }, at), 2.50);
+			assert.strictEqual(calculateClaudeCost("claude-sonnet-5", {
+				cache_creation_input_tokens: MTOK,
+				cache_creation: { ephemeral_1h_input_tokens: MTOK },
+			}, at), 4.00);
+		});
+	}
 });
 
 // --- #140: miss-path predicate ---

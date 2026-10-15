@@ -80,7 +80,9 @@ Three rules cover every caller:
   `/proc` a harness start cannot hand it the session, so there it is stopped like a daemon, with
   no SIGKILL, since a reused pid cannot be told apart. An `other` holder's lease is removed.
 - **A verified daemon:** `daemon` or `harness`, with the cmdline read. The harness's own claims
-  and the daemon management commands signal only these. `--restart` stops a harness as well. They
+  and the daemon management commands signal only these. A harness adopting a session signals
+  only a `daemon` whose `sessionArgOf(pid)`, its `--session` or `-s` as written, names the
+  same lease; one serving another session holds this lease stale. `--restart` stops a harness as well. They
   use `classifyPid` alone, so off Linux they verify nothing and stop nothing. Removing a lease is not
   signalling: `--stop` removes the lease of any live non-harness holder, `--cleanup` that of an
   `unverified` holder whose session is gone, and `--restart` removes the leases and root pid files

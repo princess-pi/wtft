@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
-import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder, takeRebuildOwed, rebuildIsOwed } from "../extensions/lib/lease.js";
+import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder, takeRebuildOwed, rebuildIsOwed, takeOverLease } from "../extensions/lib/lease.js";
 import { classifyPid, decideUnleased, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync, type DaemonProc } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
@@ -24,6 +24,7 @@ import {
 	resolveMovedSession,
 	getCurrentVersionTagPath,
 	getDaemonPidPath,
+	servesLease,
 	daemonLaunchArgs,
 	isSessionIdBasename,
 	loadExternalHarnesses,
@@ -663,25 +664,10 @@ function adoptSession(): boolean {
   slot.state.tagPath = getCurrentVersionTagPath(slot.state.sessionPath);
   try { fs.mkdirSync(path.dirname(slot.state.tagPath), { recursive: true }); } catch { /* exists */ }
   slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
-  if (!takeOverLease(slot.pidPath)) return false;
+  if (!takeOverLease(slot.pidPath, String(process.pid), servesLease(slot.pidPath))) return false;
   if (takeRebuildOwed(slot.pidPath)) slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
-}
-
-function takeOverLease(pidPath: string): boolean {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    if (claimPidFile(pidPath) === "claimed") return true;
-    const holder = leasePid(leaseHolder(pidPath));
-    if (holder === process.pid) return true;
-    if (procIsDaemon(holder)) {
-      // A harness serves other sessions too; one that is stopping lets go itself.
-      if (procIsHarness(holder)) return false;
-      processTable().signal(holder, "SIGTERM");
-    }
-    sleepMs(50);
-  }
-  return claimPidFile(pidPath) === "claimed";
 }
 
 function scheduleFlush(key: string) {
@@ -953,9 +939,6 @@ function pointSessionAt(livePid: number, file: string): boolean {
   held = holder === livePid;
   // The spawner claimed this lease for this process; it is handed on, not held.
   const mine = holder === process.pid;
-  // A rebuild token stays for the harness to read when it adopts, and a lease
-  // another live daemon holds is left for the harness's adoption to take by
-  // its own rules (never from a harness; a per-session daemon is stopped first).
   if (leaseText !== "rebuild" && !held && (mine || !procIsDaemon(holder))) {
     publishLease(lease, String(livePid), String(process.pid), leaseText);
   }
@@ -2042,11 +2025,7 @@ if (showList || showCleanup || showRestart || stopSession) {
   const tagsDir = path.dirname(tagPath);
   try { fs.mkdirSync(tagsDir, { recursive: true }); } catch (_) {}
 
-  // PID lease keyed on transcript basename so a worktree move does not spawn a second daemon.
-  const sessionHash = createHash("sha256").update(
-    isSessionIdBasename(sessionPath) ? sessionBase : sessionPath
-  ).digest("hex").slice(0, 12);
-  const pidPath = path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+  const pidPath = getDaemonPidPath(sessionPath);
   slot.pidPath = pidPath;
 
   // Old-version tag: claim the lease; old daemon exits on lost lease (no SIGTERM race).

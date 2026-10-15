@@ -137,6 +137,14 @@ export function classifyPid(pid: number): HolderKind {
 	return args.includes("--harness") ? "harness" : "daemon";
 }
 
+/** The `--session` (or `-s`) a pid was started with, as written; null when it has none or its command line cannot be read. */
+export function sessionArgOf(pid: number): string | null {
+	const args = table.cmdline(pid);
+	if (args === null) return null;
+	const at = args.findIndex(arg => arg === "--session" || arg === "-s");
+	return at >= 0 && at + 1 < args.length ? args[at + 1] : null;
+}
+
 /** Running, whatever it is: a zombie is not. */
 export function pidAlive(pid: number): boolean {
 	return classifyPid(pid) !== "gone";

@@ -6,7 +6,7 @@
  */
 
 import * as fs from "node:fs";
-import { classifyPid, holdsLease, pidAlive } from "./holder.js";
+import { classifyPid, holdsLease, pidAlive, processTable, sessionArgOf } from "./holder.js";
 
 export interface LeaseIdentity {
 	dev: number;
@@ -145,6 +145,34 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 	} finally {
 		try { fs.unlinkSync(candidate); } catch { /* already gone */ }
 	}
+}
+
+/**
+ * Claim `file` for `owner` from a per-session daemon serving it: SIGTERM it, up to 20 times
+ * 50 ms apart, then claim. A daemon whose `--session` `servesLease` rejects holds `file`
+ * stale and is never signalled. False at once for a harness holder, and after the 20th try.
+ */
+export function takeOverLease(file: string, owner: string, servesLease: (session: string) => boolean, wait: (ms: number) => void = sleepSync): boolean {
+	const ownerPid = leasePid(owner);
+	const holds = (holder: string): boolean => {
+		const pid = leasePid(holder);
+		if (pid === ownerPid) return false;
+		const kind = classifyPid(pid);
+		if (kind === "harness") return true;
+		if (kind !== "daemon") return false;
+		const session = sessionArgOf(pid);
+		return session !== null && servesLease(session);
+	};
+	for (let attempt = 0; attempt < 20; attempt++) {
+		if (claimLease(file, owner, holds) === "claimed") return true;
+		const holder = leaseHolder(file);
+		if (holder === owner) return true;
+		const pid = leasePid(holder);
+		if (classifyPid(pid) === "harness") return false;
+		if (holds(holder)) processTable().signal(pid, "SIGTERM");
+		wait(50);
+	}
+	return claimLease(file, owner, holds) === "claimed";
 }
 
 /**

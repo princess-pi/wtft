@@ -84,13 +84,11 @@ describe("#169 every priced model reaches the manifest", () => {
 	});
 
 	it("renders a dated window as its own conditioned row", () => {
-		// claude-sonnet-5's intro rate and DeepSeek's pre-2026-08-16 card are both
-		// dateTiers. The old table had no way to express either.
-		const sonnet = buildPricingManifest().models.find(m => m.model === "claude-sonnet-5");
-		assert.ok(sonnet);
-		const dated = sonnet!.rates.filter(r => r.condition.startsWith("before "));
+		const pro = buildPricingManifest().models.find(m => m.model === "deepseek-v4-pro");
+		assert.ok(pro);
+		const dated = pro!.rates.filter(r => r.condition.startsWith("before "));
 		assert.strictEqual(dated.length, 1);
-		assert.strictEqual(dated[0].input, 2.00);
+		assert.strictEqual(dated[0].input, 1.74);
 	});
 
 	it("renders a size tier as its own conditioned row", () => {

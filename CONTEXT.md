@@ -326,7 +326,6 @@ which those two share with `deepseek-flash`. `deepseek-v4-pro` keeps its own car
 onward, including an undated turn. (`-vision-exp` carried **no** `dateTiers` until #100, correctly, because it had no past
 card; it has one now, and the pre-2026-08-16 window it also gained is unreachable by any observed
 turn — carried for symmetry with `-flash`, whose retirement it shares.)
-The same `dateTiers` field also carries `claude-sonnet-5`'s intro window (#148).
 _Avoid_: List price, tariff. Also an **unqualified** "base rate" for a DeepSeek quad — say
 off-peak or peak, because for DeepSeek the two differ by 2x and "base" names neither. ("Base
 rates" is fine where the model has no surge, and where the very next words say which card is

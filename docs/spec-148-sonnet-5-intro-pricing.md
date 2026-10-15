@@ -2,7 +2,7 @@
 
 **Issue:** #148
 **Branch:** `148-sonnet-5-intro-pricing`
-**State:** Code and Spec Approved (tested; reconciled to shipped code)
+**State:** Superseded by [spec-521](spec-521-sonnet-5-standard-rate.md): the $3/$15 increase never happened, so `claude-sonnet-5` has one card and no `dateTiers` window. Read this document as a record, not as current behaviour.
 
 ---
 

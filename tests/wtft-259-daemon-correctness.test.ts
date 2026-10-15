@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { getCurrentVersionTagPath, getDaemonPidPath, readClassifiedTagFile } from "../extensions/lib/wtft-daemon-lib.ts";
+import { classifyPid } from "../extensions/lib/holder.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { standInDaemonArgs, awaitStandIn } from "./lib/stand-in-daemon";
 import { skip } from "./lib/skips.ts";
@@ -375,6 +376,79 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 		const rebuilt = await until(() => classified(target, "held-target") && !classified(target, "held-bogus"), 15_000);
 		check(rebuilt !== Infinity, `the harness rebuilds the tag (rebuild written ${read(fired)}; lease reads ${JSON.stringify(read(lease).trim())}, harness ${h.pid})`);
 		process.kill(h.pid, "SIGTERM");
+	}
+
+	console.log("\nA harness that takes a rebuild token off the lease and loses the next claim still rebuilds");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the lost claim is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		// Between the harness's unlink of `rebuild` and its link, another claim takes the lease: one
+		// naming no live process, which a later attempt displaces, or a harness, which ends the
+		// adoption until a retry.
+		const standIns: ReturnType<typeof spawn>[] = [];
+		const holders: Array<{ label: string; holder: (fired: string) => string }> = [
+			{ label: "a holder no process answers to", holder: () => "0" },
+			{ label: "a harness that exits a moment after it takes the lease", holder: (fired) => {
+				const code = `import * as fs from "node:fs";
+const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); fs.writeFileSync(process.argv[3] + ".held", ""); setTimeout(() => process.exit(0), 700); } }, 20);
+setTimeout(() => process.exit(0), 120_000);`;
+				const standIn = spawn("node", standInDaemonArgs(code, "--harness", fired), { stdio: "ignore" });
+				standIns.push(standIn);
+				return String(standIn.pid ?? 0);
+			} },
+		];
+		for (const { label, holder } of holders) {
+			const root = makeRoot("force-lost-claim");
+			const target = session(root, "lost-target");
+			const lease = getDaemonPidPath(target);
+			const fired = path.join(root, "claim-lost");
+			const preload = path.join(root, "claim-after-unlink.mjs");
+			fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const lease = process.env.WTFT_520_LEASE;
+const originalUnlink = realFs.unlinkSync.bind(realFs);
+let done = false;
+function unlinkSync(file, ...rest) {
+  const wasRebuild = !done && String(file) === lease && realFs.readFileSync(lease, "utf8").trim() === "rebuild";
+  const out = originalUnlink(file, ...rest);
+  if (wasRebuild) {
+    done = true;
+    realFs.writeFileSync(lease, realFs.readFileSync(process.env.WTFT_520_HOLDER, "utf8"));
+    realFs.writeFileSync(process.env.WTFT_520_FIRED, "");
+  }
+  return out;
+}
+mock.module("node:fs", () => ({ ...realFs, unlinkSync, default: { ...realFs, unlinkSync } }));
+`);
+			const holderFile = path.join(root, "holder");
+			const err = path.join(root, "lost.err");
+			const fd = fs.openSync(err, "a");
+			const child = spawn(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+				detached: true, stdio: ["ignore", "ignore", fd],
+				env: { ...envFor(root), WTFT_520_LEASE: lease, WTFT_520_HOLDER: holderFile, WTFT_520_FIRED: fired },
+			});
+			child.unref();
+			fs.closeSync(fd);
+			if (child.pid) pids.push(child.pid);
+			check(await until(() => classified(target, "lost-target"), 15_000) !== Infinity, `${label}: fixture: the harness serves the target`);
+			const tag = getCurrentVersionTagPath(target);
+			const row = read(tag).split("\n").find(l => l.includes('"lost-target"')) ?? "";
+			fs.appendFileSync(tag, row.replace('"lost-target"', '"lost-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+			check(classified(target, "lost-bogus"), `${label}: fixture: the target's tag carries a row its transcript does not`);
+			const named = holder(fired);
+			fs.writeFileSync(holderFile, named);
+			if (named !== "0") check(await until(() => classifyPid(Number(named)) === "harness", 15_000) !== Infinity, `${label}: fixture precondition: the stand-in reads as a harness`);
+			const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+			const forced = spawnSync("node", [cli, "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+			check(fs.existsSync(fired), `${label}: fixture precondition: it took the lease between the harness's unlink and its link (-F exit ${forced.status}: ${forced.stderr.trim()})`);
+			if (named !== "0") check(await until(() => fs.existsSync(`${fired}.held`), 5_000) !== Infinity, `${label}: fixture precondition: the stand-in was still running when it took the lease`);
+			const rebuilt = await until(() => classified(target, "lost-target") && !classified(target, "lost-bogus"), 10_000);
+			check(rebuilt !== Infinity, `${label}: the harness still rebuilds the tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${child.pid})`);
+			try { process.kill(child.pid ?? 0, "SIGTERM"); } catch { /* gone */ }
+			await until(() => !alive(child.pid ?? 0), 5_000);
+		}
+		for (const standIn of standIns) if (standIn.exitCode === null && standIn.signalCode === null) standIn.kill("SIGTERM");
 	}
 
 	console.log("\n-F landing inside a harness start's own lease hand-off is not lost");

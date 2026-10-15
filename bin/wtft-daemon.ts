@@ -643,18 +643,19 @@ function holderIsLiveDaemon(holder: string): boolean {
   return pid !== process.pid && procIsDaemon(pid);
 }
 
-/** The holder the last `claimPidFile` judged stale and displaced, "" when none.
- *  Read it after the claim, never before: the rebuild decision comes from the
- *  value actually unlinked, not from an earlier read. */
-let displacedHolder = "";
+/** Set when a `claimPidFile` judged a `rebuild` token stale, claimed or not; the caller clears it.
+ *  The rebuild decision comes from the value a claim judged, not from an earlier read. */
+let displacedRebuild = false;
 function claimPidFile(file: string): "claimed" | "busy" {
-  displacedHolder = "";
   return claimLease(file, String(process.pid), (holder) => {
     const live = holderIsLiveDaemon(holder);
-    if (!live) displacedHolder = holder;
+    if (!live && holder === "rebuild") displacedRebuild = true;
     return live;
   });
 }
+
+/** Leases whose `rebuild` token an adoption displaced without then claiming the lease. */
+const rebuildOwed = new Set<string>();
 
 function harnessRoot(which: string, env: NodeJS.ProcessEnv = process.env): string {
   if (which === "claude") {
@@ -672,8 +673,11 @@ function adoptSession(): boolean {
   slot.state.tagPath = getCurrentVersionTagPath(slot.state.sessionPath);
   try { fs.mkdirSync(path.dirname(slot.state.tagPath), { recursive: true }); } catch { /* exists */ }
   slot.pidPath = getDaemonPidPath(slot.state.sessionPath);
-  if (!takeOverLease(slot.pidPath)) return false;
-  if (displacedHolder === "rebuild") slot.rebuildTagOnStartup = true;
+  displacedRebuild = false;
+  const claimed = takeOverLease(slot.pidPath);
+  if (displacedRebuild) rebuildOwed.add(slot.pidPath);
+  if (!claimed) return false;
+  if (rebuildOwed.delete(slot.pidPath)) slot.rebuildTagOnStartup = true;
   initClassified();
   return true;
 }
@@ -2099,7 +2103,7 @@ if (showList || showCleanup || showRestart || stopSession) {
     let displaced = "";
     const holderIsLive = (holder: string): boolean => {
       const live = holdsLease(classifyPid(leasePid(holder)));
-      if (!live) displaced = holder;
+      if (!live && displaced !== "rebuild") displaced = holder;
       return live;
     };
     if (claimLease(pidPath, String(process.pid), holderIsLive) === "busy") process.exit(0);

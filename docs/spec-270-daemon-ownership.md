@@ -334,10 +334,13 @@ write (its exact cases: `docs/spec-270-daemon-health.md` §2).
 - **The rebuild decision comes from the holder the claim judged stale.** A start read the
   lease once for the `rebuild` token and then let `claimLease` read it again to decide what to
   unlink, so a token written between the two reads was consumed without a rebuild. The caller's
-  liveness predicate now records the holder it judged stale, and the daemon reads that after
-  the claim (`displacedHolder` for the harness, `displaced` in per-session `main`); a lease
+  liveness predicate now records what it judged stale, and the daemon reads that after
+  the claim (`displacedRebuild` for the harness, `displaced` in per-session `main`); a lease
   that vanishes between the judgement and the link still counts as judged, so a rebuild may
-  run once for nothing. The version takeover, which replaces rather than claims, replaces only
+  run once for nothing. A `rebuild` token a harness adoption displaced is owed to the lease
+  in that harness's memory even when another holder wins the link: its next adoption that claims the lease, a retry
+  included, rebuilds the tag; another process, or the next harness, never learns of it (#524). Within one claim a later stale holder does not overwrite a
+  displaced `rebuild`, in the harness and in per-session `main`. The version takeover, which replaces rather than claims, replaces only
   the value it read and re-reads once on a miss. *Road not taken:* a richer `claimLease`
   return carrying the displaced value, which would have widened the interface for one caller.
 - **`unlinkLeaseIf`'s check-then-act window stays.** A stat, a read and a second stat narrow

@@ -6,6 +6,9 @@ import * as assert from "node:assert";
 import { describe, it } from "node:test";
 
 import { createUncountedLatch, type UncountedLatchIo } from "../extensions/lib/uncounted-latch.ts";
+import { chartLines } from "../extensions/lib/chart-call.ts";
+import { wtftSession } from "../artifacts/renderer/fake-session.ts";
+import { withTerminal } from "../artifacts/renderer/report.ts";
 
 const turn = (id: string) => JSON.stringify({
 	type: "assistant",
@@ -80,5 +83,28 @@ describe("createUncountedLatch", () => {
 		io.files.set("/s/a.jsonl", compaction + turn("m3"));
 		assert.strictEqual(latch.seen(["/s/a.jsonl"]), true);
 		assert.strictEqual(io.bytesRead, before);
+	});
+});
+
+describe("the chart's floor marker", () => {
+	const NOW = Date.UTC(2026, 8, 26, 15, 30);
+	const draw = (floor?: boolean) => (withTerminal(200, NOW, () => chartLines({
+		interactions: wtftSession("claude-sonnet-5-5"),
+		unit: "cost",
+		asked: { interval: "1h", limit: 6, timezone: "UTC" },
+		fallback: { width: 150 },
+		floor,
+	})) ?? []).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+	const rows = (lines: string[]) => lines.filter((l) => /^\S*\d+:\d\d /.test(l));
+
+	it("puts ≥ before the newest row's total cost and nowhere else", () => {
+		const lines = rows(draw(true));
+		assert.ok(lines.length >= 2, "the fixture draws at least two rows");
+		assert.match(lines[0], /≥\$\d/);
+		for (const l of lines.slice(1)) assert.doesNotMatch(l, /≥/);
+	});
+
+	it("draws no ≥ without the flag", () => {
+		assert.ok(draw().every((l) => !l.includes("≥")));
 	});
 });

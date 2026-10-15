@@ -377,6 +377,58 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 		process.kill(h.pid, "SIGTERM");
 	}
 
+	console.log("\nA harness that takes a rebuild token off the lease and loses the next claim still rebuilds");
+	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
+		skip("the lost claim is staged from a bun --preload hook; run the suite under bun");
+	} else {
+		const root = makeRoot("force-lost-claim");
+		const target = session(root, "lost-target");
+		const lease = getDaemonPidPath(target);
+		const fired = path.join(root, "claim-lost");
+		const dead = spawnSync("true").pid ?? 0;
+		// Between the harness's unlink of `rebuild` and its link, a spawner's claim for a child that
+		// then dies takes the lease.
+		const preload = path.join(root, "claim-after-unlink.mjs");
+		fs.writeFileSync(preload, `
+import * as realFs from "node:fs";
+import { mock } from "bun:test";
+const lease = process.env.WTFT_520_LEASE;
+const originalUnlink = realFs.unlinkSync.bind(realFs);
+let done = false;
+function unlinkSync(file, ...rest) {
+  const wasRebuild = !done && String(file) === lease && realFs.readFileSync(lease, "utf8").trim() === "rebuild";
+  const out = originalUnlink(file, ...rest);
+  if (wasRebuild) {
+    done = true;
+    realFs.writeFileSync(lease, process.env.WTFT_520_DEAD);
+    realFs.writeFileSync(process.env.WTFT_520_FIRED, "");
+  }
+  return out;
+}
+mock.module("node:fs", () => ({ ...realFs, unlinkSync, default: { ...realFs, unlinkSync } }));
+`);
+		const err = path.join(root, "lost.err");
+		const fd = fs.openSync(err, "a");
+		const child = spawn(process.execPath, ["--preload", preload, DAEMON, "--harness", "claude", "--session", target], {
+			detached: true, stdio: ["ignore", "ignore", fd],
+			env: { ...envFor(root), WTFT_520_LEASE: lease, WTFT_520_DEAD: String(dead), WTFT_520_FIRED: fired },
+		});
+		child.unref();
+		fs.closeSync(fd);
+		if (child.pid) pids.push(child.pid);
+		check(await until(() => classified(target, "lost-target"), 15_000) !== Infinity, "fixture: the harness serves the target");
+		const tag = getCurrentVersionTagPath(target);
+		const row = read(tag).split("\n").find(l => l.includes('"lost-target"')) ?? "";
+		fs.appendFileSync(tag, row.replace('"lost-target"', '"lost-bogus"') + "\n" + JSON.stringify({ _meta: { offset: fs.statSync(target).size } }) + "\n");
+		check(classified(target, "lost-bogus"), "fixture: the target's tag carries a row its transcript does not");
+		const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
+		const forced = spawnSync("node", [cli, "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
+		check(fs.existsSync(fired), `fixture precondition: a claim took the lease between the harness's unlink and its link (-F exit ${forced.status}: ${forced.stderr.trim()})`);
+		const rebuilt = await until(() => classified(target, "lost-target") && !classified(target, "lost-bogus"), 10_000);
+		check(rebuilt !== Infinity, `the harness still rebuilds the tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${child.pid})`);
+		try { process.kill(child.pid ?? 0, "SIGTERM"); } catch { /* gone */ }
+	}
+
 	console.log("\n-F landing inside a harness start's own lease hand-off is not lost");
 	if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
 		skip("the -F write is staged from a bun --preload hook; run the suite under bun");

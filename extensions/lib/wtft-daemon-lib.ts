@@ -13,7 +13,8 @@ import {
 } from "./wtft-shared.js";
 import { askedOf, chartLines } from "./chart-call.js";
 import { isPlaceholderRow } from "./wtft-chart.js";
-import { splitOverheadCost, isModelTagged } from "./wtft-parser.js";
+import { splitOverheadCost, isModelTagged, discoverSubagentSessionFiles } from "./wtft-parser.js";
+import { createUncountedLatch } from "./uncounted-latch.ts";
 import { getDiscoveries } from "./harness/registry.ts";
 import { projectsDir } from "./harness/claude-code/discovery.js";
 import { showCursor, hideCursor, enterRawStdin } from "./tty-helpers.js";
@@ -907,6 +908,16 @@ export async function watchTagFile(
 	} catch {
 	}
 
+	const uncountedLatch = createUncountedLatch();
+	let liveSessionPath = sessionPath;
+	function* transcripts(): Generator<string> {
+		if (!fs.existsSync(liveSessionPath)) {
+			liveSessionPath = fs.existsSync(sessionPath) ? sessionPath : resolveMovedSession(sessionPath) ?? liveSessionPath;
+		}
+		yield liveSessionPath;
+		try { yield* discoverSubagentSessionFiles(liveSessionPath, { quietSession: true }).files; } catch {}
+	}
+
 	const render = () => {
 		const width = getTerminalWidth();
 		const pad = settings.pad || 0;
@@ -932,6 +943,7 @@ export async function watchTagFile(
 			},
 			unit: settings.unit ?? "cost",
 			live: true,
+			floor: uncountedLatch.seen(transcripts()),
 			padRows: true,
 			// No more placeholders than the terminal has rows; the fit below trims the rest.
 			padRowsCap: process.stdout.rows || undefined,

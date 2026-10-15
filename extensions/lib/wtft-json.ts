@@ -12,7 +12,7 @@ import type { TagProvisional } from "./wtft-daemon-lib.js";
 
 /** Bumped when a key is added — top-level or nested — or changes shape.
  *  Prose never bumps it. Contract: docs/spec-26-json.md. */
-export const WTFT_JSON_SCHEMA = "wtft/session@8";
+export const WTFT_JSON_SCHEMA = "wtft/session@9";
 
 /** `code` is the contract; `text` is disposable prose. */
 export interface WtftNotice {
@@ -42,6 +42,8 @@ export interface WtftSessionJson {
 	/** SELF + resolved descendants. Over the six token and cost fields only
 	 *  (`untaggedCostUsd` is not carried). */
 	tree: TokenTotals;
+	/** `categories` over self plus every counted descendant's turns; sums to `tree`. */
+	treeCategories: CategoryTotals[];
 	/** Absent rather than empty whenever discovery could not give a complete
 	 *  answer, so `[]` always means "looked, found none". */
 	subagents?: WtftSubagentJson[];
@@ -71,6 +73,8 @@ export interface BuildSessionJsonInput {
 	/** Required, not defaulted: an empty default made "nobody read the spawn
 	 *  ledger" indistinguishable from "read it, spawned nothing". */
 	spawned: SpawnTree;
+	/** Every counted descendant's turns, as `computeSpawnTree`'s `collect` gives them. */
+	descendantTurns: Interaction[];
 	subagents?: WtftSubagentJson[];
 	notices?: WtftNotice[];
 }
@@ -88,6 +92,7 @@ export function buildSessionJson(input: BuildSessionJsonInput): WtftSessionJson 
 		uncounted: input.uncounted,
 		spawned: input.spawned,
 		tree: treeTotals(summary.total, input.spawned),
+		treeCategories: computeSessionSummary([...input.interactions, ...input.descendantTurns]).categories,
 		...(input.subagents ? { subagents: input.subagents } : {}),
 		compaction: summary.compaction,
 		untaggedInteractions: summary.untaggedInteractions,

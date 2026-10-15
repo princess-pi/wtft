@@ -92,6 +92,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
 	// Keyed by mode: the pending tree excludes nothing and must never serve a full arm.
 	const spawnTreeCache = new Map<boolean, SpawnTree>();
+	const collected = new Map<boolean, { turns: Interaction[]; files: string[] }>();
 	// `pending`: the session log is absent, so nothing of it is in SELF to exclude.
 	const sessionSpawnTree = (opt: { pending?: boolean } = {}): SpawnTree => {
 		const pending = opt.pending === true;
@@ -99,18 +100,33 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		if (cached) return cached;
 		const sessionId = path.basename(finalSessionPath).replace(/\.jsonl$/i, "");
 		// SELF is the tag, so the ids to exclude are the ones the tag recorded folding.
+		const collect = { turns: [] as Interaction[], files: [] as string[] };
 		const tree = computeSpawnTree(sessionId, {
 			alreadyAttributed: pending ? new Set<string>() : folded,
+			collect,
 			unrecorded: pending
 				? { turns: [], rootCwd: null }
 				: { turns: interactions, rootCwd: resolveLastCwd(finalSessionPath), rootFile: finalSessionPath },
 		});
 		spawnTreeCache.set(pending, tree);
+		collected.set(pending, collect);
 		// The tree never replaces a reason already set.
 		if (!provisional.provisional && tree.edges.some(e => e.live)) {
 			provisional = { provisional: true, reason: "descendant-live" };
 		}
 		return tree;
+	};
+
+	// The chart's tree walk: the full one when --tokens already needs it, else one without the
+	// unrecorded listing, and never a provisional verdict (spec-133 scopes that to --tokens and --json).
+	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
+	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
+		if (opts.self) return { turns: [], files: [] };
+		if (opts.tokens || opts.json) { sessionSpawnTree(); return collected.get(false)!; }
+		if (chartCollect) return chartCollect;
+		chartCollect = { turns: [], files: [] };
+		computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect: chartCollect });
+		return chartCollect;
 	};
 
 	// ---
@@ -224,6 +240,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		const spawned = sessionSpawnTree({ pending: opt.pending });
 		const doc = buildSessionJson({
 			interactions,
+			descendantTurns: collected.get(opt.pending === true)!.turns,
 			session: {
 				path: finalSessionPath,
 				harness: opt.pending ? null : detectSessionHarness(finalSessionPath),
@@ -335,9 +352,11 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 
-	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files]);
+	const tree = descendantTurns();
+	const chartInteractions = [...interactions, ...tree.turns];
+	const floor = createUncountedLatch().seen([finalSessionPath, ...discoverOnce().files, ...tree.files]);
 	const outputLines = chartLines({
-		interactions,
+		interactions: chartInteractions,
 		asked: askedOf(opts),
 		fallback: { width: paddedWidth, interval: sessionInterval, limit: sessionLimit, mode: sessionMode, timezone: sessionTimezone, disabledEmoji: isEmojiDisabled() },
 		unit,
@@ -353,7 +372,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 
 	if (opts.other) {
 		console.log("");
-		const dedupedInteractions = deduplicateInteractions(interactions);
+		const dedupedInteractions = deduplicateInteractions(chartInteractions);
 		const otherOutput = renderOtherHistogram(dedupedInteractions, Math.min(paddedWidth, 1023));
 		for (const line of otherOutput.split("\n")) {
 			console.log(padStr + line);

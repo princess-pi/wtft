@@ -11,6 +11,9 @@ import { parseSessionFile, collectSelfAttributedSessionIds, classifyInteraction,
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
 import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
+import { buildSessionJson } from "../extensions/lib/wtft-json.ts";
+import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
+import { newUncountedBillables } from "../extensions/lib/wtft-parser.ts";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 
 isolateTmpdir("517-tree-default");
@@ -127,6 +130,34 @@ console.log("\nPART D — the root's own folds stay self's");
 	computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), alreadyAttributed: collectSelfAttributedSessionIds([], self), collect });
 	check(computeSessionSummary([...self, ...collect.turns]).total.outputTokens === 400,
 		`D1 self plus collected turns count the folded child once (got ${computeSessionSummary([...self, ...collect.turns]).total.outputTokens})`);
+}
+
+console.log("\nPART E — --json treeCategories sum to tree");
+{
+	const ROOT = uuid(41), CHILD = uuid(42);
+	putSession(CHILD, [turnLine("c1", T0 + 60_000, 200, { write: "docs/spec-y.md" }), turnLine("c2", T0 + 90_000, 500, { write: "src/y.ts" })]);
+	const rootPath = path.join(dir, "root-e.jsonl");
+	fs.writeFileSync(rootPath, JSON.stringify({ type: "session", version: 3, id: ROOT, timestamp: new Date(T0).toISOString(), cwd: dir }) + "\n"
+		+ turnLine("r", T0, 100, { write: "src/z.ts" }));
+	const self = parseSessionFile(rootPath);
+	const collect = { turns: [] as Interaction[], files: [] as string[] };
+	const spawned = computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), collect });
+	const doc = buildSessionJson({
+		interactions: self, descendantTurns: collect.turns, spawned, uncounted: newUncountedBillables(),
+		session: { path: rootPath, harness: null, taggerVersion: "0", tagPath: "" },
+		provisional: { provisional: false, reason: null },
+	});
+	const sum = doc.treeCategories.reduce((a, c) => a + c.costUsd, 0);
+	check(doc.schema === "wtft/session@9", `E1 the schema is wtft/session@9 (got ${doc.schema})`);
+	check(close(sum, doc.tree.costUsd) && sum > doc.total.costUsd, `E2 treeCategories sum to tree.costUsd (${sum} vs ${doc.tree.costUsd})`);
+	check(doc.treeCategories.map(c => c.category).join() === doc.categories.map(c => c.category).join(), "E3 treeCategories has categories' order");
+	const spec = doc.treeCategories.find(c => c.category === "spec")!.costUsd;
+	check(spec > 0 && doc.categories.find(c => c.category === "spec")!.costUsd === 0, `E4 the child's spec turn lands in tree spec, not self spec (${spec})`);
+}
+
+console.log("\nPART F — --self parses");
+{
+	check(parseWtftCliArgs(["--self"]).self === true && parseWtftCliArgs([]).self === false, "F1 --self sets self; absent, it is false");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -47,7 +47,8 @@ export function createUncountedLatch(io?: UncountedLatchIo, chunkBytes?: number)
 - **Incremental:** each call reads only the bytes past where the last call stopped, in chunks of
   the parser's size, and parses only complete lines. A line longer than a chunk costs time linear in its
   length. `paths` is iterated only while nothing has been seen, so `--watch` stops discovering
-  subagent transcripts once latched. A file smaller than that point is read again from the start. A file that cannot be
+  subagent transcripts once latched. `--watch` reads a session transcript that moved from where it
+  now is. A file smaller than that point is read again from the start. A file that cannot be
   stat-ed or read counts as nothing seen, and is tried again next call.
 - The default `io` is `node:fs`. `--watch` and the widget call `seen` on every render, so a transcript
   is parsed once, not once per frame.

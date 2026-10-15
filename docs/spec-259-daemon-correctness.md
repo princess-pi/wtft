@@ -103,9 +103,11 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   it, and the `.display` marker once no lease is left, so no reader is told the session is served.
   A session it had dropped for idling goes back to being idle-dropped.
 - **A served session whose lease reads `rebuild` is adopted again**, whether a wake, the sweep or
-  a flush finds it, so the session is rebuilt at once. When another claim takes the lease between
-  the harness removing the token and claiming it, the harness rebuilds the tag on the attempt or
-  retry that does claim it. Any other lease that is not the harness's
+  a flush finds it, so the session is rebuilt at once. A claim that removes the token leaves the
+  rebuild owed beside the lease (`<lease>.rebuild`, `takeRebuildOwed` in `lease.ts`) before it
+  links its own holder, so when another process wins the link, or the claimant stops first, the
+  next daemon to take the lease rebuilds the tag: a harness, a restarted one, or a per-session
+  daemon. A harness that is handed the lease back with a rebuild owed adopts the session afresh. Any other lease that is not the harness's
   drops the session, as `--stop` means.
 
 ### `wtft -F` (decision M)
@@ -224,6 +226,8 @@ make, as follows:
   project's tag; `-F` on Linux not signalling a lease pid with no command line; an idle session
   rewritten at the same length adopted again; `-F` naming a rebuild lease it cannot write; the
   stale-version remedy for a tag of a newer build.
+- **Checked in `tests/wtft-524-owed-rebuild.test.ts`**: a `rebuild` token whose claimant lost the
+  link, or stopped, rebuilt by the next per-session daemon or harness to take the lease.
 - **Checked in `tests/wtft-270-session-tagger.test.ts`** (#267, as step sequences over the
   session tagger): the resume leaving a folded `claude -p` transcript to the one folding it; the
   held turn of a transcript no longer found, written under its earlier source and after a

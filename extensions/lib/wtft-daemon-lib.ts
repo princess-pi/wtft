@@ -367,7 +367,6 @@ export function watcherAction(
 ): WatcherAction {
 	if (size < lastReadOffset) return "reseed";
 	if (prefixMatches === false) return "reseed";
-	// "Could not read" re-seeds. Idling here deadlocks the watch — see above.
 	if (prefixMatches === null) return "reseed";
 	if (size > lastReadOffset) return "read";
 	return "idle";
@@ -383,6 +382,17 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 		const read = fs.readSync(fd, buf, 0, buf.length, offset);
 		// A short read leaves the tail zero-filled: reseed rather than miss a record.
 		return read < buf.length || tagRecords(buf.subarray(0, read).toString("utf8")).some(r => r.kind === "generation");
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+export function readAppended(tagPath: string, offset: number, size: number): Buffer {
+	const fd = fs.openSync(tagPath, "r");
+	try {
+		const buf = Buffer.alloc(size - offset);
+		fs.readSync(fd, buf, 0, buf.length, offset);
+		return buf;
 	} finally {
 		fs.closeSync(fd);
 	}
@@ -520,6 +530,11 @@ export function getDaemonPidPath(sessionPath: string): string {
 	const key = isSessionIdBasename(sessionPath) ? path.basename(sessionPath) : sessionPath;
 	const sessionHash = createHash("sha256").update(key).digest("hex").slice(0, 12);
 	return path.join(os.tmpdir(), `wtft-daemon-${sessionHash}.pid`);
+}
+
+export function servesLease(pidPath: string): (session: string) => boolean {
+	const name = path.basename(pidPath);
+	return session => path.basename(getDaemonPidPath(session)) === name;
 }
 
 /**
@@ -1068,10 +1083,7 @@ export async function watchTagFile(
 				}
 
 				{
-					const fd = fs.openSync(tagPath, "r");
-					const buf = Buffer.alloc(stat.size - lastReadOffset);
-					fs.readSync(fd, buf, 0, buf.length, lastReadOffset);
-					fs.closeSync(fd);
+					const buf = readAppended(tagPath, lastReadOffset, stat.size);
 
 					const lastNl = buf.lastIndexOf(0x0a);
 					if (lastNl !== -1) {
@@ -1099,8 +1111,6 @@ export async function watchTagFile(
 					}
 				}
 
-				// In-place modification (heartbeat overwrite): file didn't grow
-				// but the idle timestamp changed.
 				updateDaemonHealth();
 				needsRedraw = true;
 				render();

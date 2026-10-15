@@ -7,7 +7,7 @@ the reader is checked against the harness's field names as they were at capture.
 harness still writes those names is § M7b's job, on a host that has sidecars. Why they are here rather than hand-written:
 `docs/spec-194-p9-housekeeping.md` § H2.
 
-**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294 (the `version` in its session's transcript); `agent-a0000000000000532` added 2026-10-15, Claude Code 2.1.301: keys and key order kept, `description`, `toolUseId` and the file's agent id replaced with placeholders because its source repo may be a client's.**
+**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294 (the `version` in its session's transcript); `agent-a0000000000000532` added 2026-10-15, Claude Code 2.1.301: keys and key order kept, every string value other than `agentType`, `model` and `requestShape` and the file's agent id replaced with placeholders because its source repo may be a client's.**
 
 | File | Shape it stands for |
 |---|---|
@@ -32,7 +32,7 @@ expects, or carries a key that no file here has. When that happens:
    `agentType`, `model` and `requestShape` a placeholder, and the agent id in the file name too.
 2. Copy it here, add a row to the table, update the capture line above, and add its name to
    `CORPUS` in the test, in sorted order. A key the reader does not use goes in the test's `IGNORED`
-   list; a key it reads goes in `OPTIONAL_CARRIED` and in `parseSubagentMeta`.
+   list; a key it reads goes in `OPTIONAL_CARRIED` and in `parseSubagentMeta`, then run `bun run build`, since the test reads the built bundle.
 3. If the harness renamed a field rather than adding one, fix the reader in
    `extensions/lib/wtft-parser.ts` (`parseSubagentMeta`) and run `bun run build`, since the test
    reads the built bundle, and update `REQUIRED`, `NEAR_UNIVERSAL` and `OPTIONAL_CARRIED` in the test. `M7c` then fails on

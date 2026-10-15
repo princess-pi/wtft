@@ -82,10 +82,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M2 the rest is intact", m?.description === "sweep the corpus", JSON.stringify(m));
 }
 
-// M3 — no `.meta.json` at all. Pi children and shell-spawned children have none,
-// and that is not a failure: it is the ordinary case for everything #137 does
-// not cover. The caller must be able to tell "no meta" from "broken meta"
-// without a try/catch, so both are `null` and neither throws.
 {
 	const t = subagent("meta-less-child", null);
 	let threw = false;
@@ -126,7 +122,7 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 		const t = subagent(`optional-${missing}`, partial);
 		fixtureWrote(`M5b ${missing}`, t);
 		const m = readSubagentMeta(t);
-		assert(`M5b a meta with no \`${missing}\` still PARSES — it is absent on 48 of 493 real files`,
+		assert(`M5b a meta with no \`${missing}\` still PARSES`,
 			m !== null, `got null for ${JSON.stringify(partial)}`);
 		assert(`M5b and the field it does not have is \`undefined\`, not invented`,
 			m !== null && (m as Record<string, unknown>)[missing] === undefined);
@@ -261,7 +257,7 @@ function corpusFiles(): string[] {
 					`${realFile} has keys ${JSON.stringify(Object.keys(obj))} — the harness renamed or dropped \`${k}\`, and every label in the report just went blank`);
 			}
 			const carried = NEAR_UNIVERSAL.filter(k => k in (obj as Record<string, unknown>));
-			assert(`M7b and it carries ${carried.length} of the 2 near-universal names (${JSON.stringify(carried)}) — 0 is legitimate only for a workflow child (agentType=${JSON.stringify((obj as Record<string, unknown>).agentType)})`,
+			assert(`M7b and it carries ${carried.length} of the 2 near-universal names (${JSON.stringify(carried)})`,
 				carried.length === 2 || (obj as Record<string, unknown>).agentType === "workflow-subagent",
 				`${realFile} keys ${JSON.stringify(Object.keys(obj))}`);
 			// And end to end: the reader accepts the harness's OWN file, not just
@@ -351,10 +347,6 @@ function corpusFiles(): string[] {
 // and never wired to anything, which is the failure mode that left this file
 // unread for the whole life of the project: it was on disk, it parsed, and no
 // code path asked for it.
-//
-// SCOPE. This suite covers the `--json` half only. The render half — showing
-// the description in place of `agent-<hash>` in #116's SPAWNED block — is #137,
-// still open; see docs/spec-137-subagent-meta.md for why the split stands.
 
 console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 

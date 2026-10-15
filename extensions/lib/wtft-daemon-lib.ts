@@ -933,7 +933,6 @@ export async function watchTagFile(
 		try { tree = settings.tree(tagPath); treeError = null; } catch (err) {
 			tree = { turns: [], files: [], live: [] };
 			treeError = err instanceof Error ? err.message : String(err);
-			treeAt = -Infinity;
 		}
 	};
 

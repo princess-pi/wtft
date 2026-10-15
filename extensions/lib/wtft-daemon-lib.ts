@@ -382,7 +382,6 @@ function appendedGeneration(tagPath: string, offset: number, size: number): bool
 	}
 }
 
-/** The `size - offset` bytes of `tagPath` from `offset`. Throws what the open or read throws. */
 export function readAppended(tagPath: string, offset: number, size: number): Buffer {
 	const fd = fs.openSync(tagPath, "r");
 	try {

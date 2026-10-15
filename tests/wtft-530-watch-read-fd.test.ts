@@ -17,9 +17,10 @@ function check(cond: boolean, msg: string) {
 }
 
 function fdsOn(target: string): number {
+	const real = fs.realpathSync(target);
 	let n = 0;
 	for (const fd of fs.readdirSync("/proc/self/fd")) {
-		try { if (fs.readlinkSync(`/proc/self/fd/${fd}`) === target) n++; } catch { /* closed while listing */ }
+		try { if (fs.readlinkSync(`/proc/self/fd/${fd}`) === real) n++; } catch { /* closed while listing */ }
 	}
 	return n;
 }
@@ -33,6 +34,7 @@ check(fdsOn(tag) === 0, "a successful read leaves no fd open on the tag file");
 const unreadable = path.join(dir, "a-directory");
 fs.mkdirSync(unreadable);
 const probe = fs.openSync(unreadable, "r");
+check(fdsOn(unreadable) === 1, `fixture: the count sees a held fd, and the open succeeds so a throw comes from the read (got ${fdsOn(unreadable)})`);
 fs.closeSync(probe);
 let throws = 0;
 for (let i = 0; i < 5; i++) {
@@ -40,6 +42,11 @@ for (let i = 0; i < 5; i++) {
 }
 check(throws === 5, `fixture: every read throws (got ${throws} of 5)`);
 check(fdsOn(unreadable) === 0, `no fd left open after 5 throwing reads (got ${fdsOn(unreadable)})`);
+
+const lib = fs.readFileSync(new URL("../extensions/lib/wtft-daemon-lib.ts", import.meta.url), "utf8");
+const watch = lib.slice(lib.indexOf("export async function watchTagFile("));
+const body = watch.slice(0, watch.indexOf("\nexport ", 1));
+check(body.includes("readAppended(") && !body.includes("fs.openSync("), "watchTagFile reads its tag through readAppended and opens no fd of its own");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

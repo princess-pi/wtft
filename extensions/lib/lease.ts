@@ -142,6 +142,10 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 	}
 }
 
+export function takeRebuildOwed(file: string): boolean {
+	return false;
+}
+
 /** The pid a lease holder names, or 0 when it is not one. */
 export function leasePid(holder: string): number {
 	return /^[1-9]\d*$/.test(holder) ? Number(holder) : 0;

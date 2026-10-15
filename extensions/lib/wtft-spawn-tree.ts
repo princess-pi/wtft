@@ -517,3 +517,20 @@ export function treeTotals(self: TokenTotals, tree: SpawnTree): TokenTotals {
 	addTotals(out, tree.total);
 	return out;
 }
+
+/** What a chart adds for the tree: descendant turns, their transcripts, and the live edges. */
+export interface TreeView {
+	turns: Interaction[];
+	files: string[];
+	live: { child: string; label?: string; mechanism: string; costUsd: number }[];
+}
+
+/** One walk of `rootSessionId`'s tree, shaped for a chart. */
+export function treeView(rootSessionId: string, alreadyAttributed: SpawnTreeOptions["alreadyAttributed"], options: Pick<SpawnTreeOptions, "ledgerPath" | "now"> = {}): TreeView {
+	const collect = { turns: [] as Interaction[], files: [] as string[] };
+	const tree = computeSpawnTree(rootSessionId, { ...options, alreadyAttributed, collect });
+	const live = tree.edges.filter(e => e.live && e.total).map(e => ({
+		child: e.child, ...(e.label !== undefined ? { label: e.label } : {}), mechanism: e.mechanism, costUsd: e.total!.costUsd,
+	}));
+	return { ...collect, live };
+}

@@ -50,11 +50,11 @@ pinned consumer cannot see is still a rename. The strings inside
 branches on `notices[].code` is safe, one that matches `notices[].text` has no
 contract.
 
-### Schema `wtft/session@8`
+### Schema `wtft/session@9`
 
 ```json
 {
-  "schema": "wtft/session@8",
+  "schema": "wtft/session@9",
   "session": {
     "path": "/home/u/.claude/projects/-x/abc.jsonl",
     "harness": "claude-code",
@@ -109,6 +109,10 @@ contract.
     "inputTokens": 3600, "outputTokens": 270,
     "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0
   },
+  "treeCategories": [
+    { "category": "overhead", "costUsd": 0, "inputTokens": 0, "outputTokens": 0,
+      "reasoningTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
+  ],
   "subagents": [
     { "transcript": "…/subagents/agent-a641e532bfaae9903.jsonl",
       "meta": { "agentType": "general-purpose", "spawnDepth": 1,
@@ -126,7 +130,7 @@ contract.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"wtft/session@8"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6); `@8` is #180's `spawned.descendantUntagged[]` (Amendment 7). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
+| `schema` | string | `"wtft/session@9"`. **Adding a top-level key bumps it — a NESTED one too** (Duppy, 2026-09-18, answer Y). `@2` is #116 (`spawned`, `tree`); `@3` is #141 (`subagents[]`); `@4` is #119's `total.untaggedCostUsd`; #89's `-s` no-TTY contract change is not a key change but rides the same bump (see Amendment 3); `@5` is #133's `spawned.edges[].live` and the fourth `provisional.reason` (Amendment 4); `@6` is #128's `spawned.unrecorded[]` (Amendment 5); `@7` is #137's `subagents[].total` (Amendment 6); `@8` is #180's `spawned.descendantUntagged[]` (Amendment 7); `@9` is `treeCategories` (Amendment 8). A consumer that only wants to know whether a given wtft can report subagents should still test for the `subagents[]` key, since absence is meaningful there (see below) and a version string cannot carry that. |
 | `session.path` | string | The session `.jsonl` this run read. |
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary. Not necessarily the version in `tagPath`: a stale-version read lands on an older tag. |
@@ -367,7 +371,7 @@ to write an object to.
 
 ```console
 $ node bin/wtft.mjs -s <fixture> --json \
-    | jq -e '.schema == "wtft/session@8" and (.total.outputTokens|type) == "number"'
+    | jq -e '.schema == "wtft/session@9" and (.total.outputTokens|type) == "number"'
 ```
 
 exits 0, and `tests/wtft-26-json.test.ts` asserts, on a fixture, in eleven
@@ -636,3 +640,12 @@ total; the reported untagged cost can overlap `spawned.total`, as the field row 
   rows when the list is non-empty: `N descendant(s) with untagged turns — $X left out of their edge totals (#180)`.
 
 **Closer:** `tests/wtft-180-descendant-untagged.test.ts`. Full record: `docs/spec-194-p9-housekeeping.md` § H1.
+
+## Amendment 8 — `wtft/session@9`: `treeCategories` (#517, 2026-10-15)
+
+- **`treeCategories`** has the shape and order of `categories`, summed over this session's own
+  turns plus every counted descendant's turns ([spec-517](spec-517-tree-default.md)). Each
+  descendant turn is classified as a self turn is. `sum(treeCategories[].costUsd)` equals
+  `tree.costUsd` within float error.
+- No existing key changes meaning. `total` and `categories` stay self; `--self` has no effect on
+  `--json`.

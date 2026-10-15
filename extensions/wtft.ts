@@ -27,7 +27,7 @@ import { loadUserPricing } from "./lib/wtft-pricing-config.js";
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { chartLines, chartUnit } from "./lib/chart-call.js";
-import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
+import { computeSpawnTree, treeView, type SpawnTree, type TreeView } from "./lib/wtft-spawn-tree.js";
 import { createUncountedLatch } from "./lib/uncounted-latch.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
@@ -180,6 +180,20 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 	}
 }
 
+/** The widget's tree turns; empty under `/wtft --self`. A refresh must not take the panel down. */
+function widgetTree(ctx: any, interactions: Interaction[]): TreeView {
+	const none: TreeView = { turns: [], files: [], live: [] };
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (_widgetSelf || !sessionFile) return none;
+	try {
+		return treeView(path.basename(sessionFile).replace(/\.jsonl$/i, ""),
+			() => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles));
+	} catch {
+		return none;
+	}
+}
+
+let _widgetSelf = false;
 let uncountedLatch = createUncountedLatch();
 let uncountedSessionFile: string | undefined;
 
@@ -238,6 +252,7 @@ function widgetChart(
 		showTokenColumns?: boolean;
 	},
 	interactions: Interaction[] = readInteractions(ctx),
+	tree: TreeView = widgetTree(ctx, interactions),
 ): string[] | null {
 	const settings = getSettings(ctx);
 	const { sessionFile, model, ...asked } = opts ?? {};
@@ -248,7 +263,7 @@ function widgetChart(
 	}
 
 	return chartLines({
-		interactions,
+		interactions: [...interactions, ...tree.turns],
 		asked: {
 			...asked,
 			showCostColumns: asked.showCostColumns ?? !widgetHideCostColumns,
@@ -259,7 +274,7 @@ function widgetChart(
 		sessionFile,
 		model,
 		live: true,
-		floor: transcript ? uncountedLatch.seen([transcript, ..._subagentFiles]) : false,
+		floor: transcript ? uncountedLatch.seen([transcript, ..._subagentFiles, ...tree.files]) : false,
 	});
 }
 
@@ -298,9 +313,10 @@ function updateWtftWidget(
 	const width = getTerminalWidth(true, false);
 	// Read once: fitWidget may render several times. The read sets what provisionalLines reports.
 	const interactions = readInteractions(ctx);
+	const tree = widgetTree(ctx, interactions);
 	const tail = provisionalLines();
 	const lines = fitWidget(
-		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions),
+		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions, tree),
 		parserStatusStr, width, tail, opts?.limit ?? current.limit,
 	);
 	if (!lines) {
@@ -473,6 +489,8 @@ export default function wtftExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(withProvisionalLine(output), "info");
 				return;
 			}
+
+			_widgetSelf = opts.self;
 
 			const columnFlags = {
 				showCostColumns: !widgetHideCostColumns,

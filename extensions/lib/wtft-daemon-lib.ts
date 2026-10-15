@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { Interaction, Category } from "./wtft-parser.js";
+import type { TreeView } from "./wtft-spawn-tree.js";
 import { getVisualLength, getTerminalWidth } from "./wtft-shared.js";
 import {
 	parseEntryToInteraction,
@@ -47,6 +48,9 @@ export interface WatchSettings {
 	hasTimezone?: boolean;
 	disabledEmoji?: boolean;
 	defaultDisabledEmoji?: boolean;
+	/** The spawn tree's descendant turns, the transcripts they came from, and its live edges.
+	 *  Absent under `--self`. Called at most once per `TREE_REFRESH_MS`. */
+	tree?: () => TreeView;
 }
 
 
@@ -792,6 +796,13 @@ export function waitingForDataLine(sessionPath: string): string {
 	return "Waiting for session data...";
 }
 
+export const TREE_REFRESH_MS = 10_000;
+
+/** One line per live descendant, for `--watch` under the chart. */
+export function renderLiveDescendants(live: TreeView["live"]): string[] {
+	return live.map(e => `\x1b[36m▸\x1b[0m ${e.label ?? e.child.slice(0, 8)} \x1b[90m${e.mechanism}\x1b[0m $${e.costUsd.toFixed(2)} \x1b[33mlive\x1b[0m`);
+}
+
 export async function watchTagFile(
 	sessionPath: string,
 	tagPathHint: string,
@@ -908,6 +919,14 @@ export async function watchTagFile(
 	} catch {
 	}
 
+	let tree: TreeView = { turns: [], files: [], live: [] };
+	let treeAt = -Infinity;
+	const refreshTree = () => {
+		if (!settings.tree || Date.now() - treeAt < TREE_REFRESH_MS) return;
+		treeAt = Date.now();
+		try { tree = settings.tree(); } catch { /* keep the last walk */ }
+	};
+
 	const uncountedLatch = createUncountedLatch();
 	let liveSessionPath = sessionPath;
 	function* transcripts(): Generator<string> {
@@ -916,6 +935,7 @@ export async function watchTagFile(
 		}
 		yield liveSessionPath;
 		try { yield* discoverSubagentSessionFiles(liveSessionPath, { quietSession: true }).files; } catch {}
+		yield* tree.files;
 	}
 
 	const render = () => {
@@ -927,7 +947,8 @@ export async function watchTagFile(
 		const paddedWidth = width - 2 * actualPad;
 		const finalWidth = Math.min(paddedWidth, 1023);
 
-		const deduped = dedupeClassifiedById(allInteractions);
+		refreshTree();
+		const deduped = [...dedupeClassifiedById(allInteractions), ...tree.turns];
 		interactionCount = deduped.length;
 
 		const lines = chartLines({
@@ -969,6 +990,7 @@ export async function watchTagFile(
 			}
 
 			for (const l of lines) buf.push(l);
+			for (const l of renderLiveDescendants(tree.live)) buf.push(l);
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}

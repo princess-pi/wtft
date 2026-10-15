@@ -9,7 +9,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseSessionFile, collectSelfAttributedSessionIds, classifyInteraction, type Interaction } from "../extensions/lib/wtft-parser.ts";
 import { computeSessionSummary } from "../extensions/lib/wtft-renderer.ts";
-import { computeSpawnTree } from "../extensions/lib/wtft-spawn-tree.ts";
+import { computeSpawnTree, treeView } from "../extensions/lib/wtft-spawn-tree.ts";
+import { renderLiveDescendants } from "../extensions/lib/wtft-daemon-lib.ts";
 import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtft-spawn-ledger.ts";
 import { buildSessionJson } from "../extensions/lib/wtft-json.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
@@ -158,6 +159,23 @@ console.log("\nPART E — --json treeCategories sum to tree");
 console.log("\nPART F — --self parses");
 {
 	check(parseWtftCliArgs(["--self"]).self === true && parseWtftCliArgs([]).self === false, "F1 --self sets self; absent, it is false");
+}
+
+console.log("\nPART G — --watch names a live child, and drops it once quiet (#198)");
+{
+	const ROOT = uuid(51), CHILD = uuid(52);
+	const childPath = putSession(CHILD, [turnLine("c", T0, 300)]);
+	const ledgerPath = ledgerOf([[ROOT, CHILD]]);
+	const now = Date.now();
+	fs.utimesSync(childPath, new Date(now - 1_000), new Date(now - 1_000));
+	const fresh = treeView(ROOT, new Set(), { ledgerPath, now });
+	const lines = renderLiveDescendants(fresh.live).join("\n");
+	check(fresh.turns.length === 1, `G0 fixture precondition: the child's turn is in the view (got ${fresh.turns.length})`);
+	check(lines.includes(CHILD.slice(0, 8)) && lines.includes("pr-review-lens") && lines.includes(`$${fresh.live[0]?.costUsd.toFixed(2)}`),
+		`G1 a fresh child renders a line with its id, mechanism and cost (got ${JSON.stringify(lines)})`);
+	fs.utimesSync(childPath, new Date(now - 600_000), new Date(now - 600_000));
+	const quiet = treeView(ROOT, new Set(), { ledgerPath, now });
+	check(quiet.live.length === 0 && quiet.turns.length === 1, `G2 ten minutes quiet, the line is gone and the turn stays (live ${quiet.live.length})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

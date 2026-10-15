@@ -4,6 +4,16 @@ import { watchTagFile, getCurrentVersionTagPath, chartLimit, type WatchSettings 
 import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "../wtft-config-dir.js";
 import { spawnWtftDaemon } from "../wtft-cli-shared.js";
 import type { WtftCliOptions } from "../wtft-cli-shared.js";
+import * as fs from "node:fs";
+import { foldedSessionIdsFromContent } from "../wtft-daemon-lib.js";
+import { treeView, type TreeView } from "../wtft-spawn-tree.js";
+
+/** The tree `--watch` charts: excluding what the session's tag already folded, as the report does. */
+function watchTree(sessionPath: string, tagPath: string): TreeView {
+	return treeView(path.basename(sessionPath).replace(/\.jsonl$/i, ""), () => {
+		try { return foldedSessionIdsFromContent(fs.readFileSync(tagPath, "utf8")); } catch { return new Set<string>(); }
+	});
+}
 
 /** The render settings `--watch` starts from: each flag given, else the wtft config's value, else the code default. */
 export function watchSettings(opts: WtftCliOptions, config: Record<string, unknown>): Pick<WatchSettings, "interval" | "limit" | "mode" | "timezone" | "hasInterval" | "hasLimit" | "hasMode" | "hasTimezone" | "disabledEmoji" | "defaultDisabledEmoji"> {
@@ -41,6 +51,7 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 		showTokenColumns: !opts.hideTokenColumns,
 		daemonPath,
 		pad: opts.pad,
+		...(opts.self ? {} : { tree: () => watchTree(finalSessionPath, tagPath) }),
 	});
 	return; // watchTagFile never returns until SIGINT
 }

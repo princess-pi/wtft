@@ -449,7 +449,7 @@ file-level scope says fix or file, and the Action column says which.
 | `CONTEXT.md` | no term for the new output mode; CLI entry listed two CLI-only modes | `--json` is a third | ✅ `wtft-75-doc-claims.test.ts` | Fixed: **JSON mode** and **Provisional** entries added |
 
 **#90 was filed here and has since been FIXED** (direction A, 2026-09-16):
-`computeSessionSummary` adds `serverToolCost`, so the chart's running total, the
+`computeSessionSummary` adds `serverToolCost`, so the `--self` chart's running total, the
 `--tokens` TOTAL row and `total.costUsd` are one number. Gate:
 `tests/wtft-90-total-includes-server-tool-cost.test.ts`, which drives all three
 surfaces through the CLI — the comparison whose absence let the divergence
@@ -558,7 +558,7 @@ be zero. `docs/spec-89-scoped-picker.md` U2 records the same reasoning.
 **Closer:** on a fixture with one `<synthetic>` turn among tagged ones — the
 exact shape `tests/wtft-90-total-includes-server-tool-cost.test.ts` TEST 5
 built and, at the time, could not assert against —
-`total.costUsd + total.untaggedCostUsd` equals the chart's own running total,
+`total.costUsd + total.untaggedCostUsd` equals the `--self` chart's running total,
 to within half a cent: the comparison scrapes the chart's own two-decimal
 `formatCost` display, the same tolerance `tests/wtft-90-…`'s own chart/TOTAL
 comparisons use. `tests/wtft-119-untagged-cost.test.ts` is

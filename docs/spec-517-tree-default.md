@@ -116,7 +116,7 @@ children's transcripts more often; a few seconds to a minute is the useful range
 - `computeSpawnTree` with `collect` on a fixture ledger with one launcher child: the turns' summed
   cost equals `tree.total.costUsd`, and each turn keeps its own timestamp and category.
 - A child already in self (`alreadyAttributed`) contributes no turns.
-- A descendant turn folding a session already in self has that share subtracted.
+- A descendant turn folding a session already counted has that share subtracted.
 - `buildSessionJson`: `sum(treeCategories[].costUsd)` equals `tree.costUsd`.
 - `parseWtftCliArgs(["--self"])` sets `self`.
 - `treeView` with a fresh child transcript lists it live and `renderLiveDescendants` names it;

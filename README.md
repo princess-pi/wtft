@@ -332,6 +332,11 @@ its model and the cost `TOTAL` already holds for it. Those rows are **inside**
 `TOTAL`, never added to it; `--json` carries the same figure as
 `subagents[].total`.
 
+The chart shows the spawn tree by default: this session's own turns plus every
+counted descendant's, each in its own category at its own time. `wtft --self`
+charts the session's own turns only, for summing spend across sessions without
+counting a child twice ([`docs/spec-517-tree-default.md`](./docs/spec-517-tree-default.md)).
+
 `wtft --tokens` shows the spawn tree as a `SPAWNED` / `TREE` block below
 `TOTAL`. It prints nothing when the walk found no edge — none from this session,
 nor from a session already inside its total — AND the ledger was read cleanly; an unreadable ledger, or one with skipped lines, still prints

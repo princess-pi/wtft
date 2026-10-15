@@ -540,7 +540,8 @@ That sum can include a `claude -p` child's share that `spawned.total` also count
 ledger records the child too). Both are explicit fields under `--json`; the `--tokens` table shows the
 split as `TOTAL` / `SPAWNED` / `TREE`, and shows none of the three only when the walk found no
 edge (none from this session, nor from a session already inside its total) AND the ledger read cleanly — an unreadable ledger or a skipped line still prints, because
-"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ.
+"no edges" and "could not tell" are different reports. Never write a bare "the session's cost" where the two can differ. The chart in `wtft`, `--watch` and the Pi widget shows the tree's turns by default, each
+descendant turn classified and binned as a self turn is; `--self` charts self only (spec-517).
 _Avoid_: Rollup, grand total, inclusive cost (each hides which of the two is meant)
 
 **Unattributed** (#116):

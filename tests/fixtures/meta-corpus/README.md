@@ -7,7 +7,7 @@ the reader is checked against the harness's field names as they were at capture.
 harness still writes those names is § M7b's job, on a host that has sidecars. Why they are here rather than hand-written:
 `docs/spec-194-p9-housekeeping.md` § H2.
 
-**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294 (the `version` in its session's transcript).** File mtimes on the source host ran from 2026-08-10 to
+**Captured 2026-09-23, Claude Code 2.1.281; `agent-a1a9b0bea81408e23` added 2026-10-08, Claude Code 2.1.294 (the `version` in its session's transcript); `agent-a0000000000000532` added 2026-10-15, from a sidecar written that day: keys, key order and values kept, `description`, `toolUseId` and the file's agent id replaced with placeholders because its source repo may be a client's.** File mtimes on the source host ran from 2026-08-10 to
 2026-10-08.
 
 | File | Shape it stands for |
@@ -20,6 +20,7 @@ harness still writes those names is § M7b's job, on a host that has sidecars. W
 | `agent-a12b520b52dfc5d2a` | a named dispatch (`name`) |
 | `agent-a170388e12a7fa3bc` | a dispatch carrying `cwd` |
 | `agent-a1a9b0bea81408e23` | a background dispatch carrying `effort` |
+| `agent-a0000000000000532` | a background dispatch carrying `finished` |
 
 ## Refreshing it
 

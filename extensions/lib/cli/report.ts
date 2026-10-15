@@ -334,6 +334,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	const padStr = " ".repeat(pad);
 	const paddedWidth = termColumns - 2 * pad;
 
+	const uncounted = scanSessionUncounted();
 	const outputLines = chartLines({
 		interactions,
 		asked: askedOf(opts),
@@ -341,6 +342,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		unit,
 		sessionFile: finalSessionPath,
 		padRows: true,
+		floor: uncounted.compaction + uncounted.recap > 0,
 	});
 
 	console.log(padStr + `\x1b[90m${finalSessionPath}\x1b[0m`);

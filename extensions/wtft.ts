@@ -28,6 +28,7 @@ import { WTFT_CONFIG_DIR, WTFT_CONFIG_TOOL } from "./lib/wtft-config-dir.js";
 import { fitWidget, keepTail } from "./lib/widget-fit.js";
 import { chartLines, chartUnit } from "./lib/chart-call.js";
 import { computeSpawnTree, type SpawnTree } from "./lib/wtft-spawn-tree.js";
+import { createUncountedLatch } from "./lib/uncounted-latch.js";
 import { collectSelfAttributedSessionIds } from "./lib/wtft-parser.js";
 import {
 	parseWtftCliArgs,
@@ -179,6 +180,9 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 	}
 }
 
+let uncountedLatch = createUncountedLatch();
+let uncountedSessionFile: string | undefined;
+
 let widgetHideCostColumns = false;
 let widgetHideTokenColumns = false;
 let _widgetHidden = false;
@@ -237,6 +241,11 @@ function widgetChart(
 ): string[] | null {
 	const settings = getSettings(ctx);
 	const { sessionFile, model, ...asked } = opts ?? {};
+	const transcript: string | undefined = ctx.sessionManager.getSessionFile?.();
+	if (transcript !== uncountedSessionFile) {
+		uncountedLatch = createUncountedLatch();
+		uncountedSessionFile = transcript;
+	}
 
 	return chartLines({
 		interactions,
@@ -250,6 +259,7 @@ function widgetChart(
 		sessionFile,
 		model,
 		live: true,
+		floor: transcript ? uncountedLatch.seen([transcript, ..._subagentFiles]) : false,
 	});
 }
 

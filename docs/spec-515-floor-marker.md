@@ -4,7 +4,7 @@ Issue: https://github.com/princess-pi/wtft/issues/515.
 Status: **Spec Approved** (Duppy, 2026-10-14: "I like that as a solution so we definitely want to implement that", on the `≥` form).
 
 Module: `extensions/lib/uncounted-latch.ts` · Seam: `createUncountedLatch`, tested in `tests/wtft-515-floor-marker.test.ts`
-Also: `extensions/lib/wtft-chart.ts`: prints the marker. `extensions/lib/wtft-renderer.ts` and `extensions/lib/chart-call.ts`: pass the `floor` flag through. `extensions/lib/cli/report.ts`, `extensions/lib/wtft-daemon-lib.ts` (`--watch`) and `extensions/wtft.ts` (the Pi widget): ask the latch.
+Also: `extensions/lib/wtft-chart.ts`: prints the marker. `extensions/lib/wtft-renderer.ts` and `extensions/lib/chart-call.ts`: pass the `floor` flag through. `extensions/lib/wtft-daemon-lib.ts` (`--watch`) and `extensions/wtft.ts` (the Pi widget): ask the latch. `extensions/lib/cli/report.ts`: the one-shot report reuses its existing `scanSessionUncounted`, which `--tokens` and `--json` already read.
 
 ## 1. Problem
 

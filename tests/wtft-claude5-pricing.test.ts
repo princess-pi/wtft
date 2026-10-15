@@ -144,6 +144,28 @@ describe("Claude Opus 5.5 pricing (#510)", () => {
 	});
 });
 
+describe("Claude Sonnet 5.5 pricing (#516)", () => {
+	it("prices claude-sonnet-5-5 at $2/$10/$0.10/$2.50 per MTok", () => {
+		assert.strictEqual(calculateClaudeCost("claude-sonnet-5-5", { input_tokens: MTOK }), 2.00);
+		assert.strictEqual(calculateClaudeCost("claude-sonnet-5-5", { output_tokens: MTOK }), 10.00);
+		assert.strictEqual(calculateClaudeCost("claude-sonnet-5-5", { cache_read_input_tokens: MTOK }), 0.10);
+		assert.strictEqual(calculateClaudeCost("claude-sonnet-5-5", { cache_creation_input_tokens: MTOK }), 2.50);
+	});
+
+	it("bills claude-sonnet-5-5 1h-TTL cache writes at 2x base input ($4.00/MTok)", () => {
+		const cost = calculateClaudeCost("claude-sonnet-5-5", {
+			cache_creation_input_tokens: MTOK,
+			cache_creation: { ephemeral_1h_input_tokens: MTOK },
+		});
+		assert.strictEqual(cost, 4.00);
+	});
+
+	it("resolves the exact entry, not the claude-sonnet-5 substring card", () => {
+		assert.strictEqual(lookupModelPricing("claude-sonnet-5-5")!.cacheRead, 0.10);
+		assert.notStrictEqual(lookupModelPricing("claude-sonnet-5-5"), lookupModelPricing("claude-sonnet-5"));
+	});
+});
+
 // --- #148: Sonnet 5 intro pricing (dated rate window) ---
 
 describe("Sonnet 5 intro pricing (#148)", () => {

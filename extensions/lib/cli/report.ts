@@ -89,7 +89,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		({ interactions, provisional, folded } = readTagFileWithVerdict(tagPath));
 	}
 
-	// Memoised lineage. No try/catch: computeSpawnTree reports ledger failure as ledgerError.
+	// Memoised lineage.
 	// Keyed by mode: the pending tree excludes nothing and must never serve a full arm.
 	const spawnTreeCache = new Map<boolean, SpawnTree>();
 	const collected = new Map<boolean, { turns: Interaction[]; files: string[] }>();

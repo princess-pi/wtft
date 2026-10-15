@@ -39,7 +39,7 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
   `wtft/session@4` becomes `wtft/session@5` and `spawned`'s own `wtft/spawn-tree@1` becomes `@2`.
 - **Where it applies.** Only `--tokens` and `--json` set it. A plain `wtft` run, which charts the
   tree since spec-517, does not. The Pi
-  widget's `/wtft --tokens` renders the tree but does not read `live`; that rendering is #198.
+  widget's `/wtft --tokens` renders the tree but does not read `live`.
 
 ## Not in this change
 

@@ -62,7 +62,7 @@ function provisionalLines(): string[] {
 		lines.push(`\x1b[33m⚠ ${describeProvisionalReason(_tagProvisional.verdict, _tagProvisional.tagPath)} — total is provisional\x1b[0m`);
 	}
 	if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
-	if (_widgetTreeError) lines.push(`\x1b[33m⚠ spawn tree not walked (${_widgetTreeError}); charting this session's own turns\x1b[0m`);
+	if (_widgetTreeError) lines.push(`\x1b[33m⚠ spawn tree not walked (${_widgetTreeError}): this view shows the session's own turns only\x1b[0m`);
 	return lines;
 }
 
@@ -162,11 +162,8 @@ function getSettings(_ctx: any) {
 //   2. Pi (pre-emptive): sibling files with parentSession header match
 // ---
 
-/** `computeSpawnTree` reports a ledger it could not read as `ledgerError`
- *  rather than throwing, so the widget shows that failure instead of hiding it.
- *  The catch has no reachable case left; it stays because a widget refresh
- *  running every turn must not take the panel down. */
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
+	_widgetTreeError = null;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
 	try {
@@ -176,7 +173,8 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
 			alreadyAttributed: () => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles),
 		});
-	} catch {
+	} catch (err) {
+		_widgetTreeError = err instanceof Error ? err.message : String(err);
 		return undefined;
 	}
 }

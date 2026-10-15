@@ -135,7 +135,7 @@ contract.
 | `session.harness` | string \| null | Harness id whose parse adapter claims the session's first assistant turn — `"claude-code"`, `"pi"`, or an id registered out of tree through the #156 seam. `null` means **no claim**, and does not distinguish an empty session, one not written yet, a file that could not be read, and a format no registered harness understands. |
 | `session.taggerVersion` | string | `WTFT_TAGGER_VERSION` of the running binary. Not necessarily the version in `tagPath`: a stale-version read lands on an older tag. |
 | `session.tagPath` | string | The classified tag file path resolved for this run: read when it exists, and on the `pending-session` and `no-data` arms the *expected* path — not evidence that a file was opened. |
-| `provisional.provisional` | bool | **This run's** verdict — may a number in this report still change? Usually `readTagProvisional`'s answer, but the blind-spot scan and the spawn-tree walk can set it too (see below and Amendment 4), so do not read it as "what the tag file says". For `descendant-live` only `spawned` and `tree` can move; `total` is settled. |
+| `provisional.provisional` | bool | **This run's** verdict — may a number in this report still change? Usually `readTagProvisional`'s answer, but the blind-spot scan and the spawn-tree walk can set it too (see below and Amendment 4), so do not read it as "what the tag file says". For `descendant-live` only `spawned`, `tree` and `treeCategories` can move; `total` is settled. |
 | `provisional.reason` | string \| null | A **closed four-value vocabulary**, enforced by the `TagProvisionalReason` union: `"stale-version"` · `"unswept"` · `"subagent-unreadable"` · `"descendant-live"` (#133, Amendment 4), or `null` when settled. `--json` did not widen it; #133 did. **Issue #26's own wish-list names only two**, `stale-version` and `unswept`: it was written before #457 added the third, and this spec supersedes it on that point. Repeated review lenses have cited the issue's list as the contract; it is not. |
 | `total.*` | number | Exact totals for **this session as the daemon tagged it** — its own turns AND the Task subagents blended into its tag file. The spawn walk marks an edge to any session the tag's fold records name `in-self-total` and never adds it: `tree` would bill it twice. The same holds for a `claude -p` session that a `claude -p` child of this session folded in, at any depth. The tag's fold records name each such session, and those records are what the walk reads (`docs/spec-178-135-180-fold-records.md`). **Launcher-spawned descendants are not in here** (#116) — those are `spawned`, and `tree` is the sum. Cost is USD, the rest are token counts. |
 | `spawned` | object | The recorded lineage (#116), schema `wtft/spawn-tree@4`. Present on every run, so an empty tree means "read the ledger, found nothing" rather than "nobody looked" — the same rule as `uncounted`. |
@@ -227,8 +227,8 @@ single aggregation — the only *implementation* of the arithmetic, not the only
 *call*. `renderTokenSummary` formats its result for a human; `buildSessionJson`
 in `extensions/lib/wtft-json.ts` serialises the same result for a machine.
 Neither reimplements it, so the prose and the JSON cannot report different
-**numbers**. Since #116 a run calls it N+1 times — once for this session and
-once per resolved descendant, inside `computeSpawnTree` — which is the same
+**numbers**. Since #116 a run calls it once for this session, once per resolved
+descendant inside `computeSpawnTree`, and since #517 once more for `treeCategories` — which is the same
 function over different inputs, and is what lets `self` and `tree` be added.
 
 Some things the human table prints have no direct JSON counterpart, because they
@@ -257,10 +257,10 @@ supplies its own budget.
 
 `buildSessionJson` is otherwise a thin serialiser, with four departures, all
 deliberate: `uncounted` is a separate scan of the session files and is passed in;
-`spawned` is the ledger walk and is passed in; and `tree` is the one piece of
-arithmetic the function performs itself, `treeTotals(summary.total,
+`spawned` is the ledger walk and is passed in; and `tree` is arithmetic the
+function performs itself, `treeTotals(summary.total,
 input.spawned)` — an addition of `total` and `spawned.total`, each already
-computed, which is why it is not a fourth way of counting. `notices` is the only input with a
+computed, so it is not a new way of counting. `notices` is the only input with a
 default; `uncounted` and `spawned` are required-not-defaulted, so an empty one
 always means "looked, found none". The fourth: `treeCategories` is a second
 `computeSessionSummary` call, over self plus the required `descendantTurns` (Amendment 8).

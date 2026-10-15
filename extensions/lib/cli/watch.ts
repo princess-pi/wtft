@@ -56,7 +56,7 @@ export async function runWatch(opts: WtftCliOptions, finalSessionPath: string, d
 		showTokenColumns: !opts.hideTokenColumns,
 		daemonPath,
 		pad: opts.pad,
-		...(opts.self ? {} : { tree: () => watchTree(finalSessionPath, tagPath) }),
+		...(opts.self ? {} : { tree: (current: string) => watchTree(finalSessionPath, current) }),
 	});
 	return; // watchTagFile never returns until SIGINT
 }

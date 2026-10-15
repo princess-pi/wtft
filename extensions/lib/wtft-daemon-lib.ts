@@ -50,7 +50,7 @@ export interface WatchSettings {
 	defaultDisabledEmoji?: boolean;
 	/** The spawn tree's descendant turns, the transcripts they came from, and its live edges.
 	 *  Absent under `--self`. Called at most once per `TREE_REFRESH_MS`. */
-	tree?: () => TreeView;
+	tree?: (tagPath: string) => TreeView;
 }
 
 
@@ -930,7 +930,7 @@ export async function watchTagFile(
 	const refreshTree = () => {
 		if (!settings.tree || Date.now() - treeAt < TREE_REFRESH_MS) return;
 		treeAt = Date.now();
-		try { tree = settings.tree(); treeError = null; } catch (err) {
+		try { tree = settings.tree(tagPath); treeError = null; } catch (err) {
 			tree = { turns: [], files: [], live: [] };
 			treeError = err instanceof Error ? err.message : String(err);
 		}

@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/**
- * #137 — the harness already writes the parent link; read it.
- */
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,15 +21,6 @@ function assert(label: string, ok: boolean, detail?: string) {
 
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-137-")));
 
-/** Write a transcript plus (optionally) its sibling meta, as the harness lays them out.
- *
- *  `wroteMeta` records what actually landed on disk. WHY (local audit round):
- *  every negative case below expects `null`, which is ALSO the answer when no
- *  meta exists — so a helper that silently stopped writing left them green while
- *  testing nothing. Measured: making the string-payload branch write no file left
- *  M4 ("unparseable JSON") and M6 ("a bare `null` document") both passing with no
- *  malformed file anywhere on disk. They were asserting the ABSENT case while
- *  claiming the MALFORMED one. `fixtureWrote` is the precondition that closes it. */
 const wroteMeta = new Map<string, string>();
 
 function subagent(name: string, meta: unknown | null): string {
@@ -124,14 +111,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M4 it returns null", m === null);
 }
 
-// M5 — a REQUIRED field missing, and the required set is TWO, not four.
-//
-// It was four until the local audit round. The census behind that globbed two
-// path segments then `subagents/`, so it never saw `subagents/workflows/wf_<id>/`
-// — the Dynamic Workflow children, which carry only `{agentType, spawnDepth}`.
-// 48 of 493 files on this host. Every one was declined WHOLE, and `null` is
-// defined for consumers as "this harness wrote no record", so the report claimed
-// an absence that was not there while two usable fields sat on disk.
 {
 	const full = {
 		agentType: "general-purpose", description: "d",
@@ -217,8 +196,6 @@ function corpusFiles(): string[] {
 //
 // Two halves, each honest about its subject:
 {
-	// TWO, not four — see M5. `description` and `toolUseId` are near-universal
-	// (445/493 on this host) and absent on every Dynamic Workflow child.
 	const REQUIRED = ["agentType", "spawnDepth"];
 	const NEAR_UNIVERSAL = ["description", "toolUseId"];
 
@@ -257,17 +234,6 @@ function corpusFiles(): string[] {
 	// output rather than ours. It is host-gated, so it SKIPS VISIBLY where there
 	// is none (CI has no `~/.claude`): a check that silently passed having read
 	// nothing is the coverage claim this repo's skip contract exists to refuse.
-	// NEWEST by mtime, over a RECURSIVE walk. The first version took
-	// `metas[0]` from the first session that had any — `readdir` order, no
-	// mtime — and the local audit measured it selecting a file from
-	// 2026-09-15 out of a corpus running to today. A rename shipped in the
-	// current release leaves 400+ old files on disk, so an arbitrary sample
-	// keeps passing while every label in the report goes blank. That is the
-	// same defect M7a was split off for, one level up.
-	//
-	// Recursive also matters: the flat `<session>/subagents` walk could never
-	// draw a `subagents/workflows/wf_<id>/` child, which is the shape M5c is
-	// about.
 	const real = (() => {
 		const base = path.join(os.homedir(), ".claude", "projects");
 		let best: { file: string; mtime: number } | null = null;

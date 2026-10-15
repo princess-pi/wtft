@@ -389,7 +389,8 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 			{ label: "a holder no process answers to", holder: () => "0" },
 			{ label: "a harness that exits a moment after it takes the lease", holder: (fired) => {
 				const code = `import * as fs from "node:fs";
-const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); fs.writeFileSync(process.argv[3] + ".held", ""); setTimeout(() => process.exit(0), 700); } }, 20);`;
+const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); fs.writeFileSync(process.argv[3] + ".held", ""); setTimeout(() => process.exit(0), 700); } }, 20);
+setTimeout(() => process.exit(0), 120_000);`;
 				const standIn = spawn("node", standInDaemonArgs(code, "--harness", fired), { stdio: "ignore" });
 				if (standIn.pid) pids.push(standIn.pid);
 				return String(standIn.pid ?? 0);

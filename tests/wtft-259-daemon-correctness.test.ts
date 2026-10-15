@@ -389,8 +389,7 @@ mock.module("node:fs", () => ({ ...realFs, ...hooked, default: { ...realFs, ...h
 			{ label: "a holder no process answers to", holder: () => "0" },
 			{ label: "a harness that exits a moment after it takes the lease", holder: (fired) => {
 				const code = `import * as fs from "node:fs";
-const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); setTimeout(() => process.exit(0), 700); } }, 20);
-setTimeout(() => process.exit(0), 30_000);`;
+const poll = setInterval(() => { if (fs.existsSync(process.argv[3])) { clearInterval(poll); fs.writeFileSync(process.argv[3] + ".held", ""); setTimeout(() => process.exit(0), 700); } }, 20);`;
 				const standIn = spawn("node", standInDaemonArgs(code, "--harness", fired), { stdio: "ignore" });
 				if (standIn.pid) pids.push(standIn.pid);
 				return String(standIn.pid ?? 0);
@@ -441,6 +440,7 @@ mock.module("node:fs", () => ({ ...realFs, unlinkSync, default: { ...realFs, unl
 			const cli = path.resolve(import.meta.dirname, "..", "bin", "wtft.mjs");
 			const forced = spawnSync("node", [cli, "-F", "-s", target], { encoding: "utf8", env: envFor(root), timeout: 30_000 });
 			check(fs.existsSync(fired), `${label}: fixture precondition: it took the lease between the harness's unlink and its link (-F exit ${forced.status}: ${forced.stderr.trim()})`);
+			if (named !== "0") check(await until(() => fs.existsSync(`${fired}.held`), 5_000) !== Infinity, `${label}: fixture precondition: the stand-in was still running when it took the lease`);
 			const rebuilt = await until(() => classified(target, "lost-target") && !classified(target, "lost-bogus"), 10_000);
 			check(rebuilt !== Infinity, `${label}: the harness still rebuilds the tag (lease reads ${JSON.stringify(read(lease).trim())}, harness ${child.pid})`);
 			try { process.kill(child.pid ?? 0, "SIGTERM"); } catch { /* gone */ }

@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/**
- * #137 — the harness already writes the parent link; read it.
- */
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,15 +21,6 @@ function assert(label: string, ok: boolean, detail?: string) {
 
 const root = trackSandbox(fs.mkdtempSync(path.join(os.tmpdir(), "wtft-137-")));
 
-/** Write a transcript plus (optionally) its sibling meta, as the harness lays them out.
- *
- *  `wroteMeta` records what actually landed on disk. WHY (local audit round):
- *  every negative case below expects `null`, which is ALSO the answer when no
- *  meta exists — so a helper that silently stopped writing left them green while
- *  testing nothing. Measured: making the string-payload branch write no file left
- *  M4 ("unparseable JSON") and M6 ("a bare `null` document") both passing with no
- *  malformed file anywhere on disk. They were asserting the ABSENT case while
- *  claiming the MALFORMED one. `fixtureWrote` is the precondition that closes it. */
 const wroteMeta = new Map<string, string>();
 
 function subagent(name: string, meta: unknown | null): string {
@@ -83,11 +70,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
 }
 
-// M2 — `model` absent, which is a real and recurring shape on this host. It is
-// uncommon but routine — frequent enough that any caller will meet it, and the
-// issue's Closer asked for `model` as though it were always there. The meta is
-// still valid; `model` is undefined and the caller needs an arm for it. A null
-// here is a gap, not a zero.
 {
 	const t = subagent("no-model-child", {
 		agentType: "Explore", description: "sweep the corpus",
@@ -100,10 +82,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M2 the rest is intact", m?.description === "sweep the corpus", JSON.stringify(m));
 }
 
-// M3 — no `.meta.json` at all. Pi children and shell-spawned children have none,
-// and that is not a failure: it is the ordinary case for everything #137 does
-// not cover. The caller must be able to tell "no meta" from "broken meta"
-// without a try/catch, so both are `null` and neither throws.
 {
 	const t = subagent("meta-less-child", null);
 	let threw = false;
@@ -124,14 +102,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M4 it returns null", m === null);
 }
 
-// M5 — a REQUIRED field missing, and the required set is TWO, not four.
-//
-// It was four until the local audit round. The census behind that globbed two
-// path segments then `subagents/`, so it never saw `subagents/workflows/wf_<id>/`
-// — the Dynamic Workflow children, which carry only `{agentType, spawnDepth}`.
-// 48 of 493 files on this host. Every one was declined WHOLE, and `null` is
-// defined for consumers as "this harness wrote no record", so the report claimed
-// an absence that was not there while two usable fields sat on disk.
 {
 	const full = {
 		agentType: "general-purpose", description: "d",
@@ -152,15 +122,13 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 		const t = subagent(`optional-${missing}`, partial);
 		fixtureWrote(`M5b ${missing}`, t);
 		const m = readSubagentMeta(t);
-		assert(`M5b a meta with no \`${missing}\` still PARSES — it is absent on 48 of 493 real files`,
+		assert(`M5b a meta with no \`${missing}\` still PARSES`,
 			m !== null, `got null for ${JSON.stringify(partial)}`);
 		assert(`M5b and the field it does not have is \`undefined\`, not invented`,
 			m !== null && (m as Record<string, unknown>)[missing] === undefined);
 	}
 }
 
-// M5c — the exact shape the workflow children carry, and the count that made it
-// worth changing the guard for.
 {
 	const t = subagent("workflow-child", { agentType: "workflow-subagent", spawnDepth: 1 });
 	fixtureWrote("M5c", t);
@@ -192,10 +160,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M6 a JSON array is declined by the Array.isArray guard, before any field check",
 		readSubagentMeta(t2) === null);
 
-	// The dead `const t3 = subagent("null-meta-child", null as never); void t3;`
-	// is gone: `null` in the helper means WRITE NO META, so it built a meta-less
-	// transcript nothing read and then discarded it, while reading as though the
-	// bare-null case were covered twice.
 	const tNull = subagent("literal-null-child", "null");
 	fixtureWrote("M6 bare null", tNull);
 	assert("M6 a bare `null` document is declined", readSubagentMeta(tNull) === null);
@@ -217,8 +181,6 @@ function corpusFiles(): string[] {
 //
 // Two halves, each honest about its subject:
 {
-	// TWO, not four — see M5. `description` and `toolUseId` are near-universal
-	// (445/493 on this host) and absent on every Dynamic Workflow child.
 	const REQUIRED = ["agentType", "spawnDepth"];
 	const NEAR_UNIVERSAL = ["description", "toolUseId"];
 
@@ -257,17 +219,6 @@ function corpusFiles(): string[] {
 	// output rather than ours. It is host-gated, so it SKIPS VISIBLY where there
 	// is none (CI has no `~/.claude`): a check that silently passed having read
 	// nothing is the coverage claim this repo's skip contract exists to refuse.
-	// NEWEST by mtime, over a RECURSIVE walk. The first version took
-	// `metas[0]` from the first session that had any — `readdir` order, no
-	// mtime — and the local audit measured it selecting a file from
-	// 2026-09-15 out of a corpus running to today. A rename shipped in the
-	// current release leaves 400+ old files on disk, so an arbitrary sample
-	// keeps passing while every label in the report goes blank. That is the
-	// same defect M7a was split off for, one level up.
-	//
-	// Recursive also matters: the flat `<session>/subagents` walk could never
-	// draw a `subagents/workflows/wf_<id>/` child, which is the shape M5c is
-	// about.
 	const real = (() => {
 		const base = path.join(os.homedir(), ".claude", "projects");
 		let best: { file: string; mtime: number } | null = null;
@@ -305,11 +256,8 @@ function corpusFiles(): string[] {
 					k in obj,
 					`${realFile} has keys ${JSON.stringify(Object.keys(obj))} — the harness renamed or dropped \`${k}\`, and every label in the report just went blank`);
 			}
-			// NOT asserted as required: a workflow child legitimately has neither,
-			// and this picker can now draw one. Reported so a rename of the pair
-			// is still VISIBLE in the output rather than silently tolerated.
 			const carried = NEAR_UNIVERSAL.filter(k => k in (obj as Record<string, unknown>));
-			assert(`M7b and it carries ${carried.length} of the 2 near-universal names (${JSON.stringify(carried)}) — 0 is legitimate only for a workflow child (agentType=${JSON.stringify((obj as Record<string, unknown>).agentType)})`,
+			assert(`M7b and it carries ${carried.length} of the 2 near-universal names (${JSON.stringify(carried)})`,
 				carried.length === 2 || (obj as Record<string, unknown>).agentType === "workflow-subagent",
 				`${realFile} keys ${JSON.stringify(Object.keys(obj))}`);
 			// And end to end: the reader accepts the harness's OWN file, not just
@@ -334,7 +282,7 @@ function corpusFiles(): string[] {
 	// Runs on every host, CI included, which M7b cannot.
 	const corpus = corpusFiles();
 	const OPTIONAL_CARRIED = ["description", "toolUseId", "model", "parentAgentId", "isFork"];
-	const CORPUS = ["agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a1a9b0bea81408e23", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
+	const CORPUS = ["agent-a0000000000000532", "agent-a12b520b52dfc5d2a", "agent-a170388e12a7fa3bc", "agent-a1a9b0bea81408e23", "agent-a20ea0d14166e9999", "agent-a9b6ca6692517846a",
 		"agent-ab7a653fd7de39292", "agent-ace7ef5933e128a87", "agent-aed7cbd64d6f241d1"].map(b => `${b}.meta.json`);
 	assert(`M7c the committed corpus is the files CORPUS lists`,
 		JSON.stringify(corpus.map(f => path.basename(f))) === JSON.stringify(CORPUS),
@@ -343,13 +291,13 @@ function corpusFiles(): string[] {
 	// ignores, so a rename brought in by a refresh fails here rather than
 	// leaving a field silently unread.
 	const CARRIED = [...REQUIRED, ...OPTIONAL_CARRIED];
-	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd", "effort"];
+	const IGNORED = ["requestShape", "requestNonInteractive", "name", "cwd", "effort", "finished"];
 	for (const file of corpus) {
 		let keys: string[] = [];
 		try { keys = Object.keys(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* M7c parse check owns it */ }
 		const unknown = keys.filter(k => !CARRIED.includes(k) && !IGNORED.includes(k));
 		assert(`M7c ${path.basename(file)} has no key the reader neither carries nor knowingly ignores`,
-			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — carry it in parseSubagentMeta or add it to IGNORED`);
+			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — add it to OPTIONAL_CARRIED and read it in parseSubagentMeta, or add it to IGNORED`);
 	}
 	for (const file of corpus) {
 		const name = path.basename(file);
@@ -374,19 +322,6 @@ function corpusFiles(): string[] {
 	}
 }
 
-// M8 — `parentAgentId`, which is the finding the issue did not have.
-//
-// It appeared on exactly the files with `spawnDepth > 1` — 25 of 439 here, 0
-// mismatches either way, and all 25 resolving to a sibling `agent-*.jsonl`. So a
-// subagent's parent is a RECORD at every depth, not only at the top: strictly
-// more than #116's ledger reconstructs for this class of child, and already on
-// disk.
-//
-// THAT CORRELATION IS THE HARNESS'S BEHAVIOUR, NOT OURS, and the assertions
-// below do not pin it — they pin that the READER carries the field when it is
-// there and leaves it undefined when it is not. Pinning the correlation would
-// mean failing the build when a future release starts writing `parentAgentId` at
-// depth 1, which would be reporting a correct change as a defect.
 {
 	const t = subagent("deep-child", {
 		agentType: "general-purpose", description: "a subagent's subagent",
@@ -412,10 +347,6 @@ function corpusFiles(): string[] {
 // and never wired to anything, which is the failure mode that left this file
 // unread for the whole life of the project: it was on disk, it parsed, and no
 // code path asked for it.
-//
-// SCOPE. This suite covers the `--json` half only. The render half — showing
-// the description in place of `agent-<hash>` in #116's SPAWNED block — is #137,
-// still open; see docs/spec-137-subagent-meta.md for why the split stands.
 
 console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 
@@ -456,17 +387,6 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 	fs.writeFileSync(bareChild, turn("msg_child_2"));
 
 	// Pre-populate the tag, so this reaches the REPORT path.
-	//
-	// WHY (local audit round). R1 is labelled THE CLOSER and it was landing on
-	// the `no-data` arm: `total.costUsd` 0, `models` [], one `no-data` notice.
-	// So R1's subagent rows were asserted against a document that counted
-	// nothing, and R1 would have kept passing if the daemon had stopped
-	// producing tags altogether.
-	//
-	// This tag carries `msg_parent_1` ONLY — the parent's turn. Neither child's
-	// turn is in it, so `total.costUsd > 0` below proves the REPORT path and
-	// nothing about a child's cost reaching `total`. A populated tag also
-	// avoids the no-data arm (exit 1), which would abort the suite.
 	const classified = (id: string, tsMs: number) => JSON.stringify({
 		t: tsMs, c: 0.0123, cat: "code", f: [], cmd: [],
 		id, m: "claude-sonnet-4-6", in: 1200, out: 90,

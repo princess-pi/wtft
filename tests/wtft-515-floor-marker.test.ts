@@ -19,17 +19,17 @@ const compaction = JSON.stringify({ type: "system", subtype: "compact_boundary",
 const recap = JSON.stringify({ type: "system", subtype: "away_summary", timestamp: "2026-10-14T12:02:00.000Z" }) + "\n";
 
 class FakeIo implements UncountedLatchIo {
-	files = new Map<string, string>();
+	files = new Map<string, string | Buffer>();
 	bytesRead = 0;
 	size(p: string): number | null {
 		const c = this.files.get(p);
-		return c === undefined ? null : Buffer.byteLength(c);
+		return c === undefined ? null : Buffer.from(c).length;
 	}
-	readFrom(p: string, offset: number): string | null {
+	readFrom(p: string, offset: number): Buffer | null {
 		const c = this.files.get(p);
 		if (c === undefined) return null;
-		const out = Buffer.from(c).subarray(offset).toString("utf8");
-		this.bytesRead += Buffer.byteLength(out);
+		const out = Buffer.from(c).subarray(offset);
+		this.bytesRead += out.length;
 		return out;
 	}
 }
@@ -62,6 +62,24 @@ describe("createUncountedLatch", () => {
 		assert.strictEqual(latch.seen(["/s/a.jsonl"]), false);
 		io.files.set("/s/a.jsonl", turn("m1") + compaction);
 		assert.strictEqual(latch.seen(["/s/a.jsonl"]), true);
+	});
+
+	it("keeps its place when a read ends inside a multi-byte character", () => {
+		const io = new FakeIo();
+		const wide = JSON.stringify({ type: "system", subtype: "compact_boundary", content: "café ☕ naïve" }) + "\n";
+		const cut = Buffer.byteLength(turn("m1")) + Buffer.from(wide).indexOf(Buffer.from("☕")) + 1;
+		const whole = Buffer.from(turn("m1") + wide);
+		io.files.set("/s/a.jsonl", whole.subarray(0, cut));
+		const latch = createUncountedLatch(io);
+		assert.strictEqual(latch.seen(["/s/a.jsonl"]), false);
+		io.files.set("/s/a.jsonl", whole);
+		assert.strictEqual(latch.seen(["/s/a.jsonl"]), true);
+	});
+
+	it("sees a Pi compaction entry", () => {
+		const io = new FakeIo();
+		io.files.set("/s/pi.jsonl", JSON.stringify({ type: "compaction", tokensBefore: 120000 }) + "\n");
+		assert.strictEqual(createUncountedLatch(io).seen(["/s/pi.jsonl"]), true);
 	});
 
 	it("rereads a file that shrank below its offset", () => {

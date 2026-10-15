@@ -4,7 +4,12 @@ Issue: https://github.com/princess-pi/wtft/issues/515.
 Status: **Spec Approved** (Duppy, 2026-10-14: "I like that as a solution so we definitely want to implement that", on the `≥` form).
 
 Module: `extensions/lib/uncounted-latch.ts` · Seam: `createUncountedLatch`, tested in `tests/wtft-515-floor-marker.test.ts`
-Also: `extensions/lib/wtft-chart.ts`: prints the marker. `extensions/lib/wtft-renderer.ts` and `extensions/lib/chart-call.ts`: pass the `floor` flag through. `extensions/lib/wtft-daemon-lib.ts` (`--watch`) and `extensions/wtft.ts` (the Pi widget): ask the latch. `extensions/lib/cli/report.ts`: the one-shot report reuses its existing `scanSessionUncounted`, which `--tokens` and `--json` already read.
+Also: `extensions/lib/wtft-chart.ts` — prints the marker.
+Also: `extensions/lib/wtft-renderer.ts` — passes `floor` to the chart.
+Also: `extensions/lib/chart-call.ts` — passes `floor` to the renderer.
+Also: `extensions/lib/wtft-daemon-lib.ts` — `--watch` asks the latch.
+Also: `extensions/wtft.ts` — the Pi widget asks the latch.
+Also: `extensions/lib/cli/report.ts` — the one-shot report reuses its `scanSessionUncounted`, which `--tokens` and `--json` already read, so a `--tokens` run reads the transcripts once.
 
 ## 1. Problem
 
@@ -15,19 +20,20 @@ says in one glyph that it is a floor.
 
 ## 2. The marker
 
-- **When:** the session file, or any subagent transcript under it, holds at least one entry that
-  `readUncountedBillableClass` classifies (a compaction or a recap).
-- **Where:** the total-cost column of the newest displayed row: `≥$218`. Only that cell changes. Older
-  rows, the bar, the token columns and `--json` do not. With the cost columns hidden there is no marker.
-- **Surfaces:** the CLI chart, `--watch` and the Pi widget. The `--tokens` summary already prints the
-  `UNCOUNTED` line, so it gets no marker.
+- **When:** a transcript the surface reads for this session holds an entry that
+  `readUncountedBillableClass` classifies: a compaction or a recap.
+- **Where:** the total-cost cell of the newest displayed row, in either mode and under either unit:
+  `≥$218`. The other rows' totals carry no `≥`; the column is one cell wider for it. The marker is
+  absent whenever the cost columns are not shown, and from `--json`.
+- **Surfaces:** the CLI chart (including the chart a `--tokens` run prints above its summary),
+  `--watch` and the Pi widget.
 
 ## 3. The latch
 
 ```ts
 export interface UncountedLatchIo {
-  size(path: string): number | null;                 // null: could not stat
-  readFrom(path: string, offset: number): string | null; // bytes from offset to end; null: could not read
+  size(path: string): number | null;                     // null: could not stat
+  readFrom(path: string, offset: number): Buffer | null; // bytes from offset; null: could not read
 }
 export interface UncountedLatch {
   seen(paths: Iterable<string>): boolean;
@@ -35,20 +41,19 @@ export interface UncountedLatch {
 export function createUncountedLatch(io?: UncountedLatchIo): UncountedLatch;
 ```
 
-- **Latched:** once `seen` returns true it returns true from then on, reading nothing. A compaction
-  that happened stays happened.
-- **Incremental:** for each path it reads only the bytes past the offset it reached last time. A trailing
-  line with no newline is kept and finished on the next read. A file smaller than its offset is read
-  again from 0.
-- **A failed stat or read** counts as nothing seen for that path this call.
-- The default `io` is `node:fs`. `--watch` and the widget call `seen` on every render, so an 80 MB
-  transcript is parsed once, not once per frame.
+- **Latched:** once `seen` returns true it returns true from then on, reading nothing. The Pi widget
+  starts a new latch when its session file changes.
+- **Incremental:** each call reads only the bytes past where the last call stopped, and parses only
+  complete lines. A file smaller than that point is read again from the start.
+- The default `io` is `node:fs`. `--watch` and the widget call `seen` on every render, so a transcript
+  is parsed once, not once per frame.
 
 ## 4. Verification
 
 `tests/wtft-515-floor-marker.test.ts`:
-- **Latch:** a fake io holding a `compact_boundary` line is seen; one holding only assistant turns is
-  not; an appended recap is seen on the next call after reading only the new bytes; a split line is
-  seen once its second half arrives; after a true, no further reads happen.
-- **Chart:** `chartLines` with `floor: true` puts `≥` before the newest row's total cost and nowhere
-  else; with `floor` absent the output has no `≥`.
+- **Latch:** a Claude Code compaction, a recap and a Pi compaction are each seen; plain turns are not;
+  appended bytes are the only bytes read again; a line split across reads, including inside a
+  multi-byte character, is seen once complete; a shrunken file is read again; a missing file is
+  nothing seen; after a true, nothing is read.
+- **Chart:** with `floor` the newest row's total cost reads `≥$…` and no other row does; without it no
+  line holds `≥`.

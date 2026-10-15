@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { projectsDir } from "../extensions/lib/harness/claude-code/discovery.js";
 import { tagRecords, parseTagLine, lastOffset, isDataRecord } from "../extensions/lib/tag-log.js";
-import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder, takeRebuildOwed } from "../extensions/lib/lease.js";
+import { claimLease, claimLeaseForChild, unlinkLeaseIf, replaceLease as publishLease, leaseHolder, takeRebuildOwed, rebuildIsOwed } from "../extensions/lib/lease.js";
 import { classifyPid, decideUnleased, holdsLease, isDaemonCmdline, pidAlive, processTable, stopHolderSync, type DaemonProc } from "../extensions/lib/holder.js";
 import { leasePid } from "../extensions/lib/lease.js";
 import { daemonStdio, daemonLogPath, reapLogPath, rotateDaemonLog, DAEMON_LOG_MAX_BYTES } from "../extensions/lib/daemon-log.js";
@@ -708,9 +708,10 @@ function scheduleFlush(key: string) {
 function wake(file: string, displayed: boolean) {
   const key = path.resolve(file);
   let slot = get(registry, key);
-  // A `rebuild` lease (wtft -F) is adopted afresh, which honours it. Any other
-  // lease that is not ours drops the session in serviceSession, as --stop means.
-  if (slot && slot.pidPath && leaseHolder(slot.pidPath) === "rebuild") {
+  // A `rebuild` lease (wtft -F), or a rebuild owed on a lease handed back to
+  // us, is adopted afresh, which honours it. Any other lease that is not ours
+  // drops the session in serviceSession, as --stop means.
+  if (slot && slot.pidPath && (leaseHolder(slot.pidPath) === "rebuild" || rebuildIsOwed(slot.pidPath))) {
     displayed = displayed || slot.displayed;
     dropHarnessSlot(key);
     slot = undefined;
@@ -1241,7 +1242,7 @@ function sweepIdleSlots() {
       slot.checkedAtMs = now;
       let st: fs.Stats | null = null;
       try { st = fs.statSync(slot.state.sessionPath); } catch { /* gone, or not written yet */ }
-      if (!st || st.ino !== slot.state.sessionIno || st.size !== slot.state.lastSize || slot.state.pendingFragment.length > 0 || slot.state.sessionReadFailed) {
+      if (!st || st.ino !== slot.state.sessionIno || st.size !== slot.state.lastSize || slot.state.pendingFragment.length > 0 || slot.state.sessionReadFailed || (slot.pidPath !== "" && rebuildIsOwed(slot.pidPath))) {
         wake(key, slot.displayed);
         if (get(registry, key) !== slot) continue;
       }

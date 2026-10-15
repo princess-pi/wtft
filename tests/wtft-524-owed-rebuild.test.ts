@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * A rebuild token a lease claim takes off the lease is owed to whoever ends up
- * holding the lease, in any process (#524). Spec: docs/spec-259-daemon-correctness.md.
+ * holding the lease, in any process. Spec: docs/spec-259-daemon-correctness.md.
  */
 
 import * as fs from "node:fs";
@@ -175,6 +175,24 @@ try {
 			startDaemon(root, ["--harness", "claude", "--session", target], "second-harness.err");
 			const rebuilt = await until(() => classified(target, "h-target") && !classified(target, "h-target-bogus"), 10_000);
 			check(rebuilt !== Infinity, `a harness started after the first one stopped rebuilds the tag (lease ${JSON.stringify(read(lease).trim())})`);
+		}
+
+		console.log("\nA rebuild owed on a lease that came back to the harness serving it: the harness rebuilds");
+		{
+			const root = makeRoot("handed-back");
+			const target = path.join(root, "proj", "b-target.jsonl");
+			fs.mkdirSync(path.dirname(target), { recursive: true });
+			fs.writeFileSync(target, turnLine("b-target", Date.now()));
+			await servedWithBogusRow(root, target, "b-target", ["--harness", "claude", "--session", target]);
+			const harness = startDaemon(root, ["--harness", "claude", "--session", target], "harness.err");
+			const lease = getDaemonPidPath(target);
+			check(await until(() => read(lease).trim() === String(harness), 15_000) !== Infinity && classified(target, "b-target-bogus"),
+				"fixture precondition: the harness serves the session and holds its lease, the bogus row kept");
+			fs.writeFileSync(`${lease}.rebuild`, "");
+			const rebuilt = await until(() => classified(target, "b-target") && !classified(target, "b-target-bogus"), 10_000);
+			check(rebuilt !== Infinity, `the harness rebuilds the tag (lease ${JSON.stringify(read(lease).trim())})`);
+			process.kill(harness, "SIGTERM");
+			await until(() => !alive(harness), 5_000);
 		}
 
 		console.log("\nA harness that unlinks rebuild and dies: a per-session daemon that takes the lease rebuilds");

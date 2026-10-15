@@ -107,7 +107,7 @@ The item codes (A2, F14, …) are #256's. The decisions (A–R) are recorded in 
   rebuild owed beside the lease (`<lease>.rebuild`, `takeRebuildOwed` in `lease.ts`) before it
   links its own holder, so when another process wins the link, or the claimant stops first, the
   next daemon to take the lease rebuilds the tag: a harness, a restarted one, or a per-session
-  daemon. Any other lease that is not the harness's
+  daemon. A harness that is handed the lease back with a rebuild owed adopts the session afresh. Any other lease that is not the harness's
   drops the session, as `--stop` means.
 
 ### `wtft -F` (decision M)

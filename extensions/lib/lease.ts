@@ -129,7 +129,9 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 		const holder = leaseHolder(file);
 		if (holder === owner) return "claimed";
 		if (holder && holderIsLive(holder)) return "busy";
-		if (holder === "rebuild") fs.writeFileSync(owedPath(file), "");
+		if (holder === "rebuild") {
+			try { fs.writeFileSync(owedPath(file), ""); } catch { /* left unowed */ }
+		}
 		// An empty lease is a stale one too: `unlinkLeaseIf` matches "" on an empty file.
 		unlinkLeaseIf(file, holder);
 		try {
@@ -145,7 +147,7 @@ export function claimLease(file: string, owner: string, holderIsLive: (holder: s
 }
 
 /**
- * True once after a claim on `file` unlinked a `rebuild` token, whichever
+ * True once after a claim on `file` judged a `rebuild` token stale, whichever
  * process made that claim and whether it won the lease. A holder that takes the
  * lease calls this and rebuilds when it is true.
  */
@@ -153,10 +155,14 @@ export function takeRebuildOwed(file: string): boolean {
 	try {
 		fs.unlinkSync(owedPath(file));
 		return true;
-	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
-		throw err;
+	} catch {
+		return false;
 	}
+}
+
+/** Whether a rebuild is owed on `file`, without taking it. */
+export function rebuildIsOwed(file: string): boolean {
+	return fs.existsSync(owedPath(file));
 }
 
 function owedPath(file: string): string {

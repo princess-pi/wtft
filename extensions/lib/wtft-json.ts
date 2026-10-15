@@ -42,7 +42,7 @@ export interface WtftSessionJson {
 	/** SELF + resolved descendants. Over the six token and cost fields only
 	 *  (`untaggedCostUsd` is not carried). */
 	tree: TokenTotals;
-	/** `categories` over self plus every counted descendant's turns; sums to `tree`. */
+	/** `categories` over self plus every counted descendant's turns. */
 	treeCategories: CategoryTotals[];
 	/** Absent rather than empty whenever discovery could not give a complete
 	 *  answer, so `[]` always means "looked, found none". */

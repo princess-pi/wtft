@@ -62,6 +62,7 @@ function provisionalLines(): string[] {
 		lines.push(`\x1b[33m⚠ ${describeProvisionalReason(_tagProvisional.verdict, _tagProvisional.tagPath)} — total is provisional\x1b[0m`);
 	}
 	if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
+	if (_widgetTreeError) lines.push(`\x1b[33m⚠ spawn tree not walked (${_widgetTreeError}); charting this session's own turns\x1b[0m`);
 	return lines;
 }
 
@@ -184,16 +185,19 @@ function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | und
 function widgetTree(ctx: any, interactions: Interaction[]): TreeView {
 	const none: TreeView = { turns: [], files: [], live: [] };
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	_widgetTreeError = null;
 	if (_widgetSelf || !sessionFile) return none;
 	try {
 		return treeView(path.basename(sessionFile).replace(/\.jsonl$/i, ""),
 			() => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles));
-	} catch {
+	} catch (err) {
+		_widgetTreeError = err instanceof Error ? err.message : String(err);
 		return none;
 	}
 }
 
 let _widgetSelf = false;
+let _widgetTreeError: string | null = null;
 let uncountedLatch = createUncountedLatch();
 let uncountedSessionFile: string | undefined;
 

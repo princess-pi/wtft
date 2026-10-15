@@ -213,7 +213,7 @@ stay on #267.
 
 - The tag file format (`docs/wtft-tag-format.md`) and the tagger version. S1 changes no bytes.
 - The harness seam (`extensions/lib/harness/`), discovery, pricing, the renderer, `--json`.
-- The spawn ledger and `computeSpawnTree`'s interface. R3 (the walk re-parses descendants) is
+- The spawn ledger. R3 (the walk re-parses descendants) is
   left standing.
 
 ### 3d. Closer for the issue

@@ -37,8 +37,8 @@ lines" is the requirement, so the transcript's mtime is the measurement, not a p
   has been quiet for 122 s. Both take the number from `IDLE_THRESHOLD_MS`.
 - **Schema.** `spawned.edges[].live` is a new nested key, and the reason set widens, so
   `wtft/session@4` becomes `wtft/session@5` and `spawned`'s own `wtft/spawn-tree@1` becomes `@2`.
-- **Where it applies.** Only CLI runs that compute the spawn tree: `--tokens` and `--json`. A
-  plain `wtft` run does not set it. The Pi
+- **Where it applies.** Only `--tokens` and `--json` set it. A plain `wtft` run, which charts the
+  tree since spec-517, does not. The Pi
   widget's `/wtft --tokens` renders the tree but does not read `live`; that rendering is #198.
 
 ## Not in this change

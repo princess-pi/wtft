@@ -255,14 +255,15 @@ denominator is `--thinking-budget`, an input flag the document does not carry
 and which `--json` ignores outright when it is well-formed. A consumer gets `reasoningTokens` and
 supplies its own budget.
 
-`buildSessionJson` is otherwise a thin serialiser, with three departures, all
+`buildSessionJson` is otherwise a thin serialiser, with four departures, all
 deliberate: `uncounted` is a separate scan of the session files and is passed in;
 `spawned` is the ledger walk and is passed in; and `tree` is the one piece of
 arithmetic the function performs itself, `treeTotals(summary.total,
 input.spawned)` — an addition of `total` and `spawned.total`, each already
 computed, which is why it is not a fourth way of counting. `notices` is the only input with a
 default; `uncounted` and `spawned` are required-not-defaulted, so an empty one
-always means "looked, found none".
+always means "looked, found none". The fourth: `treeCategories` is a second
+`computeSessionSummary` call, over self plus the required `descendantTurns` (Amendment 8).
 
 ### Exit codes
 
@@ -595,8 +596,7 @@ means they are not. The marker is binary. It does not estimate how much is still
   already provisional for another reason. Exit 9, the stderr line, the field and the
   `provisional` notice, as for every other reason. The notice is now built in `emitSessionJson`, so
   the empty arms carry it too, for every reason; before `@5` only the populated arm did.
-- **Mode.** Only runs that compute the spawn tree can see a descendant: `--json` and `--tokens`.
-  A plain `wtft` run does not set it.
+- **Mode.** Only `--json` and `--tokens` set it. A plain `wtft` run does not.
 - **Two bumps.** `spawned` carries its own schema, so `wtft/spawn-tree@1` becomes `@2`, and the
   document becomes `wtft/session@5`.
 
@@ -647,6 +647,6 @@ total; the reported untagged cost can overlap `spawned.total`, as the field row 
 - **`treeCategories`** has the shape and order of `categories`, summed over this session's own
   turns plus every counted descendant's turns ([spec-517](spec-517-tree-default.md)). Each
   descendant turn is classified as a self turn is. `sum(treeCategories[].costUsd)` equals
-  `tree.costUsd` within float error.
+  `tree.costUsd` within float error when no two sessions share a message id.
 - No existing key changes meaning. `total` and `categories` stay self; `--self` has no effect on
   `--json`.

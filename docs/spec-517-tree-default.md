@@ -79,7 +79,8 @@ collect?: { turns: Interaction[]; files: string[] };
 ### 2.4 `--json`: `treeCategories`
 
 `treeCategories` has the same shape and order as `categories`, summed over self turns plus
-`collect.turns`. `sum(treeCategories[].costUsd)` equals `tree.costUsd` within float error. The
+`collect.turns`. `sum(treeCategories[].costUsd)` equals `tree.costUsd` within float error when no
+two sessions share a message id. The
 schema becomes `wtft/session@9`; no existing key changes meaning.
 
 ### 2.5 `--watch`: live children (#198)

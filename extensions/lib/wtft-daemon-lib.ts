@@ -926,10 +926,14 @@ export async function watchTagFile(
 
 	let tree: TreeView = { turns: [], files: [], live: [] };
 	let treeAt = -Infinity;
+	let treeError: string | null = null;
 	const refreshTree = () => {
 		if (!settings.tree || Date.now() - treeAt < TREE_REFRESH_MS) return;
 		treeAt = Date.now();
-		try { tree = settings.tree(); } catch { /* keep the last walk */ }
+		try { tree = settings.tree(); treeError = null; } catch (err) {
+			tree = { turns: [], files: [], live: [] };
+			treeError = err instanceof Error ? err.message : String(err);
+		}
 	};
 
 	const uncountedLatch = createUncountedLatch();
@@ -996,6 +1000,7 @@ export async function watchTagFile(
 
 			for (const l of lines) buf.push(l);
 			for (const l of renderLiveDescendants(tree.live)) buf.push(l);
+			if (treeError) buf.push(`\x1b[33m⚠ spawn tree not walked (${treeError}); charting this session's own turns\x1b[0m`);
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}

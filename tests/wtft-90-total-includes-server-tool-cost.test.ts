@@ -85,7 +85,7 @@ function cli(source: string, args: string[]): string {
 /** The chart's running total: the newest cumulative bin row, which is the
  *  rightmost number a reader's eye lands on. Rows are newest-first. */
 function chartTotal(session: string): number {
-	const out = cli(session, ["--interval", "1h", "--cumulative"]);
+	const out = cli(session, ["--interval", "1h", "--cumulative", "--self"]);
 	const row = out.split("\n").find(l => /^\s*\d\d:\d\d\s+\+\$/.test(l));
 	if (!row) throw new Error(`no cumulative bin row in:\n${out}`);
 	// "07:00  +$0.01  $0.25   ████" — the SECOND figure is the running total.

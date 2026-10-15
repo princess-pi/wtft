@@ -25,7 +25,7 @@ One flat card, USD per 1M tokens, from https://platform.claude.com/docs/en/about
 
 - **Cache reads are 0.05 × input,** not the usual 0.1 ×. The pricing page's footnote 2: "Cache
   hits and refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x the base input price."
-- **The 1h write** is derived as `2 × input` ($4.00), as for every Claude row.
+- **The 1h write** is $4.00 on the pricing page, which `calculateClaudeCost` derives as `2 × input`.
 - **`WTFT_TAGGER_VERSION` bumps** a minor version, so tags written at the fallback card re-parse.
 
 ## 3. Verification

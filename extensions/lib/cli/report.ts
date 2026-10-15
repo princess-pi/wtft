@@ -117,13 +117,11 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		return tree;
 	};
 
-	// The chart's tree walk: the full one when --tokens already needs it, else one without the
-	// unrecorded listing, and never a provisional verdict (spec-133 scopes that to --tokens and --json).
 	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
 	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
 		if (opts.self) return { turns: [], files: [] };
 		if (chartCollect) return chartCollect;
-		if (opts.tokens || opts.json) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
+		if (opts.tokens) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
 		const collect = { turns: [] as Interaction[], files: [] as string[] };
 		try {
 			computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });

@@ -215,25 +215,27 @@ console.log("\nPART I — a spawn walk that throws: a plain run warns and charts
 	check(plain.status === 0 && plain.stdout.includes(session), `I1 the plain run charts self and exits 0 (exit ${plain.status})`);
 	for (const args of [["--tokens"], ["--self", "--tokens"]]) {
 		const r = run(...args);
-		check(r.status !== 0 && r.status !== null && r.stdout === "",
-			`I2 ${args.join(" ")} exits non-zero with nothing on stdout (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
+		check(r.status !== 0 && r.status !== null && r.stdout === "" && /ENOTDIR/.test(r.stderr),
+			`I2 ${args.join(" ")} exits non-zero, nothing on stdout, stderr naming the walk's ENOTDIR (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
 	}
 }
 
 console.log("\nPART J — a descendant's subagent lines stay whole, as a tag keeps them");
 {
 	const ROOT = uuid(81), CHILD = uuid(82);
-	const childPath = putSession(CHILD, [turnLine("c", T0, 100)]);
+	const recache = (id: string, at: number) => JSON.parse(turnLine(id, at, 50, { cacheWrite: 50_000 }));
+	const whole = (ls: any[]) => ls.map(l => { l.message.usage.input_tokens = 10; return JSON.stringify(l) + "\n"; });
+	const childPath = putSession(CHILD, whole([recache("c1", T0), recache("c2", T0 + 500)]));
 	const subDir = path.join(childPath.replace(/\.jsonl$/, ""), "subagents");
 	fs.mkdirSync(subDir, { recursive: true });
-	const recache = (id: string, at: number) => JSON.parse(turnLine(id, at, 50, { cacheWrite: 50_000 }));
-	const lines = [recache("s1", T0 + 1_000), recache("s2", T0 + 2_000)].map(l => { l.message.usage.input_tokens = 10; return JSON.stringify(l) + "\n"; });
-	fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), lines.join(""));
+	fs.writeFileSync(path.join(subDir, "agent-a.jsonl"), whole([recache("s1", T0 + 1_000), recache("s2", T0 + 2_000)]).join(""));
 	const collect = { turns: [] as Interaction[], files: [] as string[] };
 	computeSpawnTree(ROOT, { ledgerPath: ledgerOf([[ROOT, CHILD]]), collect });
 	const sub = collect.turns.filter(t => t.timestamp >= T0 + 1_000);
 	check(collect.files.some(f => f.endsWith("agent-a.jsonl")), "J0 fixture precondition: the subagent transcript is read");
 	check(sub.length === 2 && sub.every(t => t.cacheWriteTokens === 50_000), `J1 both subagent turns stay whole (got ${sub.length} lines)`);
+	const own = collect.turns.filter(t => t.timestamp < T0 + 1_000);
+	check(own.length === 3, `J2 the recache in the descendant's own transcript splits into an Ovrhd line (got ${own.length} lines)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

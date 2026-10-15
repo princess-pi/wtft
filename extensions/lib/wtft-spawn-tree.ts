@@ -126,8 +126,7 @@ export interface SpawnTreeOptions {
 	now?: number;
 	/** Ask for `unrecorded`. A one-shot report's cost, not a per-poll one. */
 	unrecorded?: { turns: Interaction[]; rootCwd: string | null; rootFile?: string };
-	/** Receives every counted descendant's deduplicated turns, each less any
-	 *  fold share subtracted from its edge total, and every transcript read. */
+	/** Receives every counted descendant's turns and every transcript read. */
 	collect?: { turns: Interaction[]; files: string[] };
 }
 

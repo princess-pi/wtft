@@ -74,7 +74,7 @@ collect?: { turns: Interaction[]; files: string[] };
 - **Descendant turns are shaped as a tag stores them:** a recache or post-compaction cache write
   in the descendant's own transcript splits into an Ovrhd or Cmpct line, its subagent lines stay
   whole, and no descendant turn draws a Cache Miss divider.
-- **A tree walk that throws** fails `--tokens` and `--json` before anything is printed. A plain run,
+- **A tree walk that throws** fails `--tokens` and `--json` with a non-zero exit. A plain run,
   `--watch` and the Pi widget say so on one line and chart self.
 - **`--self` is not saved** to the wtft config, in the CLI or in Pi. In the Pi widget, `/wtft --self`
   draws self only, and any later `/wtft` call without it draws the tree again.
@@ -122,6 +122,8 @@ children's transcripts more often; a few seconds to a minute is the useful range
 - `parseWtftCliArgs(["--self"])` sets `self`.
 - `treeView` with a fresh child transcript lists it live and `renderLiveDescendants` names it;
   ten minutes quiet, the line is gone (#198).
+- A walk that throws: a plain run warns once and charts self; `--tokens` exits non-zero, naming the error.
+- A recache in a descendant's own transcript splits; one in its subagent transcript stays whole.
 
 Smoke, on a session with launcher children: `wtft`'s newest running total equals
 `--json` `.tree.costUsd` plus the untagged costs above, and `wtft --self` equals `.total.costUsd`

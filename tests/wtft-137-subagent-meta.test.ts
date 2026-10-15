@@ -70,11 +70,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M1 model", m?.model === "sonnet", JSON.stringify(m));
 }
 
-// M2 — `model` absent, which is a real and recurring shape on this host. It is
-// uncommon but routine — frequent enough that any caller will meet it, and the
-// issue's Closer asked for `model` as though it were always there. The meta is
-// still valid; `model` is undefined and the caller needs an arm for it. A null
-// here is a gap, not a zero.
 {
 	const t = subagent("no-model-child", {
 		agentType: "Explore", description: "sweep the corpus",
@@ -138,8 +133,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	}
 }
 
-// M5c — the exact shape the workflow children carry, and the count that made it
-// worth changing the guard for.
 {
 	const t = subagent("workflow-child", { agentType: "workflow-subagent", spawnDepth: 1 });
 	fixtureWrote("M5c", t);
@@ -171,10 +164,6 @@ console.log("\n§ M — readSubagentMeta, and every way it must decline\n");
 	assert("M6 a JSON array is declined by the Array.isArray guard, before any field check",
 		readSubagentMeta(t2) === null);
 
-	// The dead `const t3 = subagent("null-meta-child", null as never); void t3;`
-	// is gone: `null` in the helper means WRITE NO META, so it built a meta-less
-	// transcript nothing read and then discarded it, while reading as though the
-	// bare-null case were covered twice.
 	const tNull = subagent("literal-null-child", "null");
 	fixtureWrote("M6 bare null", tNull);
 	assert("M6 a bare `null` document is declined", readSubagentMeta(tNull) === null);
@@ -271,9 +260,6 @@ function corpusFiles(): string[] {
 					k in obj,
 					`${realFile} has keys ${JSON.stringify(Object.keys(obj))} — the harness renamed or dropped \`${k}\`, and every label in the report just went blank`);
 			}
-			// NOT asserted as required: a workflow child legitimately has neither,
-			// and this picker can now draw one. Reported so a rename of the pair
-			// is still VISIBLE in the output rather than silently tolerated.
 			const carried = NEAR_UNIVERSAL.filter(k => k in (obj as Record<string, unknown>));
 			assert(`M7b and it carries ${carried.length} of the 2 near-universal names (${JSON.stringify(carried)}) — 0 is legitimate only for a workflow child (agentType=${JSON.stringify((obj as Record<string, unknown>).agentType)})`,
 				carried.length === 2 || (obj as Record<string, unknown>).agentType === "workflow-subagent",
@@ -315,7 +301,7 @@ function corpusFiles(): string[] {
 		try { keys = Object.keys(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* M7c parse check owns it */ }
 		const unknown = keys.filter(k => !CARRIED.includes(k) && !IGNORED.includes(k));
 		assert(`M7c ${path.basename(file)} has no key the reader neither carries nor knowingly ignores`,
-			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — carry it in parseSubagentMeta or add it to IGNORED`);
+			unknown.length === 0, `unknown ${JSON.stringify(unknown)} — add it to OPTIONAL_CARRIED and read it in parseSubagentMeta, or add it to IGNORED`);
 	}
 	for (const file of corpus) {
 		const name = path.basename(file);
@@ -340,19 +326,6 @@ function corpusFiles(): string[] {
 	}
 }
 
-// M8 — `parentAgentId`, which is the finding the issue did not have.
-//
-// It appeared on exactly the files with `spawnDepth > 1` — 25 of 439 here, 0
-// mismatches either way, and all 25 resolving to a sibling `agent-*.jsonl`. So a
-// subagent's parent is a RECORD at every depth, not only at the top: strictly
-// more than #116's ledger reconstructs for this class of child, and already on
-// disk.
-//
-// THAT CORRELATION IS THE HARNESS'S BEHAVIOUR, NOT OURS, and the assertions
-// below do not pin it — they pin that the READER carries the field when it is
-// there and leaves it undefined when it is not. Pinning the correlation would
-// mean failing the build when a future release starts writing `parentAgentId` at
-// depth 1, which would be reporting a correct change as a defect.
 {
 	const t = subagent("deep-child", {
 		agentType: "general-purpose", description: "a subagent's subagent",
@@ -422,17 +395,6 @@ console.log("\n§ R — the Closer: `wtft --json` names its subagents\n");
 	fs.writeFileSync(bareChild, turn("msg_child_2"));
 
 	// Pre-populate the tag, so this reaches the REPORT path.
-	//
-	// WHY (local audit round). R1 is labelled THE CLOSER and it was landing on
-	// the `no-data` arm: `total.costUsd` 0, `models` [], one `no-data` notice.
-	// So R1's subagent rows were asserted against a document that counted
-	// nothing, and R1 would have kept passing if the daemon had stopped
-	// producing tags altogether.
-	//
-	// This tag carries `msg_parent_1` ONLY — the parent's turn. Neither child's
-	// turn is in it, so `total.costUsd > 0` below proves the REPORT path and
-	// nothing about a child's cost reaching `total`. A populated tag also
-	// avoids the no-data arm (exit 1), which would abort the suite.
 	const classified = (id: string, tsMs: number) => JSON.stringify({
 		t: tsMs, c: 0.0123, cat: "code", f: [], cmd: [],
 		id, m: "claude-sonnet-4-6", in: 1200, out: 90,

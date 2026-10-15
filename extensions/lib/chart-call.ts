@@ -78,6 +78,7 @@ export function chartLines(call: {
 	padRows?: boolean;
 	padRowsCap?: number;
 	live?: boolean;
+	floor?: boolean;
 }): string[] | null {
 	const { asked, fallback } = call;
 	const interval = asked.interval ?? fallback.interval ?? "1h";
@@ -101,5 +102,6 @@ export function chartLines(call: {
 		showCostColumns: asked.showCostColumns,
 		showTokenColumns: asked.showTokenColumns,
 		live: call.live,
+		floor: call.floor,
 	});
 }

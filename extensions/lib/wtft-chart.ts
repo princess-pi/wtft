@@ -129,7 +129,7 @@ export function wholeTokens(n: number): string {
 
 /** The four number columns' text at compaction step `compact` (0 to MAX_COMPACT); a cost column keeps
  *  its cents on every row when any of `bins` shows them there. */
-function columnTexts(compact: number, bins: Bin[], words?: ChartWords) {
+function columnTexts(compact: number, bins: Bin[], words?: ChartWords, floorBin?: Bin) {
 	const currency = words?.currency ?? "$";
 	const unit = words?.tokenUnit ?? { name: "tok", short: "t" };
 	const costColumn = (values: number[]) => {
@@ -148,7 +148,7 @@ function columnTexts(compact: number, bins: Bin[], words?: ChartWords) {
 			const text = `${plus(n)}${incCost(n)}`;
 			return compact >= 4 ? text.replace(currency, "") : text;
 		},
-		totalCost: (bin: Bin) => totalCost(totalCostOf(bin)),
+		totalCost: (bin: Bin) => `${bin === floorBin ? "≥" : ""}${totalCost(totalCostOf(bin))}`,
 		incTok: (bin: Bin) => {
 			const n = bin.incremental_tokens ?? 0;
 			return `${plus(n)}${tokens(n)}`;
@@ -177,6 +177,7 @@ export function renderWtftChart(input: {
 	padRowsTo?: number;
 	words?: ChartWords;
 	live?: boolean;
+	floor?: boolean;
 	newestAt?: number;
 }): string[] {
 	const {
@@ -221,7 +222,7 @@ export function renderWtftChart(input: {
 	// buildTickLine and buildTokenTickLine return null below 15 cells.
 	const minBar = 15;
 	const layoutFor = (cost: boolean, tokens: boolean, compact: number) => {
-		const texts = columnTexts(compact, displayedBins, words);
+		const texts = columnTexts(compact, displayedBins, words, input.floor ? displayedBins[0] : undefined);
 		const shown: ((bin: Bin) => string)[] = [];
 		if (cost) shown.push(texts.incCost, texts.totalCost);
 		if (tokens) shown.push(texts.incTok, texts.totalTok);

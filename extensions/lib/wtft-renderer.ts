@@ -809,6 +809,8 @@ export function buildWtftLines(
 		words?: ChartWords;
 		/** The view follows the session as it is written (the Pi widget, `--watch`). */
 		live?: boolean;
+		/** The newest running total is a floor: docs/spec-515-floor-marker.md. */
+		floor?: boolean;
 	}
 ): string[] | null {
 	const intervalStr = opts?.interval !== undefined ? opts.interval : defaultSettings.interval;
@@ -1003,6 +1005,7 @@ export function buildWtftLines(
 		padRowsTo: opts?.padRowsTo,
 		words: opts?.words,
 		live: opts?.live,
+		floor: opts?.floor,
 		newestAt: interactions.reduce((newest, i) => Math.max(newest, i.timestamp || 0), 0) || undefined,
 	});
 }

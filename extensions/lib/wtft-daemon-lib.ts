@@ -362,7 +362,6 @@ export function watcherAction(
 ): WatcherAction {
 	if (size < lastReadOffset) return "reseed";
 	if (prefixMatches === false) return "reseed";
-	// "Could not read" re-seeds. Idling here deadlocks the watch — see above.
 	if (prefixMatches === null) return "reseed";
 	if (size > lastReadOffset) return "read";
 	return "idle";

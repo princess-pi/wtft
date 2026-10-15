@@ -22,6 +22,9 @@ The pricing page's footnote 3 (https://platform.claude.com/docs/en/about-claude/
 launch as introductory pricing through August 31, 2026, is now the standard price. The previously
 scheduled increase to $3/$15 per million input/output tokens on September 1, 2026 will not occur."
 
+The same page's table row: "Claude Sonnet 5 | $2 / MTok | $2.50 / MTok | $4 / MTok | $0.20 / MTok |
+$10 / MTok" (input, 5m write, 1h write, cache hit, output).
+
 One flat card, USD per 1M tokens, no `dateTiers`:
 
 | Registry key | input (cache miss) | cacheRead | cacheWrite (5m) | output |

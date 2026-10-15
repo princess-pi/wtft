@@ -1244,9 +1244,7 @@ export interface SessionTotal extends TokenTotals {
 	/** The cost EXCLUDED from `costUsd` above because it belongs to an
 	 *  untagged interaction (`untaggedInteractions`) — the same per-interaction
 	 *  figures the bar chart bins for those turns: `i.cost` (the tag file's
-	 *  `c`) plus `i.serverToolCost` when present. So
-	 *  `costUsd + untaggedCostUsd` equals the chart's own running
-	 *  total within float accumulation error (docs/spec-26-json.md). */
+	 *  `c`) plus `i.serverToolCost` when present. */
 	untaggedCostUsd: number;
 }
 
@@ -1291,11 +1289,6 @@ function addInteraction(into: TokenTotals, i: Interaction): void {
  * and a category row names the same category the bars do.
  * Per model it goes to the model that made the request, which is the only model
  * that could have.
- * WHAT THIS FUNCTION COUNTS IS ONE SESSION'S OWN TURNS — "self". A
- * launcher-spawned descendant is a different session with a different
- * transcript, and nothing here reaches it; `computeSpawnTree` calls this
- * function once per descendant and the caller adds the two. So a caller after
- * "what did this branch of work cost" wants `tree`, not this.
  */
 export function computeSessionSummary(interactions: Interaction[]): SessionSummary {
 	const deduped = deduplicateInteractions(interactions);

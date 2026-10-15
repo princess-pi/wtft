@@ -120,6 +120,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// The chart's tree walk: the full one when --tokens already needs it, else one without the
 	// unrecorded listing, and never a provisional verdict (spec-133 scopes that to --tokens and --json).
 	let chartCollect: { turns: Interaction[]; files: string[] } | null = null;
+	let treeFailed = false;
 	const descendantTurns = (): { turns: Interaction[]; files: string[] } => {
 		if (opts.self) return { turns: [], files: [] };
 		if (chartCollect) return chartCollect;
@@ -131,8 +132,13 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		} catch (err) {
 			console.error(`\x1b[33m⚠ spawn tree not walked (${err instanceof Error ? err.message : String(err)}); charting this session's own turns\x1b[0m`);
 			chartCollect = { turns: [], files: [] };
+			treeFailed = true;
 		}
 		return chartCollect;
+	};
+	const tokensSpawnTree = (): SpawnTree | undefined => {
+		descendantTurns();
+		return treeFailed ? undefined : sessionSpawnTree();
 	};
 
 	// ---
@@ -340,7 +346,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// ---
 	if (opts.json) {
 		const notices: WtftNotice[] = [];
-		for (const m of collectUnpricedModels(interactions)) {
+		for (const m of collectUnpricedModels([...interactions, ...(sessionSpawnTree(), collected.get(false)!.turns)])) {
 			notices.push({ code: "unpriced-model", text: unpricedModelWarning(m) });
 			console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 		}
@@ -388,7 +394,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	if (opts.tokens) {
 		const subagents = collectSubagentJson();
 		for (const n of subagents?.notices ?? []) warnNotice(n);
-		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), sessionSpawnTree(), subagents?.block);
+		const tokenOutput = renderTokenSummary(interactions, Math.min(paddedWidth, 1023), opts.thinkingBudget, scanSessionUncounted(), tokensSpawnTree(), subagents?.block);
 		for (const line of tokenOutput.split("\n")) {
 			console.log(padStr + line);
 		}
@@ -397,7 +403,7 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 	// ---
 	// UNPRICED-MODEL WARNING — re-derived from tag model ids (costs live in the daemon).
 	// ---
-	for (const m of collectUnpricedModels(interactions)) {
+	for (const m of collectUnpricedModels(chartInteractions)) {
 		console.error(`\x1b[33m⚠ ${unpricedModelWarning(m)}\x1b[0m`);
 	}
 

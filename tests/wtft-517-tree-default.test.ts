@@ -15,7 +15,9 @@ import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtf
 import { buildSessionJson } from "../extensions/lib/wtft-json.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { newUncountedBillables } from "../extensions/lib/wtft-parser.ts";
+import { spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
+import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 
 isolateTmpdir("517-tree-default");
 
@@ -185,6 +187,31 @@ console.log("\nPART H — a spawner's label and mechanism cannot write to the te
 	const [line] = renderLiveDescendants([{ child: uuid(61), label: "ok\n$0.00 forged\x1b]0;x\x07", mechanism: "m\x1b[2J", costUsd: 1 }]);
 	check(!line.includes("\n") && !line.includes("\x1b]") && !line.includes("\x1b[2J") && line.includes("\uFFFD"),
 		`H1 control characters become U+FFFD (got ${JSON.stringify(line)})`);
+}
+
+console.log("\nPART I — a spawn walk that throws under --tokens warns once and still prints the token table");
+{
+	const { WTFT_TAGGER_VERSION } = await import("../bin/wtft.mjs");
+	const ROOT = uuid(71);
+	const state = path.join(dir, "state-i");
+	fs.mkdirSync(path.join(state, "wtft"), { recursive: true });
+	fs.copyFileSync(ledgerOf([[ROOT, uuid(72)]]), path.join(state, "wtft", "spawns.jsonl"));
+	const notADir = path.join(dir, "projects-is-a-file");
+	fs.writeFileSync(notADir, "");
+	const parentDir = path.join(dir, "parent-i");
+	fs.mkdirSync(path.join(parentDir, "wtft-tags"), { recursive: true });
+	const session = path.join(parentDir, `${ROOT}.jsonl`);
+	fs.writeFileSync(session, turnLine("r", T0, 100));
+	fs.writeFileSync(path.join(parentDir, "wtft-tags", `${ROOT}.jsonl.wtft-tag.v${WTFT_TAGGER_VERSION}.jsonl`),
+		JSON.stringify({ t: T0, c: 0.25, cat: "code", f: [], cmd: [], id: "msg-r", m: "claude-sonnet-4-6", in: 100, out: 50, cr: 0, cw: 0, rs: 0 })
+		+ "\n" + JSON.stringify({ _meta: { swept: Date.now() } }) + "\n");
+	const r = spawnSync(process.execPath, [cliWithoutDaemon(), "-s", session, "--tokens"], {
+		cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), ".."), encoding: "utf8", timeout: 60_000,
+		stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_CLAUDE_PROJECTS_DIR: notADir },
+	});
+	const warnings = (r.stderr.match(/spawn tree not walked/g) ?? []).length;
+	check(warnings === 1, `I1 the failed walk warns exactly once (got ${warnings}; stderr ${JSON.stringify(r.stderr.slice(0, 400))})`);
+	check(r.status === 0 && /\$0\.25/.test(r.stdout), `I2 the run exits 0 and the token table prints self's $0.25 (exit ${r.status})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

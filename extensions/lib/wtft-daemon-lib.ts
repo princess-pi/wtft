@@ -997,7 +997,7 @@ export async function watchTagFile(
 
 		const buf: string[] = [];
 		buf.push(`\x1b[90m${sessionPath}\x1b[0m`);
-		totalCost = deduped.reduce((sum, i) => sum + i.cost, 0);
+		totalCost = deduplicateInteractions(deduped).reduce((sum, i) => sum + i.cost + (i.serverToolCost || 0), 0);
 
 		if (lines && lines.length > 0) {
 			const daemonStatusStr = daemonStatus

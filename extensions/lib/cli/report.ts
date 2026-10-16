@@ -123,13 +123,8 @@ export async function runReport(opts: WtftCliOptions, finalSessionPath: string, 
 		if (chartCollect) return chartCollect;
 		if (opts.tokens) { sessionSpawnTree(); chartCollect = collected.get(false)!; return chartCollect; }
 		const collect = { turns: [] as Interaction[], files: [] as string[] };
-		try {
-			computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });
-			chartCollect = collect;
-		} catch (err) {
-			console.error(`\x1b[33m⚠ spawn tree not walked (${err instanceof Error ? err.message : String(err)}); charting this session's own turns\x1b[0m`);
-			chartCollect = { turns: [], files: [] };
-		}
+		computeSpawnTree(path.basename(finalSessionPath).replace(/\.jsonl$/i, ""), { alreadyAttributed: folded, collect });
+		chartCollect = collect;
 		return chartCollect;
 	};
 

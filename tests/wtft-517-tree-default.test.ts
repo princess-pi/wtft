@@ -11,7 +11,7 @@ import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtf
 import { buildSessionJson } from "../extensions/lib/wtft-json.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { newUncountedBillables } from "../extensions/lib/wtft-parser.ts";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 
@@ -185,7 +185,7 @@ console.log("\nPART H — a spawner's label and mechanism cannot write to the te
 		`H1 control characters become U+FFFD (got ${JSON.stringify(line)})`);
 }
 
-console.log("\nPART I — a spawn walk that throws: a plain run warns and charts self; --tokens fails before printing");
+console.log("\nPART I — a spawn walk that throws fails every surface");
 {
 	const { WTFT_TAGGER_VERSION } = await import("../bin/wtft.mjs");
 	const ROOT = uuid(71);
@@ -205,14 +205,65 @@ console.log("\nPART I — a spawn walk that throws: a plain run warns and charts
 		cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), ".."), encoding: "utf8", timeout: 60_000,
 		stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_DAEMON_DEBUG: "", WTFT_CLAUDE_PROJECTS_DIR: notADir },
 	});
-	const plain = run();
-	const warnings = (plain.stderr.match(/spawn tree not walked/g) ?? []).length;
-	check(warnings === 1, `I0 fixture precondition: the walk fails, and a plain run warns once (got ${warnings})`);
-	check(plain.status === 0 && plain.stdout.includes(session), `I1 the plain run charts self and exits 0 (exit ${plain.status})`);
-	for (const args of [["--tokens"], ["--self", "--tokens"]]) {
+	const self = run("--self");
+	check(self.status === 0 && self.stdout.includes(session), `I0 fixture precondition: --self, which walks nothing, charts and exits 0 (exit ${self.status})`);
+	for (const args of [[], ["--tokens"], ["--self", "--tokens"]]) {
 		const r = run(...args);
 		check(r.status !== 0 && r.status !== null && r.stdout === "" && /ENOTDIR/.test(r.stderr),
-			`I2 ${args.join(" ")} exits non-zero, nothing on stdout, stderr naming the walk's ENOTDIR (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
+			`I1 ${args.join(" ") || "a plain run"} exits non-zero, nothing on stdout, stderr naming the walk's ENOTDIR (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
+	}
+
+	const CHART = /\$0\.25/;
+	const watch = (...args: string[]) => new Promise<{ status: number | null; out: string }>((resolve) => {
+		const child = spawn("script", ["-q", "-e", "-c", `${process.execPath} ${cliWithoutDaemon()} --watch -s '${session}' -l 1 ${args.join(" ")}`, "/dev/null"], {
+			stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_CLAUDE_PROJECTS_DIR: notADir },
+		});
+		let out = "";
+		let quit = false;
+		const read = (d: Buffer) => {
+			out += d.toString();
+			if (!quit && CHART.test(out)) { quit = true; child.stdin.end("q"); }
+		};
+		child.stdout.on("data", read);
+		child.stderr.on("data", read);
+		child.stdin.on("error", () => {});
+		const kill = setTimeout(() => child.kill(), 20_000);
+		child.on("close", (status) => { clearTimeout(kill); resolve({ status, out }); });
+	});
+	const control = await watch("--self");
+	check(control.status === 0 && CHART.test(control.out),
+		`I2 fixture precondition: --watch --self, which walks nothing, draws the chart's $0.25 (exit ${control.status})`);
+	const watched = await watch();
+	const watchOut = watched.out;
+	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !CHART.test(watchOut) && !/watch stopped/.test(watchOut),
+		`I2 --watch exits non-zero naming the walk's ENOTDIR and draws no chart (exit ${watched.status}): ${JSON.stringify(watchOut.slice(-300))}`);
+	check(watchOut.lastIndexOf("\x1b[?25h") > watchOut.lastIndexOf("\x1b[?25l"), "I3 --watch shows the cursor again before it exits");
+
+	const saved = { projects: process.env.WTFT_CLAUDE_PROJECTS_DIR, state: process.env.XDG_STATE_HOME };
+	process.env.WTFT_CLAUDE_PROJECTS_DIR = notADir;
+	process.env.XDG_STATE_HOME = state;
+	const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
+	const pi: any = {
+		on: () => {},
+		registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
+		registerFlag: () => {},
+		getFlag: () => undefined,
+	};
+	const widget: (string[] | undefined)[] = [];
+	const ctx: any = {
+		ui: { setWidget: (_id: string, lines: string[] | undefined) => { widget.push(lines); }, notify: () => {}, custom: async () => {} },
+		sessionManager: { getSessionFile: () => session, buildSessionContext: () => ({}) },
+	};
+	(await import("../extensions/wtft.ts")).default(pi);
+	await commands.wtft!.handler("", ctx);
+	const panel = widget[widget.length - 1] ?? [];
+	check(panel.length === 1 && /spawn tree not walked/.test(panel[0]!) && /ENOTDIR/.test(panel[0]!),
+		`I4 the widget's panel shows the walk's error and no chart: ${JSON.stringify(panel)}`);
+	let tokensThrew = false;
+	try { await commands.wtft!.handler("--tokens", ctx); } catch (err) { tokensThrew = /ENOTDIR/.test(String(err)); }
+	check(tokensThrew, "I5 /wtft --tokens throws the walk's error to Pi");
+	for (const [k, v] of [["WTFT_CLAUDE_PROJECTS_DIR", saved.projects], ["XDG_STATE_HOME", saved.state]] as const) {
+		if (v === undefined) delete process.env[k]; else process.env[k] = v;
 	}
 }
 

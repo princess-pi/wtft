@@ -76,6 +76,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 - `docs/spec-<issue>-*.md` — the spec behind each numbered change. One whose header says
   "Superseded by" is a change record, not current behaviour. One whose feature reaches more than one
   surface (plain run, `--tokens`/`--json`, `--watch`, the Pi widget) says what each does when the
-  feature's work fails, one line per surface, before its first review: it fails, or it degrades,
-  saying what it shows instead and naming the harm a failure would cause (`docs/MRD.md` § Error
+  feature's work fails, one line per surface, before its first review: it fails (non-zero exit, the
+  OS's message), or it degrades, saying what it shows instead, how the user learns, and the harm a
+  failure would cause (`docs/MRD.md` § Error
   handling).

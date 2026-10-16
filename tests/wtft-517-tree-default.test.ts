@@ -218,8 +218,8 @@ console.log("\nPART I — a spawn walk that throws fails every surface");
 		encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"], env: watchEnv,
 	});
 	const watchOut = (watched.stdout ?? "") + (watched.stderr ?? "");
-	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !/watch stopped/.test(watchOut),
-		`I2 --watch exits non-zero naming the walk's ENOTDIR (exit ${watched.status}, signal ${watched.signal}): ${JSON.stringify(watchOut.slice(-300))}`);
+	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !/watch stopped/.test(watchOut) && !watchOut.includes(session),
+		`I2 --watch exits non-zero naming the walk's ENOTDIR, no chart (exit ${watched.status}, signal ${watched.signal}): ${JSON.stringify(watchOut.slice(-300))}`);
 	check(watchOut.lastIndexOf("\x1b[?25h") > watchOut.lastIndexOf("\x1b[?25l"), "I3 --watch shows the cursor again before it exits");
 
 	const saved = { projects: process.env.WTFT_CLAUDE_PROJECTS_DIR, state: process.env.XDG_STATE_HOME };
@@ -245,8 +245,9 @@ console.log("\nPART I — a spawn walk that throws fails every surface");
 	let tokensThrew = false;
 	try { await commands.wtft!.handler("--tokens", ctx); } catch (err) { tokensThrew = /ENOTDIR/.test(String(err)); }
 	check(tokensThrew, "I5 /wtft --tokens throws the walk's error to Pi");
-	process.env.WTFT_CLAUDE_PROJECTS_DIR = saved.projects;
-	process.env.XDG_STATE_HOME = saved.state;
+	for (const [k, v] of [["WTFT_CLAUDE_PROJECTS_DIR", saved.projects], ["XDG_STATE_HOME", saved.state]] as const) {
+		if (v === undefined) delete process.env[k]; else process.env[k] = v;
+	}
 }
 
 console.log("\nPART J — a descendant's subagent lines stay whole, as a tag keeps them");

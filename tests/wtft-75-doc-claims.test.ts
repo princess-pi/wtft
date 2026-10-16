@@ -189,5 +189,18 @@ console.log("\n6. CLAUDE.md names real seams");
 	}
 }
 
+// ---
+// 7. CLAUDE.md's Read first names the MRD, and every file it names exists.
+// ---
+console.log("\n7. CLAUDE.md's Read first names real files");
+{
+	const section = read("CLAUDE.md").split("## Read first")[1]?.split("\n## ")[0] ?? "";
+	check(section !== "", "CLAUDE.md has the Read first section");
+	check(section.includes("`docs/MRD.md`"), "Read first names docs/MRD.md");
+	const paths = [...section.matchAll(/`([\w./-]+\.md)`/g)].map(m => m[1]);
+	for (const p of paths) check(fs.existsSync(path.join(REPO, p)), `${p} exists`);
+	check(fs.existsSync(path.join(REPO, ".pr-review/context.md")), ".pr-review/context.md exists");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

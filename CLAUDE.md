@@ -66,6 +66,9 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 
 ## Read first
 
+- `docs/MRD.md` — who wtft is for, and so how much error handling a requirement gets: an error
+  the OS already reports is not caught, wrapped or retried unless the requirement names the harm.
+  A byte-identical copy of princess-pi-tools' file; edit that one first.
 - `CONTEXT.md` — vocabulary, including the two-register rule: "log parser daemon" to explain,
   "daemon" to refer.
 - `docs/spec-<module>.md` with a `Module:` line — the live spec for that file in `extensions/lib/`;

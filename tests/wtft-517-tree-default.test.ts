@@ -213,18 +213,23 @@ console.log("\nPART I — a spawn walk that throws fails every surface");
 			`I1 ${args.join(" ") || "a plain run"} exits non-zero, nothing on stdout, stderr naming the walk's ENOTDIR (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
 	}
 
+	const CHART = /\$0\.25/;
 	const watch = (...args: string[]) => new Promise<{ status: number | null; out: string }>((resolve) => {
 		const child = spawn("script", ["-q", "-e", "-c", `${process.execPath} ${cliWithoutDaemon()} --watch -s '${session}' -l 1 ${args.join(" ")}`, "/dev/null"], {
 			stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_CLAUDE_PROJECTS_DIR: notADir },
 		});
 		let out = "";
-		child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-		child.stderr.on("data", (d: Buffer) => { out += d.toString(); });
-		const quit = setTimeout(() => child.stdin.write("q"), 3000);
+		let quit = false;
+		const read = (d: Buffer) => {
+			out += d.toString();
+			if (!quit && CHART.test(out)) { quit = true; child.stdin.end("q"); }
+		};
+		child.stdout.on("data", read);
+		child.stderr.on("data", read);
+		child.stdin.on("error", () => {});
 		const kill = setTimeout(() => child.kill(), 20_000);
-		child.on("exit", (status) => { clearTimeout(quit); clearTimeout(kill); resolve({ status, out }); });
+		child.on("close", (status) => { clearTimeout(kill); resolve({ status, out }); });
 	});
-	const CHART = /\$0\.25/;
 	const control = await watch("--self");
 	check(control.status === 0 && CHART.test(control.out),
 		`I2 fixture precondition: --watch --self, which walks nothing, draws the chart's $0.25 (exit ${control.status})`);

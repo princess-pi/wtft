@@ -192,6 +192,7 @@ console.log("\n7. CLAUDE.md's Read first names real files");
 	check(section.includes("`docs/MRD.md`"), "Read first names docs/MRD.md");
 	const paths = [...section.matchAll(/`([\w./-]+\.md)`/g)].map(m => m[1]);
 	for (const p of paths) check(fs.existsSync(path.join(REPO, p)), `${p} exists`);
+	check(/one line per surface/.test(section), "Read first asks a multi-surface spec for one failure line per surface");
 	const context = read(".pr-review/context.md");
 	check(/error the OS already surfaces/.test(context), ".pr-review/context.md carries the OS-error rule");
 	check(/refuses, never passes/.test(context), ".pr-review/context.md carries the guard rule");

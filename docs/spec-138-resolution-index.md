@@ -37,7 +37,7 @@ under both spellings is one node in the walk, counted once.
 order: the index when the harness has the method, else that harness's `resolveSessionById`,
 asked per id. The first harness that knows an id wins, which is the order `resolveSessionFile`
 already uses. Answers are memoised for the walk. **An index that throws, or is not a `Map`,
-fails the walk** — the error leaves `computeSpawnTree`, and every surface fails with it
+fails the walk** — the error leaves `computeSpawnTree`, and each surface reports it as
 (`docs/spec-517-tree-default.md`). A harness with no
 index method is asked per id, and a throw there costs only that harness's answer for that id; the
 next harness is asked. Each built-in's `indexSessionsById` reads its root directly: ENOENT is an

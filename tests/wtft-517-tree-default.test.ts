@@ -11,7 +11,7 @@ import { SPAWN_RECORD_SCHEMA, serializeSpawnRecord } from "../extensions/lib/wtf
 import { buildSessionJson } from "../extensions/lib/wtft-json.ts";
 import { parseWtftCliArgs } from "../extensions/lib/wtft-cli-shared.ts";
 import { newUncountedBillables } from "../extensions/lib/wtft-parser.ts";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { trackSandbox, isolateTmpdir } from "./lib/sandbox";
 import { cliWithoutDaemon } from "./lib/cli-harness.ts";
 
@@ -213,13 +213,25 @@ console.log("\nPART I — a spawn walk that throws fails every surface");
 			`I1 ${args.join(" ") || "a plain run"} exits non-zero, nothing on stdout, stderr naming the walk's ENOTDIR (exit ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 120))})`);
 	}
 
-	const watchEnv = { ...process.env, XDG_STATE_HOME: state, WTFT_CLAUDE_PROJECTS_DIR: notADir };
-	const watched = spawnSync("script", ["-q", "-e", "-c", `${process.execPath} ${cliWithoutDaemon()} --watch -s '${session}' -l 1`, "/dev/null"], {
-		encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"], env: watchEnv,
+	const watch = (...args: string[]) => new Promise<{ status: number | null; out: string }>((resolve) => {
+		const child = spawn("script", ["-q", "-e", "-c", `${process.execPath} ${cliWithoutDaemon()} --watch -s '${session}' -l 1 ${args.join(" ")}`, "/dev/null"], {
+			stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, XDG_STATE_HOME: state, WTFT_CLAUDE_PROJECTS_DIR: notADir },
+		});
+		let out = "";
+		child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+		child.stderr.on("data", (d: Buffer) => { out += d.toString(); });
+		const quit = setTimeout(() => child.stdin.write("q"), 3000);
+		const kill = setTimeout(() => child.kill(), 20_000);
+		child.on("exit", (status) => { clearTimeout(quit); clearTimeout(kill); resolve({ status, out }); });
 	});
-	const watchOut = (watched.stdout ?? "") + (watched.stderr ?? "");
-	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !/watch stopped/.test(watchOut),
-		`I2 --watch exits non-zero naming the walk's ENOTDIR (exit ${watched.status}, signal ${watched.signal}): ${JSON.stringify(watchOut.slice(-300))}`);
+	const CHART = /\$0\.25/;
+	const control = await watch("--self");
+	check(control.status === 0 && CHART.test(control.out),
+		`I2 fixture precondition: --watch --self, which walks nothing, draws the chart's $0.25 (exit ${control.status})`);
+	const watched = await watch();
+	const watchOut = watched.out;
+	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !CHART.test(watchOut) && !/watch stopped/.test(watchOut),
+		`I2 --watch exits non-zero naming the walk's ENOTDIR and draws no chart (exit ${watched.status}): ${JSON.stringify(watchOut.slice(-300))}`);
 	check(watchOut.lastIndexOf("\x1b[?25h") > watchOut.lastIndexOf("\x1b[?25l"), "I3 --watch shows the cursor again before it exits");
 
 	const saved = { projects: process.env.WTFT_CLAUDE_PROJECTS_DIR, state: process.env.XDG_STATE_HOME };

@@ -77,7 +77,10 @@ async function scenario(n: number, name: string, sAt: number, aAt: number, lateM
 	if (lateMs === null) writeSubagent();
 	const tagger = tagForCli(session);
 	if (lateMs !== null) {
-		check(readTagFileWithVerdict(tagger.tagPath).folded.has(F), "fixture precondition: before the subagent transcript exists, F is tagged as S's child");
+		const before = readTagFileWithVerdict(tagger.tagPath);
+		check(before.folded.has(F) && before.interactions.find(i => i.messageId === `msg-237-f${n}`)?.outputTokens === F_OUT,
+			"fixture precondition: before the subagent transcript exists, F's own turn is tagged as S's child",
+			JSON.stringify(before.interactions.map(i => [i.messageId, i.outputTokens])));
 		tagger.advance(lateMs);
 		writeSubagent();
 	}

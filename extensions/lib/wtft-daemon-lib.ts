@@ -840,6 +840,8 @@ export async function watchTagFile(
 	let interactionCount = 0;
 	let needsRedraw = true;
 	let daemonWatchdog: ReturnType<typeof setTimeout> | null = null;
+	let watcher: fs.FSWatcher | null = null;
+	let rearmTimer: ReturnType<typeof setInterval> | null = null;
 	const HEALTHY_BEAT_MS = 1334; // 2 × 667ms daemon poll cycle
 	const resetWatchdog = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
@@ -857,23 +859,26 @@ export async function watchTagFile(
 	let lastFrame: RepaintFrame | null = null;
 	let lastBuffer: string[] = [];
 
-	const exitWatch = () => {
+	const exitWatch = (error?: unknown) => {
 		if (watcher) watcher.close();
 		if (rearmTimer) clearInterval(rearmTimer);
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
 		process.stdout.write(eraseFrame(lastFrame));
 		showCursor();
 		cleanupStdin();
-		if (lastBuffer.length > 0) {
+		const code = error === undefined ? 0 : 1;
+		if (error !== undefined) {
+			console.error(`✗ spawn tree not walked: ${error instanceof Error ? error.message : String(error)}`);
+		} else {
 			for (const l of lastBuffer) console.log(l);
+			console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
 		}
-		console.log(`WTFT watch stopped \u2014 ${interactionCount} interactions, $${totalCost.toFixed(4)} total cost.`);
 		// A restart already stopped the old daemon; exiting now would leave none.
-		if (pendingRestart) void pendingRestart.finally(() => process.exit(0));
-		else process.exit(0);
+		if (pendingRestart) void pendingRestart.finally(() => process.exit(code));
+		else process.exit(code);
 	};
 
-	process.on("SIGINT", exitWatch);
+	process.on("SIGINT", () => exitWatch());
 
 	let daemonDead = false;
 	let daemonStatus: DaemonStatus | null = null;
@@ -942,14 +947,10 @@ export async function watchTagFile(
 
 	let tree: TreeView = { turns: [], files: [], live: [] };
 	let treeAt = -Infinity;
-	let treeError: string | null = null;
 	const refreshTree = () => {
 		if (!settings.tree || Date.now() - treeAt < TREE_REFRESH_MS) return;
 		treeAt = Date.now();
-		try { tree = settings.tree(tagPath); treeError = null; } catch (err) {
-			tree = { turns: [], files: [], live: [] };
-			treeError = err instanceof Error ? err.message : String(err);
-		}
+		tree = settings.tree(tagPath);
 	};
 
 	const uncountedLatch = createUncountedLatch();
@@ -972,7 +973,7 @@ export async function watchTagFile(
 		const paddedWidth = width - 2 * actualPad;
 		const finalWidth = Math.min(paddedWidth, 1023);
 
-		refreshTree();
+		try { refreshTree(); } catch (err) { exitWatch(err); return; }
 		const deduped = [...dedupeClassifiedById(allInteractions), ...tree.turns];
 		interactionCount = deduped.length;
 
@@ -1016,7 +1017,6 @@ export async function watchTagFile(
 
 			for (const l of lines) buf.push(l);
 			for (const l of renderLiveDescendants(tree.live)) buf.push(l);
-			if (treeError) buf.push(`\x1b[33m⚠ spawn tree not walked (${treeError}); charting this session's own turns\x1b[0m`);
 		} else {
 			buf.push(`\x1b[90m${waitingForDataLine(sessionPath)}\x1b[0m`);
 		}
@@ -1050,10 +1050,8 @@ export async function watchTagFile(
 		resetWatchdog();
 	});
 
-	let watcher: fs.FSWatcher | null = null;
 	let watchedIno = 0;
 	let watchLost = false;
-	let rearmTimer: ReturnType<typeof setInterval> | null = null;
 
 	const startWatching = (ino: number) => {
 		watchedIno = ino;

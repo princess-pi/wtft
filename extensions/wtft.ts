@@ -61,7 +61,6 @@ function provisionalLines(): string[] {
 		lines.push(`\x1b[33m⚠ ${describeProvisionalReason(_tagProvisional.verdict, _tagProvisional.tagPath)} — total is provisional\x1b[0m`);
 	}
 	if (_subagentUnreadable) lines.push(PROVISIONAL_LINE);
-	if (_widgetTreeError) lines.push(`\x1b[33m⚠ spawn tree not walked (${_widgetTreeError}): this view shows the session's own turns only\x1b[0m`);
 	return lines;
 }
 
@@ -162,39 +161,25 @@ function getSettings(_ctx: any) {
 // ---
 
 function widgetSpawnTree(ctx: any, interactions: Interaction[]): SpawnTree | undefined {
-	_widgetTreeError = null;
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
 	if (!sessionFile) return undefined;
-	try {
-		// The same double-count guard the CLI passes: `readInteractions` merges
-		// every subagent session into SELF, so a spawner that also records one
-		// as a ledger edge would bill it in TOTAL and again in SPAWNED.
-		return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
-			alreadyAttributed: () => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles),
-		});
-	} catch (err) {
-		_widgetTreeError = err instanceof Error ? err.message : String(err);
-		return undefined;
-	}
+	// The same double-count guard the CLI passes: `readInteractions` merges
+	// every subagent session into SELF, so a spawner that also records one
+	// as a ledger edge would bill it in TOTAL and again in SPAWNED.
+	return computeSpawnTree(path.basename(sessionFile).replace(/\.jsonl$/i, ""), {
+		alreadyAttributed: () => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles),
+	});
 }
 
-/** The widget's tree turns; empty under `/wtft --self`. A refresh must not take the panel down. */
+/** The widget's tree turns; empty under `/wtft --self`. Throws what the walk throws. */
 function widgetTree(ctx: any, interactions: Interaction[]): TreeView {
-	const none: TreeView = { turns: [], files: [], live: [] };
 	const sessionFile = ctx.sessionManager.getSessionFile?.();
-	_widgetTreeError = null;
-	if (_widgetSelf || !sessionFile) return none;
-	try {
-		return treeView(path.basename(sessionFile).replace(/\.jsonl$/i, ""),
-			() => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles));
-	} catch (err) {
-		_widgetTreeError = err instanceof Error ? err.message : String(err);
-		return none;
-	}
+	if (_widgetSelf || !sessionFile) return { turns: [], files: [], live: [] };
+	return treeView(path.basename(sessionFile).replace(/\.jsonl$/i, ""),
+		() => collectSelfAttributedSessionIds(_tagFolded, interactions, _subagentFiles));
 }
 
 let _widgetSelf = false;
-let _widgetTreeError: string | null = null;
 let uncountedLatch = createUncountedLatch();
 let uncountedSessionFile: string | undefined;
 
@@ -315,7 +300,14 @@ function updateWtftWidget(
 	const width = getTerminalWidth(true, false);
 	// Read once: fitWidget may render several times. The read sets what provisionalLines reports.
 	const interactions = readInteractions(ctx);
-	const tree = widgetTree(ctx, interactions);
+	let tree: TreeView;
+	try {
+		tree = widgetTree(ctx, interactions);
+	} catch (err) {
+		// The 60-second refresh timer calls this; a throw there is uncaught in Pi's own process.
+		ctx.ui.setWidget("wtft", [`\x1b[31m✗ spawn tree not walked: ${err instanceof Error ? err.message : String(err)}\x1b[0m`], { placement: "belowEditor" });
+		return;
+	}
 	const tail = provisionalLines();
 	const lines = fitWidget(
 		(limit) => widgetChart(ctx, pi, { ...buildOpts, limit }, interactions, tree),

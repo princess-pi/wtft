@@ -54,7 +54,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 | Pricing manifest | `bun run manifest` |
 | Install on this host | `bin/install-wtft` · `--check` for drift (exit codes in README) |
 | PR cost record | `bun run pr-cost --write-pr` in the branch's worktree, just before `pr-offer-merge` (`docs/spec-277-pr-cost.md`) |
-| After every merge | `pr-cleanup <branch>` → `git pull --ff-only` → `bin/install-wtft`, from the main clone. The install stops any daemon on an older build (restarting per-session ones; a harness returns on the next wtft) and says so |
+| After every merge | `pr-merge` has run `pr-cleanup` and fast-forwarded main; then `bin/install-wtft` from the main clone. The install stops any daemon on an older build (restarting per-session ones; a harness returns on the next wtft) and says so |
 
 ## Shape
 

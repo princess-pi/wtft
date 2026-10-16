@@ -75,11 +75,12 @@ collect?: { turns: Interaction[]; files: string[] };
   whole, and no descendant turn draws a Cache Miss divider.
 - **A tree walk that throws** fails every surface; none charts self in its place (`docs/MRD.md`,
   § Error handling):
-  - **a plain run, `--tokens`, `--json`:** a non-zero exit, the error on stderr, nothing on stdout.
+  - **a plain run, `--tokens`, `--json`:** a non-zero exit, the error on stderr, no chart.
   - **`--watch`:** restores the terminal, prints the error on stderr and exits non-zero.
   - **the Pi widget's panel:** shows the error on one line and no chart. Its 60-second refresh
     runs in Pi's own process, where a throw would take the session down.
-  - **Pi's `/wtft --tokens` and `/wtft --other`:** the throw reaches Pi, which reports it.
+  - **Pi's `/wtft` commands that print text** (`--tokens`, `--other`, the pager): the throw
+    reaches Pi, which reports it.
 - **`--self` is not saved** to the wtft config, in the CLI or in Pi. In the Pi widget, `/wtft --self`
   draws self only, and any later `/wtft` call without it draws the tree again.
 

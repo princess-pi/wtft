@@ -1133,7 +1133,7 @@ export async function watchTagFile(
 	const child = settings.daemonChild ?? null;
 	const NO_HANDLE_CEILING_MS = 5000;
 	// Leave the terminal sane before an error exit: drop the in-place render,
-	// restore the cursor and cooked stdin. (exitWatch() would exit 0 — wrong here.)
+	// restore the cursor and cooked stdin.
 	const teardownForError = () => {
 		if (daemonWatchdog) clearTimeout(daemonWatchdog);
 		process.stdout.write(eraseFrame(lastFrame));

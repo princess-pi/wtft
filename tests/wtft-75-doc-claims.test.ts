@@ -32,7 +32,7 @@ console.log("\n1. README wtft examples name real flags");
 	for (const m of parser.matchAll(/arg\.startsWith\("(--[\w-]+)="\)/g)) accepted.add(m[1]);
 	check(accepted.size > 20, `parser exposes a flag set to compare against (${accepted.size} literals)`);
 
-	// `wtft spawn-record` is a POSITIONAL SUBCOMMAND with its own parser (#116),
+	// `wtft spawn-record` is a POSITIONAL SUBCOMMAND with its own parser,
 	// and its flags are deliberately NOT in `parseWtftCliArgs` — the report path
 	// must never accept them. So the example lines are routed to the parser that
 	// actually handles them. Unioning the two sets instead would let a report
@@ -51,10 +51,6 @@ console.log("\n1. README wtft examples name real flags");
 	const named: string[] = [];
 	const subcommandNamed: string[] = [];
 	for (const block of blocks) {
-		// Shell line continuations first: a `\`-terminated line carries flags
-		// onto the next physical line, and splitting on "\n" left every one of
-		// them unchecked. The README's first multi-line example arrived with
-		// #116, so this had been vacuously true until then.
 		const joined = block.replace(/\\\n\s*/g, " ");
 		for (const line of joined.split("\n")) {
 			const t = line.trim();
@@ -162,7 +158,7 @@ console.log("\n4. README install-wtft exit codes match the script");
 }
 
 // ---
-// 5. adding-a-harness.md pins the native-cost / server-tool-cost rule (#118).
+// 5. adding-a-harness.md pins the native-cost / server-tool-cost rule.
 // ---
 console.log("\n5. adding-a-harness.md states the native-cost/server-tool-cost rule");
 {
@@ -174,7 +170,7 @@ console.log("\n5. adding-a-harness.md states the native-cost/server-tool-cost ru
 }
 
 // ---
-// 6. CLAUDE.md's seams name files that exist and functions they export (#280).
+// 6. CLAUDE.md's seams name files that exist and functions they export.
 // ---
 console.log("\n6. CLAUDE.md names real seams");
 {
@@ -190,7 +186,7 @@ console.log("\n6. CLAUDE.md names real seams");
 }
 
 // ---
-// 7. CLAUDE.md's Read first names the MRD, and every file it names exists.
+// 7. CLAUDE.md's Read first names the MRD and real files; the lens context carries the OS-error rule.
 // ---
 console.log("\n7. CLAUDE.md's Read first names real files");
 {
@@ -199,7 +195,7 @@ console.log("\n7. CLAUDE.md's Read first names real files");
 	check(section.includes("`docs/MRD.md`"), "Read first names docs/MRD.md");
 	const paths = [...section.matchAll(/`([\w./-]+\.md)`/g)].map(m => m[1]);
 	for (const p of paths) check(fs.existsSync(path.join(REPO, p)), `${p} exists`);
-	check(fs.existsSync(path.join(REPO, ".pr-review/context.md")), ".pr-review/context.md exists");
+	check(/error the OS already surfaces/.test(read(".pr-review/context.md")), ".pr-review/context.md carries the OS-error rule");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

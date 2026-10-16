@@ -73,9 +73,6 @@ console.log("\n1. README wtft examples name real flags");
 	check(unknownSub.length === 0, "every README spawn-record flag is accepted by runSpawnRecordCommand",
 		unknownSub.length ? `not in subcommand parser: ${unknownSub.join(", ")}` : undefined);
 
-	// The closer names the manifest too: it is what `--help` and `--why` render
-	// from, so a README example naming a flag the manifest omits documents
-	// something `--help` would deny. Flags are found in the manifest's strings.
 	const manifest = read("docs/manifests/wtft-cmd.json");
 	const inManifest = new Set([...manifest.matchAll(/(?<![\w-])(-{1,2}[A-Za-z][\w-]*)/g)].map(m => m[1]));
 	const undocumented = [...named, ...subcommandNamed].filter(f => !inManifest.has(f));
@@ -186,7 +183,7 @@ console.log("\n6. CLAUDE.md names real seams");
 }
 
 // ---
-// 7. CLAUDE.md's Read first names the MRD and real files; the lens context carries the OS-error rule.
+// 7. CLAUDE.md's Read first names the MRD and real files; the lens context carries its rules.
 // ---
 console.log("\n7. CLAUDE.md's Read first names real files");
 {
@@ -195,7 +192,10 @@ console.log("\n7. CLAUDE.md's Read first names real files");
 	check(section.includes("`docs/MRD.md`"), "Read first names docs/MRD.md");
 	const paths = [...section.matchAll(/`([\w./-]+\.md)`/g)].map(m => m[1]);
 	for (const p of paths) check(fs.existsSync(path.join(REPO, p)), `${p} exists`);
-	check(/error the OS already surfaces/.test(read(".pr-review/context.md")), ".pr-review/context.md carries the OS-error rule");
+	const context = read(".pr-review/context.md");
+	check(/error the OS already surfaces/.test(context), ".pr-review/context.md carries the OS-error rule");
+	check(/refuses, never passes/.test(context), ".pr-review/context.md carries the guard rule");
+	check(/graded Low at most/.test(context), ".pr-review/context.md carries the grade-Low rule");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

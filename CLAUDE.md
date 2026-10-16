@@ -16,8 +16,8 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
   test fails on any other import.
 - **The README is tested.** `tests/wtft-75-doc-claims.test.ts` checks README flags against the
   parser and the manifest, and `install-wtft` exit codes against the script, so a README edit can
-  fail the suite. It pins `CONTEXT.md`, `docs/adding-a-harness.md` and this file's seam list and
-  Read first files, and `.pr-review/context.md`, too, so an edit there can fail it as well.
+  fail the suite. It pins other docs too, this file and `.pr-review/context.md` among them, so an edit
+  there can fail it as well.
 - **Shared code goes in `@princess-pi/libs`**, never copied in.
 - **Spec-reconcile does not treat comments as spec.** Reconcile: manifests,
   `--help`, README flags/exit codes, JSON schema, tag-format, `CONTEXT.md`,

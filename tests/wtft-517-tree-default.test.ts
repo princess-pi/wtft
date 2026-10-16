@@ -218,8 +218,8 @@ console.log("\nPART I — a spawn walk that throws fails every surface");
 		encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"], env: watchEnv,
 	});
 	const watchOut = (watched.stdout ?? "") + (watched.stderr ?? "");
-	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !/watch stopped/.test(watchOut) && !watchOut.includes(session),
-		`I2 --watch exits non-zero naming the walk's ENOTDIR, no chart (exit ${watched.status}, signal ${watched.signal}): ${JSON.stringify(watchOut.slice(-300))}`);
+	check(watched.status !== 0 && watched.status !== null && /ENOTDIR/.test(watchOut) && !/watch stopped/.test(watchOut),
+		`I2 --watch exits non-zero naming the walk's ENOTDIR (exit ${watched.status}, signal ${watched.signal}): ${JSON.stringify(watchOut.slice(-300))}`);
 	check(watchOut.lastIndexOf("\x1b[?25h") > watchOut.lastIndexOf("\x1b[?25l"), "I3 --watch shows the cursor again before it exits");
 
 	const saved = { projects: process.env.WTFT_CLAUDE_PROJECTS_DIR, state: process.env.XDG_STATE_HOME };

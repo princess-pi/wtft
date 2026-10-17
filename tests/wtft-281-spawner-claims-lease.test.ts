@@ -198,7 +198,8 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 	const newStart = events.find(e => e.pid !== old.pid && e.e === "start");
 	check(oldExit !== undefined, "C4 the old daemon exited");
 	check(newStart !== undefined && oldExit !== undefined && newStart.t >= oldExit.t, "C4 the new daemon started only after the old one exited");
-	check(newStart !== undefined && leaseNow === String(newStart.pid), "C4 the lease names the new daemon when restartDaemon returns");
+	let leaseAfter = ""; try { leaseAfter = fs.readFileSync(lease, "utf8").trim(); } catch { /* no lease */ }
+	check(newStart !== undefined && leaseNow === String(newStart.pid), `C4 the lease names the new daemon when restartDaemon returns (read ${JSON.stringify(leaseNow)}, then ${JSON.stringify(leaseAfter)}; old ${old.pid}, new ${newStart?.pid}; events ${JSON.stringify(events)})`);
 	if (newStart) try { process.kill(newStart.pid, "SIGKILL"); } catch {}
 }
 

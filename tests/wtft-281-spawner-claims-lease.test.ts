@@ -111,7 +111,8 @@ console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");
 	fs.writeFileSync(path.join(standIn, "wtft-daemon.mjs"),
 		"import * as fs from 'node:fs';\n" +
 		"let seen = ''; try { seen = fs.readFileSync(process.env.WTFT281_LEASE, 'utf8'); } catch {}\n" +
-		"fs.writeFileSync(process.env.WTFT281_OUT, JSON.stringify({ seen, pid: process.pid }));\n" +
+		"fs.writeFileSync(process.env.WTFT281_OUT + '.part', JSON.stringify({ seen, pid: process.pid }));\n" +
+		"fs.renameSync(process.env.WTFT281_OUT + '.part', process.env.WTFT281_OUT);\n" +
 		"setTimeout(() => {}, 3000);\n");
 	const session = path.join(dir, "c2-session.jsonl");
 	fs.writeFileSync(session, "");

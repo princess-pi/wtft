@@ -111,7 +111,8 @@ console.log("\nC2. spawnWtftDaemon claims the lease before the child runs");
 	fs.writeFileSync(path.join(standIn, "wtft-daemon.mjs"),
 		"import * as fs from 'node:fs';\n" +
 		"let seen = ''; try { seen = fs.readFileSync(process.env.WTFT281_LEASE, 'utf8'); } catch {}\n" +
-		"fs.writeFileSync(process.env.WTFT281_OUT, JSON.stringify({ seen, pid: process.pid }));\n" +
+		"fs.writeFileSync(process.env.WTFT281_OUT + '.part', JSON.stringify({ seen, pid: process.pid }));\n" +
+		"fs.renameSync(process.env.WTFT281_OUT + '.part', process.env.WTFT281_OUT);\n" +
 		"setTimeout(() => {}, 3000);\n");
 	const session = path.join(dir, "c2-session.jsonl");
 	fs.writeFileSync(session, "");
@@ -198,7 +199,7 @@ console.log("\nC4. restartDaemon waits for the old per-session daemon, then spaw
 	const newStart = events.find(e => e.pid !== old.pid && e.e === "start");
 	check(oldExit !== undefined, "C4 the old daemon exited");
 	check(newStart !== undefined && oldExit !== undefined && newStart.t >= oldExit.t, "C4 the new daemon started only after the old one exited");
-	check(newStart !== undefined && leaseNow === String(newStart.pid), "C4 the lease names the new daemon when restartDaemon returns");
+	check(newStart !== undefined && leaseNow === String(newStart.pid), `C4 the lease names the new daemon when restartDaemon returns (read ${JSON.stringify(leaseNow)}; old ${old.pid}, new ${newStart?.pid}; events ${JSON.stringify(events)})`);
 	if (newStart) try { process.kill(newStart.pid, "SIGKILL"); } catch {}
 }
 

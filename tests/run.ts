@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { collectSkips, renderSkipSummary } from "./lib/skips.ts";
 import { reapFixtureDaemons } from "./lib/reap-fixture-daemons.ts";
 import { appendTestRun } from "./lib/test-run-log.ts";
+import { appendFailureRecord, failureLogPath, firstFailingLine } from "./lib/test-failure-log.ts";
 
 // ---
 // Layout
@@ -207,12 +208,23 @@ try {
 	fs.writeFileSync(TIMES_FILE, JSON.stringify(times, null, "\t") + "\n");
 } catch { /* the order hint is an optimisation; a run never fails over it */ }
 
+let branch = "";
 try {
-	const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+	branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
 	appendTestRun(TEST_RUNS_FILE, branch, results.map(r => ({ name: r.name, ok: r.ok })));
 } catch (err) {
 	// A run never fails over it, but pr-cost reads this file, so say it is short.
 	console.error(`${RED}could not append to ${TEST_RUNS_FILE}: ${err instanceof Error ? err.message : String(err)}${RESET}`);
+}
+
+const FAILURE_LOG = failureLogPath();
+try {
+	appendFailureRecord(FAILURE_LOG, {
+		utc: new Date().toISOString(), branch, checkout: REPO_ROOT, suites: results.length,
+		failures: results.filter(r => !r.ok).map(r => ({ suite: r.name, timedOut: r.timedOut, line: firstFailingLine(r.output) })),
+	});
+} catch (err) {
+	console.error(`${RED}could not append to ${FAILURE_LOG}: ${err instanceof Error ? err.message : String(err)}${RESET}`);
 }
 
 // ---

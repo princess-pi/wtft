@@ -42,8 +42,8 @@ export function appendFailureRecord(file: string, record: FailureRecord): void {
 }
 
 /**
- * Runs and failures per suite for the last `days` UTC days up to `now`, newest first, days with a
- * run only. Null when there is no log.
+ * Runs and failures per suite per UTC day, newest first, days with a run only, from the day
+ * `days - 1` before `now` onward. Null when there is no log.
  */
 export function countFailures(file: string, days: number, now: number = Date.now()): FailureCount | null {
 	let text: string;

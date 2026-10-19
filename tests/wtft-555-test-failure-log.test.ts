@@ -74,7 +74,7 @@ describe("the count", () => {
 	run("2026-10-17T00:00:00.000Z", []);
 	run("2026-10-19T01:00:00.000Z", ["a", "b"]);
 	run("2026-10-19T02:00:00.000Z", ["a"]);
-	fs.appendFileSync(log, "{ torn\n" + JSON.stringify({ utc: "2026-10-19T03:00:00Z", failures: [null] }) + "\n");
+	fs.appendFileSync(log, "{ torn\n" + JSON.stringify({ utc: "2026-10-19T03:00:00.000Z", failures: [null] }) + "\n");
 	fs.appendFileSync(log, JSON.stringify({ utc: "garbage", failures: [] }) + "\n");
 	fs.appendFileSync(log, JSON.stringify({ utc: "2026-99-99Tjunk", failures: [] }) + "\n");
 	run("2026-10-18T23:30:00-05:00", ["offset"]);

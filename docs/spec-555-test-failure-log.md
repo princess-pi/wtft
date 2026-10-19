@@ -37,7 +37,8 @@ bun run test-failures [--days <n>] [--json]
   its failure count, most first.
 - `--json`: `{"schema":"wtft-test-failures@1","log":<path>,"days":[{"day":"YYYY-MM-DD","runs":n,
   "failures":{"<suite>":n}}],"unreadableLines":n}`. `days` is newest first and holds only days
-  with a run. `unreadableLines` counts the whole log; a line whose `utc` does not parse as a date is one. A run's day is its `utc` in UTC. With no log yet, `days` is empty.
+  with a run. `unreadableLines` counts the bad lines in the whole log, a line whose `utc` is not in the
+  form `toISOString()` writes among them. With no log yet, `days` is empty.
 
 Exit codes:
 - **0:** the count was printed.

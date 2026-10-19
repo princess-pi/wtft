@@ -66,12 +66,12 @@ export function countFailures(file: string, days: number, now: number = Date.now
 			continue;
 		}
 		const at = typeof record?.utc === "string" ? Date.parse(record.utc) : NaN;
-		if (!Number.isFinite(at) || !Array.isArray(record.failures)
+		if (!Number.isFinite(at) || new Date(at).toISOString() !== record.utc || !Array.isArray(record.failures)
 			|| !record.failures.every(f => typeof f?.suite === "string")) {
 			unreadableLines++;
 			continue;
 		}
-		const day = new Date(at).toISOString().slice(0, 10);
+		const day = record.utc.slice(0, 10);
 		if (day < first) continue;
 		const count = byDay.get(day) ?? { day, runs: 0, failures: {} };
 		count.runs++;

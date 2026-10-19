@@ -77,16 +77,17 @@ describe("the count", () => {
 	fs.appendFileSync(log, "{ torn\n" + JSON.stringify({ utc: "2026-10-19T03:00:00Z", failures: [null] }) + "\n");
 	fs.appendFileSync(log, JSON.stringify({ utc: "garbage", failures: [] }) + "\n");
 	fs.appendFileSync(log, JSON.stringify({ utc: "2026-99-99Tjunk", failures: [] }) + "\n");
-	run("2026-10-18T23:30:00-05:00", ["late"]);
+	run("2026-10-18T23:30:00-05:00", ["offset"]);
+	run("2026-10-19T23:30:00", ["no-offset"]);
 	const now = Date.parse("2026-10-19T20:00:00Z");
 
-	it("holds the last n UTC days with a run, newest first, a day with no failure included", () => {
+	it("holds the last n UTC days with a run, newest first, a day with no failure included; a utc not in toISOString form is unreadable", () => {
 		assert.deepStrictEqual(countFailures(log, 7, now), {
 			days: [
-				{ day: "2026-10-19", runs: 3, failures: { late: 1, a: 2, b: 1 } },
+				{ day: "2026-10-19", runs: 2, failures: { a: 2, b: 1 } },
 				{ day: "2026-10-17", runs: 1, failures: {} },
 			],
-			unreadableLines: 4,
+			unreadableLines: 6,
 		});
 	});
 	it("one day is today only", () => {

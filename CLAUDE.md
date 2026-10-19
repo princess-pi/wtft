@@ -50,6 +50,7 @@ parser daemon, and Pi widgets. Public, `@princess-pi/wtft`, not on npm yet (#29)
 | Build | `bun run build` |
 | Test | `bun run test` — each suite in its own process, 2 × CPUs at a time (`WTFT_TEST_JOBS=1` for serial); skips shell suites. Each suite gets its own `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, and `PRINCESS_PI_CONFIG_NO_WALKUP=1`, so no `.wtft/config.json` above the checkout reaches it; a test of the walk-up deletes the variable. A run stops only its own fixture daemons, so runs in two worktrees can overlap |
 | Shell suite | `bash tests/wtft-daemon.test.sh` |
+| Local test failures per day | `bun run test-failures` · `--days <n>`, `--json` (`docs/spec-555-test-failure-log.md`). Every `bun run test` feeds it, from any worktree |
 | Typecheck | `bun run typecheck` |
 | Pricing manifest | `bun run manifest` |
 | Install on this host | `bin/install-wtft` · `--check` for drift (exit codes in README) |

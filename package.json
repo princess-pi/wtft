@@ -32,6 +32,7 @@
     "manifest": "bun run pricing-manifest.ts",
     "artifacts": "bun run build-artifacts.ts",
     "test": "bun run tests/run.ts",
+    "test-failures": "bun run tests/failures.ts",
     "pr-cost": "bun pr-cost.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "if [ ! -d node_modules/wcwidth ] || [ ! -d node_modules/@princess-pi/libs ]; then bun install; fi && bun run build"

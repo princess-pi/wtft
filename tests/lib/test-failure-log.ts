@@ -31,7 +31,7 @@ export function failureLogPath(env: NodeJS.ProcessEnv = process.env): string {
 /** The suite's first failing check, uncoloured; else its last non-empty line. */
 export function firstFailingLine(output: string): string {
 	const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n").map(l => l.trim()).filter(l => l !== "");
-	const line = lines.find(l => l.includes("❌") || /^(FAIL\b|\(fail\))/.test(l)) ?? lines.at(-1) ?? "";
+	const line = lines.find(l => /^(❌|FAIL\b|\(fail\))/.test(l)) ?? lines.at(-1) ?? "";
 	return line.slice(0, LINE_MAX);
 }
 

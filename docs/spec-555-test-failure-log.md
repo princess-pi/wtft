@@ -19,8 +19,8 @@ can stand beside its failure count:
 ```
 
 - `suites`: how many suites the run ran. A filtered run counts too.
-- `line`: the suite's first failing check, with colour codes removed: the first line that holds
-  `❌`, or opens with `FAIL` or `(fail)`. With no such line, the suite's last non-empty line. Cut to
+- `line`: the suite's first failing check, with colour codes removed: the first line that opens,
+  past its indent, with `❌`, `FAIL` or `(fail)`. With no such line, the suite's last non-empty line. Cut to
   300 characters.
 
 A run never fails because the log could not be written. The runner says so on stderr.

@@ -18,9 +18,10 @@ can stand beside its failure count:
  "failures":[{"suite":"wtft-259-daemon-correctness","timedOut":true,"line":"…"}]}
 ```
 
+- `branch`: empty when git cannot name it.
 - `suites`: how many suites the run ran. A filtered run counts too.
 - `line`: the suite's first failing check, with colour codes removed: the first line that opens,
-  past its indent, with `❌`, `FAIL` or `(fail)`. With no such line, the suite's last non-empty line. Cut to
+  past its indent, with `❌`, the word `FAIL` or `(fail)`. With no such line, the suite's last non-empty line. Cut to
   300 characters.
 
 A run never fails because the log could not be written. The runner says so on stderr.
@@ -36,8 +37,9 @@ bun run test-failures [--days <n>] [--json]
   its failure count, most first.
 - `--json`: `{"schema":"wtft-test-failures@1","log":<path>,"days":[{"day":"YYYY-MM-DD","runs":n,
   "failures":{"<suite>":n}}],"unreadableLines":n}`. `days` is newest first and holds only days
-  with a run. `unreadableLines` counts the whole log. With no log yet, `days` is empty.
+  with a run. `unreadableLines` counts the whole log; a line whose `utc` is not an ISO date is one. With no log yet, `days` is empty.
 
 Exit codes:
 - **0:** the count was printed.
-- **2:** a bad call: an unknown argument, or `--days` that is not a whole number above 0.
+- **2:** a bad call: an unknown argument, or `--days` that is not a whole number from 1 to 9999.
+- **Any other code:** the log exists but could not be read. The OS's message says why.

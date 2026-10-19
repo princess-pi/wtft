@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun
 /**
  * `bun run test-failures [--days <n>] [--json]`: local test failures per suite per UTC day.
- * docs/spec-555-test-failure-log.md § 2. Exit 0 printed, 2 bad call.
+ * docs/spec-555-test-failure-log.md § 2.
  */
 
 import { countFailures, failureLogPath } from "./lib/test-failure-log.ts";
@@ -16,8 +16,8 @@ for (let i = 0; i < args.length; i++) {
 	if (arg === "--json") json = true;
 	else if (arg === "--days") {
 		const value = args[++i];
-		if (value === undefined || !/^[1-9]\d*$/.test(value)) {
-			console.error(`--days needs a whole number above 0, got ${JSON.stringify(value ?? "")}\n${USAGE}`);
+		if (value === undefined || !/^[1-9]\d{0,3}$/.test(value)) {
+			console.error(`--days needs a whole number from 1 to 9999, got ${JSON.stringify(value ?? "")}\n${USAGE}`);
 			process.exit(2);
 		}
 		days = Number(value);

@@ -65,7 +65,7 @@ export function countFailures(file: string, days: number, now: number = Date.now
 			unreadableLines++;
 			continue;
 		}
-		if (typeof record?.utc !== "string" || !Array.isArray(record.failures)
+		if (typeof record?.utc !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(record.utc) || !Array.isArray(record.failures)
 			|| !record.failures.every(f => typeof f?.suite === "string")) {
 			unreadableLines++;
 			continue;
